@@ -95,6 +95,7 @@ export interface ValidateNamespace {
   readonly async: AsyncValidateNamespace;
 }
 
+/** Describes the JIT validation diagnostic options contract used by the public API. */
 export interface ValidationDiagnosticOptions {
   readonly maxIssues?: number;
 }
@@ -145,6 +146,7 @@ export const validate: ValidateNamespace = Object.freeze({
   }),
 });
 
+/** Describes the JIT json namespace contract used by the public API. */
 export interface JsonNamespace {
   value(message?: ValidationMessage): Builder<ATS.JsonSchema>;
   parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): SchemaArtifact<string, TSchema>;
@@ -182,6 +184,7 @@ export const json: JsonNamespace = Object.freeze({
   },
 });
 
+/** Describes the JIT binary namespace contract used by the public API. */
 export interface BinaryNamespace {
   encode<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
@@ -222,6 +225,7 @@ type SelectablePath<TValue, TDepth extends readonly unknown[] = []> = TDepth["le
           }[Extract<keyof TValue, string>]
         : never;
 
+/** Describes the JIT selectable equal contract used by the public API. */
 export interface SelectableEqual<TValue> extends RuntimeCompiledFunction<Equal<TValue>> {
   /**
    * Compares only the named fields. The other fields are not read, not
@@ -271,6 +275,7 @@ export interface ChangedMask<TValue, TPath extends string, TMask> {
   readonly fields: readonly TPath[];
 }
 
+/** Describes the JIT changed builder contract used by the public API. */
 export interface ChangedBuilder<TValue> extends ChangedMask<TValue, SelectablePath<TValue>, number> {
   /**
    * Watches only the named fields. Bit order follows the order given here.
@@ -313,6 +318,7 @@ function createChangedMask(schema: ATS.AnyTypeSchema, paths: readonly string[]) 
   return compiled as ChangedMask<unknown, string, number>;
 }
 
+/** Provides the JIT clone operation for the supplied input. */
 export function clone<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Clone<ATS.TypeofSchema<TSchema>>> {
@@ -345,6 +351,7 @@ export function mock<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSch
   return compileMock<ATS.TypeofSchema<TSchema>>(unwrapSchema(schema));
 }
 
+/** Provides the JIT format operation for the supplied input. */
 export function format<TSchema extends ATS.StringSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Format> {
@@ -434,6 +441,7 @@ function arrayOf<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): ATS.ArrayS
   };
 }
 
+/** Converts the supplied input into the JIT map representation. */
 export const map: MapNamespace = Object.assign(mapCapability, {
   many: mapMany,
 });

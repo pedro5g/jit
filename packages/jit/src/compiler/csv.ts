@@ -8,17 +8,23 @@ import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./source/access.js";
 import { compileValidator } from "./validate.js";
 
+/** Describes the JIT csv chunk contract used by the public API. */
 export type CsvChunk = string | Uint8Array;
+/** Describes the JIT csv input contract used by the public API. */
 export type CsvInput = CsvChunk | Iterable<CsvChunk>;
+/** Describes the JIT csv parse sink contract used by the public API. */
 export type CsvParseSink = "result" | "iterator" | "visitor";
+/** Describes the JIT csv stringify sink contract used by the public API. */
 export type CsvStringifySink = "string" | "iterator";
 
+/** Describes the JIT csv options contract used by the public API. */
 export interface CsvOptions {
   readonly delimiter?: string;
   readonly header?: boolean;
   readonly columns?: Readonly<Record<string, string>>;
 }
 
+/** Describes the JIT csv field descriptor contract used by the public API. */
 export interface CsvFieldDescriptor {
   readonly key: string;
   readonly column: string;
@@ -27,6 +33,7 @@ export interface CsvFieldDescriptor {
   readonly nullable: boolean;
 }
 
+/** Describes the JIT csv descriptor contract used by the public API. */
 export interface CsvDescriptor {
   readonly schema: ATS.AnyTypeSchema;
   readonly fields: readonly CsvFieldDescriptor[];
@@ -38,6 +45,7 @@ export interface CsvDescriptor {
 
 type ObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
 
+/** Returns the JIT resolve csv descriptor result for the supplied input. */
 export function resolveCsvDescriptor(
   schema: ATS.AnyTypeSchema,
   operation: CsvDescriptor["operation"],
@@ -155,6 +163,7 @@ function hasDefault(schema: ATS.AnyTypeSchema): boolean {
   }
 }
 
+/** Emits deterministic source for the JIT emit csv source operation. */
 export function emitCsvSource(descriptor: CsvDescriptor, validator = "__csvValidator"): string {
   const source =
     descriptor.operation === "parse" ? emitCsvParseSource(descriptor, validator) : emitCsvStringifySource(descriptor);
@@ -430,6 +439,7 @@ function csvStaticEscape(value: string, delimiter: string): string {
     : value;
 }
 
+/** Creates the JIT compile csv parse artifact from the supplied input. */
 export function compileCsvParse<TRow>(
   descriptor: CsvDescriptor
 ): (input: CsvInput, consume?: (row: TRow, index: number) => void) => unknown {
@@ -445,6 +455,7 @@ export function compileCsvParse<TRow>(
   return compiled;
 }
 
+/** Creates the JIT compile csv stringify artifact from the supplied input. */
 export function compileCsvStringify<TRow>(descriptor: CsvDescriptor): (value: readonly TRow[]) => unknown {
   const source = emitCsvSource(descriptor);
   const compiled = globalThis.Function(`return ${source};`)() as (value: readonly TRow[]) => unknown;

@@ -22,14 +22,6 @@ export function normalizeFactoryReturnMode(mode: FactoryReturnModeInput): Factor
   return mode;
 }
 
-/**
- * Chooses one deterministic inherited return policy. Numeric priority is the
- * primary key; the rank only resolves equal priorities.
- */
-export function resolveFactoryReturnMode(candidates: readonly FactoryPolicyCandidate[]): FactoryReturnMode | undefined {
-  return selectFactoryPolicyCandidate(candidates)?.mode;
-}
-
 /** Returns the complete winner so declaration planners can preserve priority metadata. */
 export function selectFactoryPolicyCandidate(
   candidates: readonly FactoryPolicyCandidate[]

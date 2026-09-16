@@ -13,8 +13,10 @@ import { resolveRowField, resolveRowObjectSchema, resolveScalarKeyDomain } from 
 import { emitPropertyAccess } from "./source/access.js";
 import { emitLiteral } from "./source/literal.js";
 
+/** Describes the JIT join physical strategy contract used by the public API. */
 export type JoinPhysicalStrategy = "IndexedJoin" | "HashJoin" | "MergeJoin";
 
+/** Describes the JIT join plan contract used by the public API. */
 export interface JoinPlan {
   readonly kind: QueryJoinKind;
   readonly leftSchema: ATS.AnyTypeSchema;
@@ -30,6 +32,7 @@ export interface JoinPlan {
   readonly leftProgram: QueryProgram;
 }
 
+/** Describes the JIT join explain contract used by the public API. */
 export interface JoinExplain {
   readonly strategy: JoinPhysicalStrategy;
   readonly reason: string;
@@ -37,15 +40,19 @@ export interface JoinExplain {
   readonly facts: readonly string[];
 }
 
+/** Describes the JIT join pair contract used by the public API. */
 export type JoinPair<TLeft, TRight> = { readonly left: TLeft; readonly right: TRight };
+/** Describes the JIT left join pair contract used by the public API. */
 export type LeftJoinPair<TLeft, TRight> = { readonly left: TLeft; readonly right: TRight | undefined };
 
+/** Describes the JIT compiled join contract used by the public API. */
 export type CompiledJoin<TLeft, TRight, TResult, TParams extends Readonly<Record<string, unknown>>> = (
   left: readonly TLeft[],
   right: readonly TRight[],
   params?: TParams
 ) => TResult;
 
+/** Creates the JIT create join plan artifact from the supplied input. */
 export function createJoinPlan(
   leftSchema: ATS.AnyTypeSchema,
   rightSchema: ATS.AnyTypeSchema,
@@ -116,6 +123,7 @@ export function createJoinPlan(
   });
 }
 
+/** Provides the JIT explain join plan operation for the supplied input. */
 export function explainJoinPlan(plan: JoinPlan): JoinExplain {
   return Object.freeze({
     strategy: plan.strategy,
@@ -130,6 +138,7 @@ export function explainJoinPlan(plan: JoinPlan): JoinExplain {
   });
 }
 
+/** Emits deterministic source for the JIT emit join source operation. */
 export function emitJoinSource(plan: JoinPlan): string {
   const writer = new CodeWriter();
   const hasParams = Boolean(plan.leftProgram.params?.length);
@@ -324,6 +333,7 @@ function emitValue(value: QueryValueNode, row: string): string {
   return value.name;
 }
 
+/** Creates the JIT compile join artifact from the supplied input. */
 export function compileJoin<TLeft, TRight, TResult, TParams extends Readonly<Record<string, unknown>>>(
   plan: JoinPlan,
   options?: CompileCacheOptions

@@ -1,8 +1,17 @@
 import type { FluentOperation } from "../ast/fluent.js";
+import { combinationFields } from "./combinations.js";
+import { contractNotes } from "./contract-notes.js";
 
-export type Capability = string;
+type Capability = string;
 export type RepeatSemantics = "forbid" | "accumulate" | "idempotent" | "explicit-replace";
-export type ContractAudit = "reviewed" | "inferred";
+type AliasSemantics = "accumulate" | "forbid" | "explicit-replace";
+type ContractAudit = "reviewed" | "inferred";
+
+export interface OperationCombination {
+  readonly operation: string;
+  readonly expected: "valid" | "invalid";
+  readonly notes: string;
+}
 
 export interface OperationContract {
   readonly id: string;
@@ -10,6 +19,7 @@ export interface OperationContract {
   readonly family: string;
   readonly semanticKey: string;
   readonly aliases?: readonly string[];
+  readonly aliasSemantics?: AliasSemantics;
   readonly audit: ContractAudit;
   readonly requires: readonly Capability[];
   readonly provides: readonly Capability[];
@@ -19,6 +29,7 @@ export interface OperationContract {
   readonly repeat: RepeatSemantics;
   readonly terminal?: boolean;
   readonly fusesWith?: readonly string[];
+  readonly combinesWith?: readonly OperationCombination[];
   readonly notes: string;
 }
 
@@ -410,23 +421,7 @@ const SEMANTIC_ALIASES: Readonly<Record<string, string>> = {
   toUpperCase: "normalization.uppercase",
 };
 
-const REVIEWED_OPERATIONS = new Set([
-  ...CHECKS,
-  ...SINGLETONS,
-  ...TERMINALS,
-  "assert",
-  "refine",
-  "validate",
-  "parse",
-  "parseAsync",
-  "safeParse",
-  "safeParseAsync",
-  "parseJson",
-  "decode",
-  "public",
-  "protected",
-  "private",
-]);
+const REVIEWED_OPERATIONS = new Set([...BASE_OPERATIONS, ...EXTENDED_OPERATIONS]);
 const PARSE_OPERATIONS = new Set(["parse", "parseAsync", "safeParse", "safeParseAsync", "parseJson", "decode"]);
 const VISIBILITY_OPERATIONS = new Set(["public", "protected", "private"]);
 
@@ -446,10 +441,11 @@ export function contractForOperation(operation: FluentOperation): OperationContr
     requires: requirementsFor(operation.name),
     provides: providesFor(operation.name, family),
     repeat,
-    notes: notesFor(operation.name, repeat, terminal),
+    notes: contractNotes(operation.name, repeat, terminal),
     ...terminalFields(terminal),
     ...visibilityFields(operation.name),
     ...fusionFields(operation.name),
+    ...combinationFields(family, operation.name),
   };
 }
 
@@ -467,12 +463,15 @@ function semanticKeyFor(family: string, name: string): string {
   return `${family}:${name}`;
 }
 
-function aliasesFor(semanticKey: string, name: string): Pick<OperationContract, "aliases"> | Record<never, never> {
+function aliasesFor(
+  semanticKey: string,
+  name: string
+): Pick<OperationContract, "aliases" | "aliasSemantics"> | Record<never, never> {
   const aliases = Object.entries(SEMANTIC_ALIASES)
     .filter(([alias, key]) => key === semanticKey && alias !== name)
     .map(([alias]) => alias)
     .sort();
-  return aliases.length > 0 ? { aliases } : {};
+  return aliases.length > 0 ? { aliases, aliasSemantics: "accumulate" } : {};
 }
 
 function auditFor(name: string): ContractAudit {
@@ -501,17 +500,4 @@ function visibilityFields(
 
 function fusionFields(name: string): Pick<OperationContract, "fusesWith"> | Record<never, never> {
   return name === "validate" ? { fusesWith: ["parse", "json.parse", "binary.decode", "ndjson.parse"] } : {};
-}
-
-function notesFor(name: string, repeat: RepeatSemantics, terminal: boolean): string {
-  if (name === "email")
-    return "Email is a singleton validation stage; a second email stage requires an explicit replacement design.";
-  if (name === "refine" || name === "assert")
-    return "Independent predicates accumulate and preserve declaration order.";
-  if (name === "validate")
-    return "Validation fuses with a parse/decode stage and must not introduce a second validator.";
-  if (terminal) return "Terminal operation returns or materializes the requested result and closes this chain.";
-  return repeat === "forbid"
-    ? "Singleton policy; repeat only through an explicit replacement contract."
-    : "The operation composes with the current chain.";
 }

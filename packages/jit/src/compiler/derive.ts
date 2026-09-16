@@ -9,7 +9,7 @@ import { emitPropertyAccess } from "./source/access.js";
 import { emitObjectKey } from "./source/literal.js";
 
 /** One field a derived computation reads, and how it is compared. */
-export interface DerivedDependency {
+interface DerivedDependency {
   readonly path: string;
   readonly segments: readonly string[];
   /** The key this dependency takes in the derived value. */

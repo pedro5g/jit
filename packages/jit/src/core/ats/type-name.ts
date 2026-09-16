@@ -53,8 +53,11 @@ export const TypeName = {
   runtimeType: "runtimeType",
 } as const;
 
+/** Describes the JIT any type name contract used by the public API. */
 export type AnyTypeName = TypeName[keyof TypeName];
 
+/** Describes the JIT type name contract used by the public API. */
 export type TypeName = typeof TypeName;
 
+/** Provides the JIT type names configuration used by the public contract. */
 export const TypeNames = Utils.Object_keys(TypeName) as AnyTypeName[];

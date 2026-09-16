@@ -56,7 +56,7 @@ function emitCanonicalFunction(
 
     // The order check is the whole optimization: an already-canonical value is
     // returned as it stands, with nothing allocated.
-    writer.line("const keys = Object.keys(value);");
+    writer.dynamicLine("const keys = Object.keys(value);");
     const ordered = keys.map((key, index) => `keys[${index}] === ${JSON.stringify(key)}`).join(" && ");
 
     writer.line(`let canonical = keys.length === ${keys.length}${ordered === "" ? "" : ` && ${ordered}`};`);
@@ -99,6 +99,7 @@ function childName(parent: string, key: string, schema: ObjectSchema, nested: Ma
   return name;
 }
 
+/** Creates the JIT compile canonical artifact from the supplied input. */
 export function compileCanonical<TValue>(
   schema: ATS.AnyTypeSchema,
   options?: CompileCacheOptions

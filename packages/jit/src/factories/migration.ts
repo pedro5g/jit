@@ -15,6 +15,7 @@ type MigrationArgs<TSource, TTarget> =
     ? [overrides?: MigrationOverrides<TSource, TTarget>]
     : [overrides: MigrationOverrides<TSource, TTarget>];
 
+/** Provides the JIT migration plan operation for the supplied input. */
 export interface MigrationPlan<TInput, TCurrentSchema extends ATS.AnyTypeSchema> {
   (value: TInput | ATS.TypeofSchema<TCurrentSchema>): ATS.TypeofSchema<TCurrentSchema>;
   to<TNextSchema extends ATS.AnyTypeSchema>(

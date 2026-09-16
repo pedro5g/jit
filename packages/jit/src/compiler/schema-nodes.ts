@@ -1,4 +1,5 @@
 import * as ATS from "../core/ats/index.js";
+import { JITError } from "../errors/index.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { resolveRuntimeTypeOperation } from "./runtime-type/resolve-runtime-type.js";
 import type { RuntimeTypeNode } from "./runtime-type/runtime-type-node.js";
@@ -16,7 +17,7 @@ export interface ObjectNode<TNode> {
   readonly props: readonly ObjectNodeProp<TNode>[];
 }
 
-export interface ObjectNodeProp<TNode> {
+interface ObjectNodeProp<TNode> {
   readonly key: string;
   readonly schema: ATS.AnyTypeSchema;
   readonly value: TNode;
@@ -50,15 +51,30 @@ export interface MapNode<TNode> {
   readonly value: TNode;
 }
 
-export type SchemaNode<TNode> =
-  | GuardNode<TNode>
-  | ObjectNode<TNode>
-  | RecordNode<TNode>
-  | TupleNode<TNode>
-  | ArrayNode<TNode>
-  | SetNode<TNode>
-  | MapNode<TNode>
-  | RuntimeTypeNode<TNode>;
+export interface StructuralIROption {
+  readonly schema: ATS.AnyTypeSchema;
+  readonly node: StructuralIRNode;
+}
+
+export type StructuralIRNode =
+  | { readonly kind: "reuse" }
+  | { readonly kind: "date" }
+  | { readonly kind: "union"; readonly options: readonly StructuralIROption[] }
+  | { readonly kind: "intersection"; readonly options: readonly StructuralIRNode[] }
+  | {
+      readonly kind: "discriminatedUnion";
+      readonly discriminator: string;
+      readonly options: readonly StructuralIROption[];
+    }
+  | ObjectNode<StructuralIRNode>
+  | RecordNode<StructuralIRNode>
+  | TupleNode<StructuralIRNode>
+  | ArrayNode<StructuralIRNode>
+  | SetNode<StructuralIRNode>
+  | MapNode<StructuralIRNode>
+  | RuntimeTypeNode<StructuralIRNode>
+  | GuardNode<StructuralIRNode>
+  | RecursiveNode;
 
 type InnerWrappedSchema = ATS.AnyTypeSchema & { readonly def: ATS.InnerTypeDef<ATS.AnyTypeSchema> };
 type LazyWrappedSchema = ATS.AnyTypeSchema & { readonly def: ATS.LazyDef<ATS.AnyTypeSchema> };
@@ -138,9 +154,60 @@ export function buildSchemaNode<TNode>(
         })),
       };
     }
-    default:
-      return undefined;
   }
+
+  return undefined;
+}
+
+export function buildStructuralIR(
+  schema: ATS.AnyTypeSchema,
+  recursive: ReadonlySet<ATS.AnyTypeSchema>,
+  operation: string
+): RecursiveProgram<StructuralIRNode> {
+  return buildRecursiveProgram<StructuralIRNode>(
+    schema,
+    (current, recurse) => buildStructuralNode(current, recurse, operation),
+    (id) => ({ kind: "recursive", id }),
+    recursive
+  );
+}
+
+function buildStructuralNode(
+  schema: ATS.AnyTypeSchema,
+  recurse: (child: ATS.AnyTypeSchema) => StructuralIRNode,
+  operation: string
+): StructuralIRNode {
+  if (schema.type === ATS.TypeName.date) return { kind: "date" };
+  if (schema.type === ATS.TypeName.union) {
+    const union = schema as ATS.UnionSchema;
+    if (union.def.options.every((option) => isPrimitiveLikeSchema(option))) return { kind: "reuse" };
+    return {
+      kind: "union",
+      options: union.def.options.map((option) => ({ schema: option, node: recurse(option) })),
+    };
+  }
+  if (schema.type === ATS.TypeName.intersection) {
+    const flattened = flattenObjectIntersection(schema);
+    if (flattened !== undefined) return buildStructuralNode(flattened, recurse, operation);
+    return {
+      kind: "intersection",
+      options: (schema as ATS.IntersectionSchema).def.options.map(recurse),
+    };
+  }
+  if (schema.type === ATS.TypeName.discriminatedUnion) {
+    const discriminated = schema as ATS.DiscriminatedUnionSchema;
+    return {
+      kind: "discriminatedUnion",
+      discriminator: discriminated.def.discriminator,
+      options: discriminated.def.options.map((option) => ({ schema: option, node: recurse(option) })),
+    };
+  }
+
+  const node = buildSchemaNode(schema, recurse);
+  if (node) return node;
+  if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
+
+  throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler ${operation} IR for type: ${schema.type}`);
 }
 
 export function isPrimitiveLikeSchema(schema: ATS.AnyTypeSchema): boolean {
@@ -169,7 +236,7 @@ export function isPrimitiveLikeSchema(schema: ATS.AnyTypeSchema): boolean {
   }
 }
 
-export function innerType(schema: ATS.AnyTypeSchema): ATS.AnyTypeSchema {
+function innerType(schema: ATS.AnyTypeSchema): ATS.AnyTypeSchema {
   return (schema as InnerWrappedSchema).def.innerType;
 }
 

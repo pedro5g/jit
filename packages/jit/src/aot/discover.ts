@@ -49,6 +49,7 @@ export function defineConfig<const TConfig extends JitConfig>(config: TConfig): 
   return config;
 }
 
+/** Provides the JIT default schema patterns configuration used by the public contract. */
 export const DEFAULT_SCHEMA_PATTERNS = ["**/*.jit.ts", "**/*.jit.js"] as const;
 
 const CONFIG_BASENAMES = ["jit.config.ts", "jit.config.js", "jit.config.mjs"];
@@ -170,6 +171,7 @@ export async function loadModule(file: string): Promise<Record<string, unknown>>
   }
 }
 
+/** Describes the JIT collected declarations contract used by the public API. */
 export interface CollectedDeclarations {
   /** Binding name -> registered compiled artifact. */
   readonly artifacts: Record<string, unknown>;

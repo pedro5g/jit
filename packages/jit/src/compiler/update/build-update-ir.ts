@@ -18,6 +18,7 @@ import {
 } from "../schema-nodes.js";
 import { findRecursiveSchemas } from "../schema-recursion.js";
 
+/** Describes the JIT update irnode contract used by the public API. */
 export type UpdateIRNode =
   | { readonly kind: "reuse" }
   | { readonly kind: "date" }
@@ -32,11 +33,13 @@ export type UpdateIRNode =
   | GuardNode<UpdateIRNode>
   | RecursiveNode;
 
+/** Describes the JIT update iroption contract used by the public API. */
 export interface UpdateIROption {
   readonly schema: ATS.AnyTypeSchema;
   readonly node: UpdateIRNode;
 }
 
+/** Describes the JIT update irprogram contract used by the public API. */
 export interface UpdateIRProgram {
   readonly kind: "program";
   readonly valueParam: "value";
@@ -46,6 +49,7 @@ export interface UpdateIRProgram {
   readonly helpers: readonly RecursiveHelper<UpdateIRNode>[];
 }
 
+/** Creates the JIT build update ir artifact from the supplied input. */
 export function buildUpdateIR(schema: ATS.AnyTypeSchema): UpdateIRProgram {
   const { body, helpers } = buildRecursiveProgram<UpdateIRNode>(
     schema,

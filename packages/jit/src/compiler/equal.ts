@@ -17,6 +17,7 @@ import { resolveEqualStrategy } from "./strategy/resolve-strategy.js";
  * @returns `true` when both values are equal according to the compiled schema.
  */
 export type Equal<T = unknown> = (left: T, right: T) => boolean;
+/** Describes the JIT equal method contract used by the public API. */
 export type EqualMethod<T = unknown> = (this: T, other: T) => boolean;
 
 /**

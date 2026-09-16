@@ -197,6 +197,7 @@ export function emitBoundaryType(
   return emit(schema);
 }
 
+/** Returns whether the JIT accepts missing boundary condition holds. */
 export function acceptsMissingBoundary(schema: ATS.AnyTypeSchema, omitFields?: ReadonlySet<string>): boolean {
   const node = schema as AnySchema;
   if (node.type === TypeName.object) {

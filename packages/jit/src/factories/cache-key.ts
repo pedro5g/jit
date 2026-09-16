@@ -16,6 +16,7 @@ const HASH_HELPERS = Object.freeze({
   __hashUnknown: hashUnknown,
 });
 
+/** Provides the JIT cache key builder operation for the supplied input. */
 export interface CacheKeyBuilder<TValue, TKey> {
   /** Builds the key from the named fields, in the order given. */
   select<const TPaths extends readonly ProjectablePath<TValue>[]>(...paths: TPaths): (value: TValue) => TKey;

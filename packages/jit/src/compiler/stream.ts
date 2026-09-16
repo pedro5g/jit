@@ -8,6 +8,7 @@ import { compileValidator } from "./validate.js";
 
 type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
 
+/** Provides the JIT stream options operation for the supplied input. */
 export interface StreamOptions<TItem = unknown> {
   /**
    * Input format. `"json"` (default) expects one JSON document; when the
@@ -120,6 +121,18 @@ function prefixIssues(issues: readonly ValidationIssue[], prefix: PropertyKey): 
  * and scalar roots are structurally supervised per chunk (unbalanced
  * brackets and trailing garbage fail immediately) and fully validated on
  * `end()`. NDJSON validates one document per line.
+ */
+/** Creates the JIT compile stream artifact from the supplied input. */
+/**
+ * Compiles a chunked JSON or NDJSON validator for a schema.
+ *
+ * @example
+ * ```ts
+ * const stream = JIT.stream(JIT.array(JIT.number()));
+ * stream.write("[1,");
+ * stream.write("2]");
+ * const values = stream.end(); // [1, 2]
+ * ```
  */
 export function compileStream<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,

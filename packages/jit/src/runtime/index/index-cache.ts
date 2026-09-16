@@ -28,6 +28,7 @@ function indexesOf(items: readonly object[]): ArrayIndexes {
   return entry;
 }
 
+/** Returns the cached single-key index for an array, rebuilding it when the key changes. */
 export function getIndex<TItem extends object, TKey extends keyof TItem>(
   items: readonly TItem[],
   key: TKey

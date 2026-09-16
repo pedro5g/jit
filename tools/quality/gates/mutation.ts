@@ -5,7 +5,7 @@ import { finding, type QualityFinding } from "../core/finding.js";
 import { runLocalBinary } from "../core/process.js";
 
 export function mutationGate(context: QualityContext): QualityFinding[] {
-  if (!existsSync(resolve(context.root, "stryker.config.ts")))
+  if (!existsSync(resolve(context.root, "stryker.config.mjs")))
     return [
       finding({
         code: "QG-MUTATION-001",
@@ -29,8 +29,13 @@ export function mutationGate(context: QualityContext): QualityFinding[] {
     ];
   const args =
     context.mode === "full"
-      ? ["run", "stryker.config.ts"]
-      : ["run", "stryker.config.ts", "--mutate", context.changedFiles.filter((file) => file.endsWith(".ts")).join(",")];
+      ? ["run", "stryker.config.mjs"]
+      : [
+          "run",
+          "stryker.config.mjs",
+          "--mutate",
+          context.changedFiles.filter((file) => file.endsWith(".ts")).join(","),
+        ];
   const result = runLocalBinary(context.root, "stryker", args);
   if (result.status === 0) return mutationReportFindings(context);
   return [

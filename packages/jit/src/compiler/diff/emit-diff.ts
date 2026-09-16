@@ -10,6 +10,7 @@ import type { DiffIRNode, DiffIRProgram } from "./build-diff-ir.js";
 
 type PathPart = string | number | { readonly expr: string };
 
+/** Emits deterministic source for the JIT emit diff operation. */
 export function emitDiff(program: DiffIRProgram): string {
   const writer = new CodeWriter();
 
@@ -23,6 +24,7 @@ export function emitDiff(program: DiffIRProgram): string {
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit diff body operation. */
 export function emitDiffBody(program: DiffIRProgram): string {
   const writer = new CodeWriter();
 
@@ -379,8 +381,8 @@ function emitRecordDiff(
 
   writer.line(`if (!Object.is(${leftBase}, ${rightBase})) {`);
   writer.indent(() => {
-    writer.line(`const ${leftKeys} = Object.keys(${leftBase});`);
-    writer.line(`const ${rightKeys} = Object.keys(${rightBase});`);
+    writer.dynamicLine(`const ${leftKeys} = Object.keys(${leftBase});`);
+    writer.dynamicLine(`const ${rightKeys} = Object.keys(${rightBase});`);
     writer.line(`for (let ${index} = 0, ${len} = ${rightKeys}.length; ${index} < ${len}; ${index}++) {`);
     writer.indent(() => {
       writer.line(`const ${key} = ${rightKeys}[${index}];`);

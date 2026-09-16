@@ -4,10 +4,13 @@ import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { canUseFastParse, emitValidator } from "./validate/emit-validate.js";
 
+/** Provides the JIT validator ops configuration used by the public contract. */
 export const VALIDATOR_OPS = ["is", "parse", "safeParse", "parseAsync", "safeParseAsync"] as const;
 
+/** Describes the JIT validator op contract used by the public API. */
 export type ValidatorOp = (typeof VALIDATOR_OPS)[number];
 
+/** Describes the JIT validation compile options contract used by the public API. */
 export interface ValidationCompileOptions extends CompileCacheOptions {
   /** Stops diagnostic validation after exactly this many issues. */
   readonly maxIssues?: number;
@@ -25,6 +28,7 @@ export interface SafeParseFailure {
   readonly issues: readonly ValidationIssue[];
 }
 
+/** Describes the JIT safe parse result contract used by the public API. */
 export type SafeParseResult<T> = SafeParseSuccess<T> | SafeParseFailure;
 
 /**
@@ -49,6 +53,7 @@ export interface CompiledValidator<T> {
   readonly parseAsync: (value: unknown) => Promise<T>;
 }
 
+/** Describes the JIT compiled validator selection contract used by the public API. */
 export type CompiledValidatorSelection<T, TOps extends readonly ValidatorOp[]> = Pick<
   CompiledValidator<T>,
   TOps[number]
@@ -219,6 +224,7 @@ export function compileSafeHydrator<TSchema extends ATS.AnyTypeSchema>(
   );
 }
 
+/** Creates the JIT compile validator selection artifact from the supplied input. */
 export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, const TOps extends readonly ValidatorOp[]>(
   schema: TSchema,
   ops: TOps,
@@ -264,8 +270,7 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
       };
       // Promise-free schemas share the sync path behind an async signature.
       const safeParseAsync =
-        compiled.safeParseAsync ??
-        (safeParse ? async (value: unknown): Promise<SafeParseResult<TValue>> => safeParse(value) : undefined);
+        compiled.safeParseAsync ?? (safeParse ? async (value: unknown) => safeParse(value) : undefined);
       const parseAsync = async (value: unknown): Promise<TValue> => {
         if (!safeParseAsync) throw new Error("parseAsync requires async validation generation");
         const result = await safeParseAsync(value);

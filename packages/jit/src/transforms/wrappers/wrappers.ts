@@ -126,6 +126,7 @@ function defaultTo<TSchema extends AnyTypeSchema>(
   );
 }
 
+/** Public `default` alias that supplies a value when input is `undefined`. */
 export { defaultTo as default };
 
 /**

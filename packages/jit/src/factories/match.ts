@@ -31,6 +31,7 @@ type Tag<TValue> = TValue extends object ? TValue[LiteralKeys<TValue>] : never;
 /** Narrows the union to the member carrying `TTag` on its discriminator. */
 type Member<TValue, TTag> = TValue extends object ? (TTag extends TValue[LiteralKeys<TValue>] ? TValue : never) : never;
 
+/** Provides the JIT match builder operation for the supplied input. */
 export interface MatchBuilder<TValue, TResult, TCovered> {
   /** Handles one tag. The value is narrowed to that member. */
   case<const TTag extends Exclude<Tag<TValue> & (string | number | boolean), TCovered>, TNext>(

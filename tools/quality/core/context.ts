@@ -19,13 +19,13 @@ export interface QualityBaseline {
   readonly deadCodeFindings?: readonly string[];
 }
 
-export interface QualityLayer {
+interface QualityLayer {
   readonly name: string;
   readonly patterns: readonly string[];
   readonly dependsOn: readonly string[];
 }
 
-export interface QualityThresholds {
+interface QualityThresholds {
   readonly productionLogicalLoc: number;
   readonly testLogicalLoc: number;
   readonly functionLogicalLoc: number;
@@ -44,6 +44,7 @@ export interface QualityConfig {
   readonly publicEntryPoints: readonly string[];
   readonly thresholds: QualityThresholds;
   readonly layers: readonly QualityLayer[];
+  readonly compositionRoots: readonly string[];
   readonly ignoredPaths: readonly string[];
 }
 

@@ -3,6 +3,7 @@ import * as ATS from "../../core/ats/index.js";
 type InnerWrappedSchema = ATS.AnyTypeSchema & { readonly def: ATS.InnerTypeDef<ATS.AnyTypeSchema> };
 type LazyWrappedSchema = ATS.AnyTypeSchema & { readonly def: ATS.LazyDef<ATS.AnyTypeSchema> };
 
+/** Describes the JIT resolved wrappers contract used by the public API. */
 export interface ResolvedWrappers {
   readonly base: ATS.AnyTypeSchema;
   readonly optional: boolean;
@@ -11,6 +12,7 @@ export interface ResolvedWrappers {
   readonly readonly: boolean;
 }
 
+/** Returns the JIT resolve wrappers result for the supplied input. */
 export function resolveWrappers(schema: ATS.AnyTypeSchema): ResolvedWrappers {
   let current = schema;
   let optional = false;

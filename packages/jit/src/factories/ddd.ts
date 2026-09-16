@@ -53,11 +53,13 @@ const dddBase = {
   }),
 };
 
+/** Provides the JIT ddd extensions operation for the supplied input. */
 export interface DddExtensions {}
 type DddExtensionFactory = (...args: never[]) => ClassMixin;
 const DDD_BUILTINS = new Set(Object.keys(dddBase).concat("$extends"));
 const registered = new Map<string, DddExtensionFactory>();
 
+/** Provides the JIT ddd namespace operation for the supplied input. */
 export type DddNamespace = typeof dddBase &
   DddExtensions & {
     readonly $extends: <T extends Record<string, DddExtensionFactory>>(extensions: T) => typeof ddd & T;
@@ -87,6 +89,7 @@ function extendDdd<T extends Record<string, DddExtensionFactory>>(extensions: T)
 
 import { JITError } from "../errors/index.js";
 
+/** Provides the JIT ddd operation for the supplied input. */
 export const ddd = {
   ...dddBase,
   $extends: extendDdd,

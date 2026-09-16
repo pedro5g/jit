@@ -1,7 +1,6 @@
 import { type BinaryRowSetOptions, compileBinaryArray } from "../../compiler/binary-rowset.js";
 import { compileValidator, compileValidatorSelection } from "../../compiler/validate.js";
 import { JITError } from "../../errors/index.js";
-import type { OpChain } from "../../factories/ops.js";
 import { Regexes } from "../../shared/index.js";
 import * as Transform from "../../transforms/index.js";
 import {
@@ -25,6 +24,7 @@ import {
   type Metadata,
   type OrderDirection,
 } from "../hints/index.js";
+import type { OpChain } from "../ops.js";
 import { appendCheck, appendSingletonCheck } from "./checks.js";
 import type { AnyBuilder, Builder, ObjectBuilder, StandardSchemaIssue, StandardSchemaProps } from "./types.js";
 import { type SchemaInput, unwrapSchema } from "./unwrap-schema.js";
@@ -967,6 +967,7 @@ function isHashEncoding(value: unknown): value is Regexes.HashEncoding {
   return typeof value === "string" && HASH_ENCODINGS.has(value);
 }
 
+/** Creates the JIT create builder artifact from the supplied input. */
 export function createBuilder<TSchema extends AnyTypeSchema>(schema: TSchema): Builder<TSchema> {
   const prototype =
     schema.type === TypeName.object

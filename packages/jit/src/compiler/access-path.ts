@@ -81,6 +81,7 @@ export interface KeyedEmitShape {
   readonly answers: "row" | "exists" | "position";
 }
 
+/** Emits deterministic source for the JIT emit cached index lookup operation. */
 export function emitCachedIndexLookup(descriptor: IndexDescriptor, shape: KeyedEmitShape): string {
   const writer = new CodeWriter();
 
@@ -107,6 +108,7 @@ export function emitCachedIndexLookup(descriptor: IndexDescriptor, shape: KeyedE
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit binary search operation. */
 export function emitBinarySearch(
   key: string,
   descriptor: IndexDescriptor,

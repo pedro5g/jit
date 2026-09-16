@@ -22,6 +22,7 @@ export interface LookupDescriptor {
   readonly date: boolean;
 }
 
+/** Describes the JIT compiled lookup contract used by the public API. */
 export interface CompiledLookup<TRow, TKey> {
   (rows: readonly TRow[], key: TKey): TRow | undefined;
   /** The access path this lookup resolved to, for review. */
@@ -77,10 +78,12 @@ export function emitLookupSource(lookup: LookupDescriptor): string {
   return emitEarlyExitScan(lookup.key, lookup.descriptor, shape);
 }
 
+/** Returns the JIT lookup cache key result for the supplied input. */
 export function lookupCacheKey(lookup: LookupDescriptor): string {
   return `lookup:${lookup.choice.strategy}:${lookup.key}:${lookup.date}:${lookup.choice.direction}`;
 }
 
+/** Creates the JIT compile lookup artifact from the supplied input. */
 export function compileLookup<TRow, TKey>(
   schema: ATS.AnyTypeSchema,
   lookup: LookupDescriptor,

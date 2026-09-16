@@ -8,6 +8,7 @@ type ArrayItem<TValue> = TValue extends readonly (infer TItem)[] ? TItem : never
 
 type JsonStreamOptions<TItem> = Omit<StreamOptions<TItem>, "format"> & CompileCacheOptions;
 
+/** Describes the JIT stream namespace contract used by the public API. */
 export interface StreamNamespace {
   <TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,

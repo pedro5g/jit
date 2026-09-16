@@ -1,6 +1,5 @@
 import type { BinaryArray, BinaryRowSetOptions } from "../../compiler/binary-rowset.js";
 import type { SafeParseResult } from "../../compiler/validate.js";
-import type { OpChain } from "../../factories/ops.js";
 import type { Regexes } from "../../shared/index.js";
 import type {
   AnyTypeSchema,
@@ -56,17 +55,21 @@ import type {
   XorSchema,
 } from "../ats/index.js";
 import type { EntityHint, HashStrategy, Metadata, OrderDirection, PropertySelector } from "../hints/index.js";
+import type { OpChain } from "../ops.js";
 import type { HasStringCheck, SchemaInput } from "./check-state.js";
 
+/** Describes the JIT standard schema issue contract used by the public API. */
 export interface StandardSchemaIssue {
   readonly message: string;
   readonly path?: readonly (string | number)[];
 }
 
+/** Describes the JIT standard schema result contract used by the public API. */
 export type StandardSchemaResult<TOutput> =
   | { readonly value: TOutput; readonly issues?: undefined }
   | { readonly issues: readonly StandardSchemaIssue[] };
 
+/** Describes the JIT standard schema props contract used by the public API. */
 export interface StandardSchemaProps<TInput = unknown, TOutput = TInput> {
   readonly version: 1;
   readonly vendor: "jit";
@@ -214,6 +217,7 @@ type CompareDigits<TLeft extends string, TRight extends string> =
 
 type Magnitude<TValue extends number> = `${TValue}` extends `-${infer TRest}` ? TRest : `${TValue}`;
 
+/** Describes the JIT compare numeric literal contract used by the public API. */
 export type CompareNumericLiteral<TLeft extends number, TRight extends number> = number extends TLeft | TRight
   ? "unknown"
   : IsIntegerNumber<TLeft> extends false
@@ -361,9 +365,11 @@ type StaticDefaultPasses<TSchema extends AnyTypeSchema, TValue> = [TValue] exten
 
 type DefaultReturn<TDefault> = TDefault extends () => infer TReturn ? TReturn : TDefault;
 
+/** Describes the JIT valid default contract used by the public API. */
 export type ValidDefault<TSchema extends AnyTypeSchema, TDefault> =
   StaticDefaultPasses<TSchema, DefaultReturn<TDefault>> extends false ? never : TDefault;
 
+/** Provides the JIT strict operation for the supplied input. */
 export type Strict<TSchemaLike, TValue> = TSchemaLike extends {
   readonly schema: infer TSchema extends AnyTypeSchema;
 }
@@ -422,6 +428,7 @@ type ValidFormatPattern<TPattern extends string> = string extends TPattern
       : never
     : never;
 
+/** Describes the JIT when options contract used by the public API. */
 export interface WhenOptions<
   TSchema extends AnyTypeSchema,
   TContextValue = unknown,
@@ -445,6 +452,7 @@ type RequiredKeysShape<TShape extends SchemaShape, TKeys extends keyof TShape> =
     : TShape[TKey];
 };
 
+/** Describes the JIT builder core contract used by the public API. */
 export interface BuilderCore<TSchema extends AnyTypeSchema> {
   readonly schema: TSchema;
   readonly "~standard": StandardSchemaProps<unknown, TypeofSchema<TSchema>>;
@@ -523,6 +531,7 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
 
 type HintTarget<T> = T extends readonly (infer TElement)[] ? TElement : T;
 
+/** Describes the JIT object operators contract used by the public API. */
 export interface ObjectOperators<
   TShape extends SchemaShape,
   TUnknownKeys extends ObjectUnknownKeys = undefined,
@@ -571,16 +580,20 @@ export interface ObjectOperators<
   ): ObjectBuilder<MergeShape<TShape, TRight>, TUnknownKeys, TCatchall>;
 }
 
+/** Describes the JIT key of values contract used by the public API. */
 export type KeyOfValues<TShape extends SchemaShape> = readonly Extract<keyof TShape, string>[];
 
+/** Describes the JIT unwrap builder shape contract used by the public API. */
 export type UnwrapBuilderShape<TShape extends Record<string, SchemaInput>> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema extends AnyTypeSchema>
     ? TSchema
     : never;
 };
 
+/** Describes the JIT base builder contract used by the public API. */
 export type BaseBuilder<TSchema extends AnyTypeSchema> = BuilderCore<TSchema>;
 
+/** Describes the JIT function operators contract used by the public API. */
 export interface FunctionOperators<
   TInput extends readonly AnyTypeSchema[],
   TOutput extends AnyTypeSchema | undefined = AnyTypeSchema | undefined,
@@ -593,6 +606,7 @@ export interface FunctionOperators<
   ): (...args: FunctionArgs<TInput>) => Promise<Awaited<ReturnType<TImplementation>>>;
 }
 
+/** Describes the JIT codec operators contract used by the public API. */
 export interface CodecOperators<TInput extends AnyTypeSchema, TOutput extends AnyTypeSchema> {
   decode(value: TypeofSchema<TInput>): TypeofSchema<TOutput>;
   encode(value: TypeofSchema<TOutput>): TypeofSchema<TInput>;
@@ -771,6 +785,7 @@ export interface ArrayCheckMethods<TSchema extends AnyTypeSchema> {
     : never;
 }
 
+/** Describes the JIT date like check methods contract used by the public API. */
 export interface DateLikeCheckMethods<TSchema extends AnyTypeSchema> {
   min(value: Date | string, message?: string): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"min", Date | string>>>;
   max(value: Date | string, message?: string): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"max", Date | string>>>;
@@ -807,6 +822,7 @@ type CheckMethods<TSchema extends AnyTypeSchema> = TSchema extends {
         ? DateLikeCheckMethods<TSchema>
         : unknown;
 
+/** Describes the JIT object builder contract used by the public API. */
 export type ObjectBuilder<
   TShape extends SchemaShape,
   TUnknownKeys extends ObjectUnknownKeys = undefined,
@@ -814,16 +830,19 @@ export type ObjectBuilder<
 > = Omit<BuilderCore<ObjectSchema<TShape, TUnknownKeys, TCatchall>>, "required"> &
   ObjectOperators<TShape, TUnknownKeys, TCatchall>;
 
+/** Describes the JIT function builder contract used by the public API. */
 export type FunctionBuilder<
   TInput extends readonly AnyTypeSchema[],
   TOutput extends AnyTypeSchema | undefined = AnyTypeSchema | undefined,
 > = BuilderCore<FunctionSchema<TInput, TOutput>> & FunctionOperators<TInput, TOutput>;
 
+/** Describes the JIT codec builder contract used by the public API. */
 export type CodecBuilder<TInput extends AnyTypeSchema, TOutput extends AnyTypeSchema> = BuilderCore<
   CodecSchema<TInput, TOutput>
 > &
   CodecOperators<TInput, TOutput>;
 
+/** Describes the JIT builder contract used by the public API. */
 export type Builder<TSchema extends AnyTypeSchema> =
   TSchema extends ObjectSchema<infer TShape, infer TUnknownKeys, infer TCatchall>
     ? ObjectBuilder<TShape, TUnknownKeys, TCatchall>
@@ -833,4 +852,5 @@ export type Builder<TSchema extends AnyTypeSchema> =
         ? CodecBuilder<TInput, TOutput>
         : BaseBuilder<TSchema> & CheckMethods<TSchema>;
 
+/** Describes the JIT any builder contract used by the public API. */
 export type AnyBuilder = Builder<AnyTypeSchema>;

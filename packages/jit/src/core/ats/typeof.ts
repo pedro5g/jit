@@ -4,8 +4,10 @@ import type { AnyTypeSchema, OptionalSchema, ReadonlySchema, SchemaShape } from 
 /** Resolves the output represented by a schema or builder. */
 export type Typeof<TSchemaLike> = ResolveTypeofSchemaLike<TSchemaLike>;
 
+/** Describes the JIT schema like contract used by the public API. */
 export type SchemaLike<TSchema extends AnyTypeSchema = AnyTypeSchema> = TSchema | { readonly schema: TSchema };
 
+/** Describes the JIT typeof schema like contract used by the public API. */
 export type TypeofSchemaLike<TSchemaLike extends SchemaLike> = ResolveTypeofSchemaLike<TSchemaLike>;
 
 /**
@@ -129,44 +131,56 @@ type ResolveIntersection<TOptions extends readonly AnyTypeSchema[]> = TOptions e
 type ResolveTransformOutput<TInput, TSpec> =
   TSpec extends ATS.TransformSpec<TInput> ? ATS.TransformOutput<TInput, TSpec> : TInput;
 
+/** Describes the JIT optional shape contract used by the public API. */
 export type OptionalShape<TShape extends SchemaShape> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends OptionalSchema ? TShape[TKey] : OptionalSchema<TShape[TKey]>;
 };
 
+/** Describes the JIT required shape contract used by the public API. */
 export type RequiredShape<TShape extends SchemaShape> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends OptionalSchema<infer TInner> ? TInner : TShape[TKey];
 };
 
+/** Describes the JIT partial shape contract used by the public API. */
 export type PartialShape<TShape extends SchemaShape> = OptionalShape<TShape>;
 
+/** Describes the JIT readonly shape contract used by the public API. */
 export type ReadonlyShape<TShape extends SchemaShape> = {
   readonly [TKey in keyof TShape]: ReadonlySchema<TShape[TKey]>;
 };
 
+/** Describes the JIT pick shape contract used by the public API. */
 export type PickShape<TShape extends SchemaShape, TKeys extends keyof TShape> = {
   readonly [TKey in TKeys]: TShape[TKey];
 };
 
+/** Describes the JIT omit shape contract used by the public API. */
 export type OmitShape<TShape extends SchemaShape, TKeys extends keyof TShape> = {
   readonly [TKey in Exclude<keyof TShape, TKeys>]: TShape[TKey];
 };
 
+/** Describes the JIT extend shape contract used by the public API. */
 export type ExtendShape<TShape extends SchemaShape, TExtension extends SchemaShape> = OmitShape<
   TShape,
   Extract<keyof TShape, keyof TExtension>
 > &
   TExtension;
 
+/** Describes the JIT merge shape contract used by the public API. */
 export type MergeShape<TLeft extends SchemaShape, TRight extends SchemaShape> = ExtendShape<TLeft, TRight>;
 
+/** Describes the JIT deep partial shape contract used by the public API. */
 export type DeepPartialShape<TShape extends SchemaShape> = {
   readonly [TKey in keyof TShape]: OptionalSchema<TShape[TKey]>;
 };
 
+/** Describes the JIT deep required shape contract used by the public API. */
 export type DeepRequiredShape<TShape extends SchemaShape> = RequiredShape<TShape>;
 
+/** Describes the JIT deep readonly shape contract used by the public API. */
 export type DeepReadonlyShape<TShape extends SchemaShape> = {
   readonly [TKey in keyof TShape]: ReadonlySchema<TShape[TKey]>;
 };
 
+/** Describes the JIT any schema like contract used by the public API. */
 export type AnySchemaLike = AnyTypeSchema | { readonly schema: AnyTypeSchema };

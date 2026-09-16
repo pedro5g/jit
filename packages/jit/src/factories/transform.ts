@@ -20,6 +20,7 @@ type TransformMapped<TOutput, TKey extends keyof TOutput, TValue> = Omit<TOutput
   readonly [TField in TKey]: TValue;
 };
 
+/** Describes the JIT transform expression contract used by the public API. */
 export interface TransformExpression<TInput, TOutput> {
   readonly __jitTransformExpression: true;
   readonly emit: (valueExpr: string) => string;
@@ -27,6 +28,7 @@ export interface TransformExpression<TInput, TOutput> {
   readonly _output: TOutput;
 }
 
+/** Converts the supplied input into the JIT transform field ops representation. */
 export type TransformFieldOps<TValue> = TValue extends string
   ? {
       lowercase(): TransformExpression<string, string>;
@@ -41,6 +43,7 @@ type TransformMapperResult<TValue, TSource, TResult> =
   | TransformExpression<TValue, TResult>
   | ((value: TValue, source: TSource) => TResult);
 
+/** Converts the supplied input into the JIT transform builder representation. */
 export interface TransformBuilder<TSource, TOutput> {
   select<const TKeys extends readonly TransformKeys<TOutput>[]>(
     ...keys: TKeys
@@ -57,6 +60,7 @@ interface TransformState<TSource> {
   readonly transforms: TransformMap<TSource>;
 }
 
+/** Converts the supplied input into the JIT transform representation. */
 export function transform<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): TransformBuilder<ATS.TypeofSchema<TSchema>, ATS.TypeofSchema<TSchema>> {

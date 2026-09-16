@@ -91,7 +91,7 @@ parseKey.defaults = {
   parseAsJson: false,
 } satisfies Required<parseKey.Options>;
 
-export function stringify_key(key: string): string {
+function stringify_key(key: string): string {
   return isQuoted(key) ? (key.startsWith('"') && key.endsWith('"') ? key : `"${key}"`) : `"${key}"`;
 }
 
@@ -107,7 +107,7 @@ export function key_access(key: keyof any | undefined, isOptional: boolean): str
       : `${isOptional ? "?." : ""}[${parseKey(key)}]`;
 }
 
-export function index_accessor(index: keyof any | undefined, isOptional: boolean): string {
+function index_accessor(index: keyof any | undefined, isOptional: boolean): string {
   const safe = isOptional ? "?." : "";
   return typeof index !== "number" ? "" : `${safe}[${index}]`;
 }

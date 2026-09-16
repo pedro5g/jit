@@ -5,9 +5,9 @@ import * as Transform from "../transforms/index.js";
 import { ResolvedMemberTable } from "./members.js";
 
 export type DddCapabilityKind = "ddd.timestamps" | "ddd.softDelete" | "ddd.versioned";
-export type ManagedFieldResolutionState = "MISSING" | "COMPATIBLE" | "AUGMENTABLE" | "CONFLICT";
+type ManagedFieldResolutionState = "MISSING" | "COMPATIBLE" | "AUGMENTABLE" | "CONFLICT";
 
-export interface TimestampCapabilityDefinition {
+interface TimestampCapabilityDefinition {
   readonly kind: "ddd.timestamps";
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -16,7 +16,7 @@ export interface TimestampCapabilityDefinition {
   readonly touchMethod: string;
 }
 
-export interface SoftDeleteCapabilityDefinition {
+interface SoftDeleteCapabilityDefinition {
   readonly kind: "ddd.softDelete";
   readonly field: string;
   readonly clock?: () => Date;
@@ -25,7 +25,7 @@ export interface SoftDeleteCapabilityDefinition {
   readonly isDeletedMember: string;
 }
 
-export interface VersionedCapabilityDefinition {
+interface VersionedCapabilityDefinition {
   readonly kind: "ddd.versioned";
   readonly field: string;
 }
@@ -380,7 +380,7 @@ function resolveManagedField(
  * The classification is declaration-only; no generated runtime path consults
  * it after the effective schema has been materialized.
  */
-export function resolveManagedFieldState(
+function resolveManagedFieldState(
   existing: ATS.AnyTypeSchema | undefined,
   role: ManagedFieldDescriptor["role"]
 ): ManagedFieldResolutionState {

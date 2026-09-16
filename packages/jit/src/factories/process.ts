@@ -25,10 +25,12 @@ type ProcessExecute<TElement, TResult, TParams extends Readonly<Record<string, u
   ? (values: readonly TElement[], length?: number) => TResult
   : (values: readonly TElement[], params: TParams, length?: number) => TResult;
 
+/** Executes the JIT process builder operation for the supplied input. */
 export interface ProcessBuilder<TElement> {
   binary(options?: BinaryRowSetOptions): BinaryProcessBuilder<TElement, TElement, TElement[]>;
 }
 
+/** Provides the JIT binary process compiled operation for the supplied input. */
 export interface BinaryProcessCompiled<
   TElement,
   TResult,
@@ -41,6 +43,7 @@ export interface BinaryProcessCompiled<
   readonly execute: ProcessExecute<TElement, TResult, TParams>;
 }
 
+/** Provides the JIT binary process builder operation for the supplied input. */
 export interface BinaryProcessBuilder<
   TElement,
   TOutput,
@@ -77,6 +80,7 @@ export interface BinaryProcessBuilder<
   compile(): BinaryProcessCompiled<TElement, TResult, TParams>;
 }
 
+/** Executes the JIT process operation for the supplied input. */
 export function process<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): ProcessBuilder<ATS.TypeofSchema<TSchema>> {

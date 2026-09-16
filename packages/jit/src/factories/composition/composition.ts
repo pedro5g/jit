@@ -28,6 +28,7 @@ export function union<const TOptions extends readonly SchemaInput[]>(
   );
 }
 
+/** Provides the JIT xor operation for the supplied input. */
 export function xor<const TOptions extends readonly SchemaInput[]>(
   ...options: TOptions
 ): Builder<XorSchema<UnwrapOptions<TOptions>>> {
@@ -38,6 +39,7 @@ export function xor<const TOptions extends readonly SchemaInput[]>(
   );
 }
 
+/** Provides the JIT not operation for the supplied input. */
 export function not<TSchema extends AnyTypeSchema>(schema: SchemaInput<TSchema>): Builder<NotSchema<TSchema>> {
   return /* @__PURE__ */ createBuilder(
     createSchema(TypeName.not, {

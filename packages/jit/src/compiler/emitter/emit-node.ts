@@ -89,7 +89,7 @@ export function emitNode(writer: CodeWriter, node: IRNode): void {
   }
 }
 
-export function emitTestExpr(expr: IRExpr): string {
+function emitTestExpr(expr: IRExpr): string {
   if (expr.kind === "binary") {
     const left = emitExpr(expr.left);
     const right = emitExpr(expr.right);

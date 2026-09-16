@@ -18,6 +18,7 @@ export interface AggregateMutationPlan {
   readonly version?: string;
 }
 
+/** Describes the JIT aggregate mutation plan options contract used by the public API. */
 export interface AggregateMutationPlanOptions {
   readonly fields: readonly string[];
   readonly readonlyFields?: readonly string[];
@@ -29,6 +30,7 @@ export interface AggregateMutationPlanOptions {
   readonly version?: string;
 }
 
+/** Creates the JIT build aggregate mutation plan artifact from the supplied input. */
 export function buildAggregateMutationPlan(options: AggregateMutationPlanOptions): AggregateMutationPlan {
   const readonlyFields = new Set([...(options.readonlyFields ?? []), ...(options.managedFields ?? [])]);
   const mutableFields = [...new Set(options.fields)].filter((field) => !readonlyFields.has(field));

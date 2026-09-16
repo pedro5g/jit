@@ -11,8 +11,10 @@ type RowKey<TSchema extends ATS.AnyTypeSchema> = Extract<keyof RowOf<TSchema>, s
 /** A `Date` key is looked up by the `Date` itself; the timestamp is read for you. */
 type LookupKeyValue<TRow, TKey extends keyof TRow> = TRow[TKey];
 
+/** Returns the JIT lookup plan result for the supplied input. */
 export interface LookupPlan<TRow, TKey> extends CompiledLookup<TRow, TKey> {}
 
+/** Returns the JIT lookup builder result for the supplied input. */
 export interface LookupBuilder<TSchema extends ATS.AnyTypeSchema>
   extends LookupPlan<RowOf<TSchema>, RowOf<TSchema>[RowKey<TSchema>]> {
   by<const TKey extends RowKey<TSchema>>(key: TKey): LookupPlan<RowOf<TSchema>, LookupKeyValue<RowOf<TSchema>, TKey>>;

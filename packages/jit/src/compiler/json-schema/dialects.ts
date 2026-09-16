@@ -102,6 +102,7 @@ const ALIASES: Readonly<Record<string, JsonSchemaTarget>> = {
   "openapi-3.1": "draft-2020-12",
 };
 
+/** Returns the JIT resolve dialect result for the supplied input. */
 export function resolveDialect(target: string = "draft-2020-12"): JsonSchemaDialect {
   const canonical = (ALIASES[target] ?? target) as JsonSchemaTarget;
   const dialect = DIALECTS[canonical];
@@ -116,4 +117,5 @@ export function resolveDialect(target: string = "draft-2020-12"): JsonSchemaDial
   return dialect;
 }
 
+/** Provides the JIT json schema targets operation for the supplied input. */
 export const JSON_SCHEMA_TARGETS = Object.keys(DIALECTS) as readonly JsonSchemaTarget[];

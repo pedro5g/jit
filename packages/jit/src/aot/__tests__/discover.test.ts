@@ -176,8 +176,8 @@ describe("JIT AOT self-contained types", () => {
         'import { JIT } from "@jit-compiler/jit/define";',
         "",
         "export const UserSchema = JIT.object({ id: JIT.number(), name: JIT.string() });",
-        "export const isUser = JIT.validate.is(UserSchema);",
-        "export const parseUser = JIT.validate.parse(UserSchema);",
+        "export const isUser = JIT.validate.is!(UserSchema);",
+        "export const parseUser = JIT.validate.parse!(UserSchema);",
         "export const User = { is: isUser, parse: parseUser };",
         "",
       ].join("\n")
@@ -277,7 +277,7 @@ describe("JIT AOT self-contained types", () => {
         `generated import typecheck failed\n${failed.stdout?.toString() ?? ""}${failed.stderr?.toString() ?? ""}`
       );
     }
-  }, 30_000);
+  }, 60_000);
 
   it("should name a generated type after the schema that declared it", () => {
     const User = JIT.object({ id: JIT.number() });

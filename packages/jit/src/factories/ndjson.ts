@@ -17,6 +17,7 @@ import type { RulePredicate } from "./rules.js";
 
 type NdjsonPick<TValue, TKeys extends keyof TValue> = { readonly [TKey in TKeys]: TValue[TKey] };
 
+/** Provides the JIT ndjson parse plan operation for the supplied input. */
 export interface NdjsonParsePlan<TRow, TOutput = TRow> {
   (input: NdjsonInput): TOutput[];
   validate(): NdjsonParsePlan<TRow, TOutput>;
@@ -40,6 +41,7 @@ export interface NdjsonParsePlan<TRow, TOutput = TRow> {
   };
 }
 
+/** Provides the JIT ndjson stringify plan operation for the supplied input. */
 export interface NdjsonStringifyPlan<TRow> {
   (value: readonly TRow[]): string;
   readonly to: {
@@ -53,6 +55,7 @@ function parse<TSchema extends ATS.AnyTypeSchema>(
   return createParsePlan(createNdjsonDescriptor(unwrapSchema(schema), "parse")) as never;
 }
 
+/** Creates the JIT create parse plan artifact from the supplied input. */
 export function createParsePlan(descriptor: NdjsonDescriptor): NdjsonParsePlan<unknown> {
   const result = compileNdjsonParse(descriptor) as unknown as NdjsonParsePlan<unknown>;
 
@@ -102,11 +105,13 @@ function stringify<TSchema extends ATS.AnyTypeSchema>(
   return result;
 }
 
+/** Describes the JIT ndjson namespace contract used by the public API. */
 export interface NdjsonNamespace {
   readonly parse: typeof parse;
   readonly stringify: typeof stringify;
 }
 
+/** Provides the JIT ndjson operation for the supplied input. */
 export const ndjson: NdjsonNamespace = Object.freeze({ parse, stringify });
 
 export type { NdjsonChunk, NdjsonInput } from "../compiler/ndjson.js";

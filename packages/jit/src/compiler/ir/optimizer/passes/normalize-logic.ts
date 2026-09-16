@@ -170,5 +170,3 @@ function exprKey(expr: IRExpr): string {
       return `new:${expr.ctor}(${expr.args.map(exprKey).join(",")})`;
   }
 }
-
-export { exprKey as serializeIRExpr };

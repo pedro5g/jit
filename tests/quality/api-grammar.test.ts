@@ -66,6 +66,11 @@ function registerTransitionTests(): void {
 }
 
 function registerSemanticChallengeTests(): void {
+  describe("declared policies", registerDeclaredPolicyTests);
+  describe("pipeline constraints", registerPipelineConstraintTests);
+}
+
+function registerDeclaredPolicyTests(): void {
   it("turns repeated email into an explicit semantic challenge", () => {
     const challenges = buildApiChallenges([contract("email")]);
     const repeated = challenges.find((item) => item.id === "repeat:jit.validation-check.email");
@@ -80,18 +85,44 @@ function registerSemanticChallengeTests(): void {
     expect(repeated?.question).toContain("email -> email");
   });
 
-  it("challenges semantic aliases instead of silently choosing a policy", () => {
+  it("verifies the declared accumulation policy for semantic aliases", () => {
     const challenges = buildApiChallenges([contract("min"), contract("gte")]);
     const alias = challenges.find((item) => item.kind === "alias");
 
     expect(alias).toMatchObject({
       sequence: ["gte", "min"],
-      expected: "decision-required",
-      status: "needs-design",
+      expected: "valid",
+      actual: "valid",
+      status: "verified",
     });
-    expect(alias?.question).toContain("same intent");
+    expect(alias?.evidence).toContain("alias semantics: accumulate");
   });
 
+  it("audits only declared representative combinations", () => {
+    const challenges = buildApiChallenges([contract("parse", "factory"), contract("validate", "factory")]);
+    const combination = challenges.find((item) => item.kind === "combination");
+
+    expect(combination).toMatchObject({
+      sequence: ["parse", "validate"],
+      expected: "valid",
+      actual: "valid",
+      status: "verified",
+    });
+  });
+
+  it("requires every discovered operation to have an explicit repeat policy", () => {
+    const challenges = buildApiChallenges([contract("and")]);
+    const repeated = challenges.find((item) => item.kind === "repeat");
+
+    expect(repeated).toMatchObject({
+      expected: "valid",
+      actual: "valid",
+      status: "verified",
+    });
+  });
+}
+
+function registerPipelineConstraintTests(): void {
   it("challenges exclusive visibility transitions", () => {
     const challenges = buildApiChallenges([contract("public", "class"), contract("private", "class")]);
     const visibility = challenges.find((item) => item.kind === "exclusive");

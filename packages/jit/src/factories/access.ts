@@ -39,6 +39,7 @@ export interface AccessConditionBuilder<TSubject, TActor> {
 
 type AccessOperand<TValue, TActor> = TValue | { readonly kind: "param"; readonly name: Field<TActor> };
 
+/** Provides the JIT access predicate operation for the supplied input. */
 export type AccessPredicate<TSubject, TActor> = (
   query: AccessConditionBuilder<TSubject, TActor>,
   actor: ActorRef<TActor>
@@ -52,6 +53,7 @@ export interface AccessRuleOptions<TSubject, TActor> {
   readonly reason?: string;
 }
 
+/** Provides the JIT access explanation operation for the supplied input. */
 export interface AccessExplanation<TSubject> {
   readonly allowed: boolean;
   readonly field?: Field<TSubject>;
@@ -69,6 +71,7 @@ export interface Ability<TSubject, TAction extends string> {
   fields(action: TAction, subject?: TSubject): readonly Field<TSubject>[];
 }
 
+/** Provides the JIT access plan operation for the supplied input. */
 export interface AccessPlan<TSubject, TActor, TAction extends string> {
   (actor: TActor): Ability<TSubject, TAction>;
   can<const TNext extends string>(
@@ -89,6 +92,7 @@ export interface AccessPlan<TSubject, TActor, TAction extends string> {
   fields(action: TAction): readonly Field<TSubject>[] | undefined;
 }
 
+/** Provides the JIT access builder operation for the supplied input. */
 export interface AccessBuilder<TSubject> extends AccessPlan<TSubject, unknown, never> {
   /** Declares the actor's shape, which is what `actor.field()` is checked against. */
   actor<TActorSchema extends ATS.AnyTypeSchema>(

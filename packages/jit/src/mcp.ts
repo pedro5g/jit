@@ -58,6 +58,7 @@ interface ToolDefinition {
   readonly annotations: JsonValue;
 }
 
+/** Describes the JIT mcp runtime contract used by the public API. */
 export interface McpRuntime {
   readonly cwd: string;
   readonly write: (message: JsonRpcResponse) => void;
@@ -213,6 +214,7 @@ const PROMPTS: readonly JsonValue[] = [
   },
 ];
 
+/** Executes the JIT handle json rpc operation for the supplied input. */
 export async function handleJsonRpc(request: JsonRpcRequest, runtime: McpRuntime): Promise<void> {
   if (request.id === undefined) {
     handleNotification(request, runtime);
@@ -231,6 +233,7 @@ export async function handleJsonRpc(request: JsonRpcRequest, runtime: McpRuntime
   }
 }
 
+/** Provides the JIT call tool operation for the supplied input. */
 export async function callTool(params: unknown, cwd: string): Promise<JsonValue> {
   const record = requireRecord(params, "tools/call params");
   const name = readRequiredString(record, "name");
@@ -251,6 +254,7 @@ export async function callTool(params: unknown, cwd: string): Promise<JsonValue>
   }
 }
 
+/** Executes the JIT process json rpc line operation for the supplied input. */
 export async function processJsonRpcLine(line: string, runtime: McpRuntime): Promise<void> {
   let parsed: unknown;
 
@@ -547,6 +551,7 @@ function isDirectRun(): boolean {
   return entry !== undefined && import.meta.url === pathToFileURL(realpathSync(resolve(entry))).href;
 }
 
+/** Executes the JIT run stdio server operation for the supplied input. */
 export function runStdioServer(cwd: string = process.env.JIT_MCP_ROOT ?? process.cwd()): void {
   const runtime: McpRuntime = {
     cwd,

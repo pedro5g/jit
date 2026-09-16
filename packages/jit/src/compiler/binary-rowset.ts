@@ -20,9 +20,12 @@ type ObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
 type ArraySchema = ATS.AnyTypeSchema & { readonly def: ATS.ElementDef };
 type ScalarDictionaryValue = string | number;
 
+/** Describes the JIT binary row set strategy contract used by the public API. */
 export type BinaryRowSetStrategy = "dynamic" | "static" | "exact";
+/** Describes the JIT binary memory layout contract used by the public API. */
 export type BinaryMemoryLayout = "auto" | "packed" | "aligned" | "columnar";
 
+/** Describes the JIT binary row set options contract used by the public API. */
 export interface BinaryRowSetOptions {
   /**
    * `dynamic` keeps and grows one scratch buffer, `static` uses a fixed
@@ -43,6 +46,7 @@ export interface BinaryRowSetOptions {
   readonly buffer?: ArrayBuffer | Uint8Array;
 }
 
+/** Describes the JIT binary field kind contract used by the public API. */
 export type BinaryFieldKind =
   | "float64"
   | "float32"
@@ -57,12 +61,14 @@ export type BinaryFieldKind =
   | "null"
   | "undefined";
 
+/** Describes the JIT binary field guard contract used by the public API. */
 export interface BinaryFieldGuard {
   readonly maskOffset: number;
   readonly shift: number;
   readonly maskStride: number;
 }
 
+/** Describes the JIT binary field layout contract used by the public API. */
 export interface BinaryFieldLayout {
   readonly key: string;
   readonly kind: BinaryFieldKind;
@@ -77,6 +83,7 @@ export interface BinaryFieldLayout {
   readonly literal?: unknown;
 }
 
+/** Describes the JIT binary row view usage contract used by the public API. */
 export interface BinaryRowViewUsage {
   readonly int32: boolean;
   readonly uint32: boolean;
@@ -85,6 +92,7 @@ export interface BinaryRowViewUsage {
   readonly bigint64: boolean;
 }
 
+/** Describes the JIT binary row layout contract used by the public API. */
 export interface BinaryRowLayout {
   readonly schema: ObjectSchema;
   readonly rowSize: number;
@@ -99,23 +107,27 @@ export interface BinaryRowLayout {
   readonly union: BinaryUnionLayout | undefined;
 }
 
+/** Describes the JIT binary union variant layout contract used by the public API. */
 export interface BinaryUnionVariantLayout {
   readonly tag: number;
   readonly value: string | number;
   readonly keys: readonly string[];
 }
 
+/** Describes the JIT binary union layout contract used by the public API. */
 export interface BinaryUnionLayout {
   readonly discriminator: string;
   readonly variants: readonly BinaryUnionVariantLayout[];
 }
 
+/** Describes the JIT binary dictionary contract used by the public API. */
 export interface BinaryDictionary {
   readonly ids: Map<ScalarDictionaryValue, number>;
   readonly values: ScalarDictionaryValue[];
   identity: boolean;
 }
 
+/** Describes the JIT binary row set contract used by the public API. */
 export interface BinaryRowSet<TElement = unknown> {
   readonly __jitBinaryRowSet: true;
   readonly schema: ObjectSchema;
@@ -139,6 +151,7 @@ export interface BinaryRowSet<TElement = unknown> {
   release(): void;
 }
 
+/** Describes the JIT binary array contract used by the public API. */
 export interface BinaryArray<TElement = unknown> {
   readonly __jitBinaryArray: true;
   readonly schema: ArraySchema;
@@ -149,6 +162,7 @@ export interface BinaryArray<TElement = unknown> {
   clear(): void;
 }
 
+/** Describes the JIT binary array element contract used by the public API. */
 export type BinaryArrayElement<TSchema extends ATS.ArraySchema> =
   ATS.TypeofSchema<TSchema> extends (infer TElement)[] ? TElement : never;
 
@@ -179,12 +193,14 @@ interface BinaryRowTarget {
   readonly capacity: number;
 }
 
+/** Describes the JIT binary query program contract used by the public API. */
 export interface BinaryQueryProgram {
   readonly nodes: readonly QueryNode[];
   readonly bindings: readonly unknown[];
   readonly params?: readonly string[];
 }
 
+/** Describes the JIT binary query compiled contract used by the public API. */
 export type BinaryQueryCompiled<
   TElement,
   TResult,
@@ -213,6 +229,7 @@ const EMPTY_FLOAT64 = new Float64Array(EMPTY_BUFFER);
 const EMPTY_BIGINT64 = new BigInt64Array(EMPTY_BUFFER);
 const EMPTY_OFFSETS = new Uint32Array(EMPTY_BUFFER);
 
+/** Returns whether the JIT is binary row set condition holds. */
 export function isBinaryRowSet(value: unknown): value is BinaryRowSet<unknown> {
   return (
     value !== null &&
@@ -221,6 +238,7 @@ export function isBinaryRowSet(value: unknown): value is BinaryRowSet<unknown> {
   );
 }
 
+/** Returns whether the JIT is binary array condition holds. */
 export function isBinaryArray(value: unknown): value is BinaryArray<unknown> {
   return (
     value !== null &&
@@ -229,6 +247,7 @@ export function isBinaryArray(value: unknown): value is BinaryArray<unknown> {
   );
 }
 
+/** Creates the JIT compile binary array artifact from the supplied input. */
 export function compileBinaryArray<TSchema extends ATS.ArraySchema>(
   schema: TSchema,
   options: BinaryRowSetOptions = {},
@@ -278,6 +297,7 @@ export function compileBinaryArray<TSchema extends ATS.ArraySchema>(
   return Object.freeze(api);
 }
 
+/** Emits deterministic source for the JIT emit binary row set writer source operation. */
 export function emitBinaryRowSetWriterSource(layout: BinaryRowLayout): string {
   const writer = new CodeWriter();
 
@@ -305,6 +325,7 @@ export function emitBinaryRowSetWriterSource(layout: BinaryRowLayout): string {
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit binary hydrate source operation. */
 export function emitBinaryHydrateSource(layout: BinaryRowLayout): string {
   const writer = new CodeWriter();
 
@@ -330,6 +351,7 @@ export function emitBinaryHydrateSource(layout: BinaryRowLayout): string {
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit binary query source operation. */
 export function emitBinaryQuerySource(layout: BinaryRowLayout, program: BinaryQueryProgram): string {
   const plan = createBinaryQueryPlan(program.nodes);
   const lookup = createFieldLookup(layout);
@@ -364,6 +386,7 @@ export function emitBinaryQuerySource(layout: BinaryRowLayout, program: BinaryQu
   return writer.toString();
 }
 
+/** Creates the JIT compile binary query artifact from the supplied input. */
 export function compileBinaryQuery<
   TElement,
   TResult = TElement[],
@@ -913,6 +936,7 @@ function fieldSignature(key: string, schema: ATS.AnyTypeSchema): string {
   return JSON.stringify([descriptor.kind, descriptor.size, descriptor.values, descriptor.literal]);
 }
 
+/** Creates the JIT create binary row layout artifact from the supplied input. */
 export function createBinaryRowLayout(
   schema: ObjectSchema,
   requestedLayout: BinaryMemoryLayout = "auto",

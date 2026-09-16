@@ -67,6 +67,7 @@ export type OmitCompiled<T, TKeys extends keyof T> = (value: T) => Omit<T, TKeys
 export type TransformSpec<T> = {
   readonly [TKey in keyof T]?: (value: T[TKey], source: T) => unknown;
 };
+/** Describes the JIT transform output contract used by the public API. */
 export type TransformOutput<T, TSpec extends TransformSpec<T>> = {
   -readonly [TKey in keyof T]: TKey extends keyof TSpec
     ? TSpec[TKey] extends (...args: never[]) => infer TOutput
@@ -93,13 +94,17 @@ export interface Normalized<TEntity, TKey extends keyof TEntity> {
   readonly byId: Record<Extract<TEntity[TKey], PropertyKey>, TEntity>;
   readonly ids: Extract<TEntity[TKey], PropertyKey>[];
 }
+/** Describes the JIT normalize contract used by the public API. */
 export type Normalize<TValue, TKey extends keyof ElementOf<TValue>> = (
   value: TValue
 ) => Normalized<ElementOf<TValue>, TKey>;
+/** Describes the JIT group by contract used by the public API. */
 export type GroupBy<TValue, TKey extends keyof ElementOf<TValue>> = (
   value: TValue
 ) => Record<Extract<ElementOf<TValue>[TKey], PropertyKey>, ElementOf<TValue>[]>;
+/** Describes the JIT sort by contract used by the public API. */
 export type SortBy<TValue> = (value: TValue) => TValue;
+/** Describes the JIT unique by contract used by the public API. */
 export type UniqueBy<TValue> = (value: TValue) => ElementOf<TValue>[];
 
 type ElementOf<TValue> = TValue extends readonly (infer TElement)[] ? TElement : never;

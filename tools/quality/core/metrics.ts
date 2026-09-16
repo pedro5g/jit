@@ -24,7 +24,7 @@ export function collectMetrics(context: QualityContext): Record<string, FileMetr
   return result;
 }
 
-export function metricsForSource(context: QualityContext, source: ts.SourceFile): FileMetrics {
+function metricsForSource(context: QualityContext, source: ts.SourceFile): FileMetrics {
   const text = readFileSync(source.fileName, "utf8");
   const logicalLoc = text
     .split(/\r?\n/)

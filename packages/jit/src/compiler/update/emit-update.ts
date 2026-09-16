@@ -7,6 +7,7 @@ import { emitSchemaGuard, literalDiscriminatorValue } from "../source/guard.js";
 import { emitLiteral } from "../source/literal.js";
 import type { UpdateIRNode, UpdateIRProgram } from "./build-update-ir.js";
 
+/** Emits deterministic source for the JIT emit update operation. */
 export function emitUpdate(program: UpdateIRProgram): string {
   const writer = new CodeWriter();
 
@@ -20,6 +21,7 @@ export function emitUpdate(program: UpdateIRProgram): string {
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit update body operation. */
 export function emitUpdateBody(program: UpdateIRProgram): string {
   const writer = new CodeWriter();
 
@@ -374,8 +376,8 @@ function emitRecordUpdateTo(
   writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
   writer.indent(() => {
     writer.line(`let changed = false;`);
-    writer.line(`const ${keys} = Object.keys(${value});`);
-    writer.line(`const ${patchKeys} = Object.keys(${patch});`);
+    writer.dynamicLine(`const ${keys} = Object.keys(${value});`);
+    writer.dynamicLine(`const ${patchKeys} = Object.keys(${patch});`);
     writer.line(`if (${keys}.length !== ${patchKeys}.length) {`);
     writer.indent(() => writer.line("changed = true;"));
     writer.line("}");

@@ -25,7 +25,7 @@ export interface MutationWrite {
 }
 
 /** Paths a mutation reads and writes; the basis of dependency intersection. */
-export interface MutationDependencies {
+interface MutationDependencies {
   readonly reads: readonly (readonly string[])[];
   readonly writes: readonly (readonly string[])[];
 }
@@ -164,7 +164,7 @@ export function isSpecializableMutation(schema: ATS.AnyTypeSchema, paths: readon
 }
 
 /** Leaf kinds the generic update assigns rather than merges. */
-export function isAssignedLeaf(schema: ATS.AnyTypeSchema): boolean {
+function isAssignedLeaf(schema: ATS.AnyTypeSchema): boolean {
   if (hasDefault(schema)) return false;
   let program: ReturnType<typeof buildUpdateIR>;
   try {

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { collectFluentOperations } from "../ast/fluent.js";
 import type { QualityContext } from "../core/context.js";
 import { finding, type QualityFinding } from "../core/finding.js";
+import { isRelevantSourceFile, listRepositoryFiles } from "../core/paths.js";
 import { contractForOperation, type OperationContract } from "./contracts.js";
 import { initialState, transition } from "./grammar.js";
 
@@ -16,7 +17,10 @@ const inventoryCache = new WeakMap<object, ApiInventory>();
 export function buildApiInventory(context: QualityContext): ApiInventory {
   const cached = inventoryCache.get(context);
   if (cached) return cached;
-  const operations = collectFluentOperations(context);
+  const operations = collectFluentOperations({
+    ...context,
+    files: listRepositoryFiles(context.root).filter(isRelevantSourceFile),
+  });
   const contracts = operations.flatMap((operation) => {
     const contract = contractForOperation(operation);
     return contract ? [contract] : [];

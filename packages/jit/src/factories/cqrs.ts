@@ -40,6 +40,7 @@ import {
 } from "./query.js";
 import type { RulePredicate } from "./rules.js";
 
+/** Provides the JIT standard query operation for the supplied input. */
 export interface StandardQuery {
   readonly version: 1;
   readonly definition: StandardQueryDefinition;
@@ -63,6 +64,7 @@ export interface StandardQueryDefinition {
   readonly params: readonly string[];
 }
 
+/** Provides the JIT standard query step operation for the supplied input. */
 export type StandardQueryStep =
   | { readonly kind: "where"; readonly condition: StandardQueryCondition }
   | { readonly kind: "select"; readonly fields: readonly string[] }
@@ -116,12 +118,14 @@ export type StandardQueryStep =
       readonly rightKey: string;
     };
 
+/** Provides the JIT standard query value operation for the supplied input. */
 export type StandardQueryValue =
   | { readonly kind: "field"; readonly path: readonly string[] }
   | { readonly kind: "literal"; readonly value: unknown }
   | { readonly kind: "binding"; readonly name: string }
   | { readonly kind: "param"; readonly name: string };
 
+/** Provides the JIT standard query condition operation for the supplied input. */
 export type StandardQueryCondition =
   | {
       readonly kind: "compare";
@@ -141,6 +145,7 @@ type QueryBoundaryOperators<TValue> = [QueryOperatorsFor<TValue>] extends [never
   ? never
   : true | readonly QueryOperatorsFor<TValue>[];
 
+/** Describes the JIT cqrs input options contract used by the public API. */
 export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
   readonly filter?: Partial<{
     readonly [TKey in Extract<keyof ATS.TypeofSchema<TSchema>, string>]: QueryBoundaryOperators<
@@ -179,6 +184,7 @@ export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
   };
 }
 
+/** Describes the JIT cqrs input contract used by the public API. */
 export interface CqrsInput<TSchema extends ATS.AnyTypeSchema> {
   readonly schema: TSchema;
   readonly options: CqrsInputOptions<TSchema>;
@@ -222,6 +228,7 @@ export interface StandardQueryInput {
     };
   };
 }
+/** Describes the JIT cqrs input condition contract used by the public API. */
 export interface CqrsInputCondition {
   readonly kind: string;
   readonly path: readonly string[];
@@ -244,6 +251,7 @@ export interface AuthorizedApiRequest {
   readonly pagination?: ParsedCqrsInput["pagination"];
 }
 
+/** Describes the JIT parsed cqrs input contract used by the public API. */
 export interface ParsedCqrsInput {
   readonly filter: readonly CqrsInputCondition[];
   readonly select?: readonly string[];
@@ -304,6 +312,7 @@ type JoinResult<TLeft, TRight, TKind extends QueryJoinKind> = TKind extends "sem
     ? LeftJoinPair<TLeft, TRight>[]
     : JoinPair<TLeft, TRight>[];
 
+/** Describes the JIT cqrs join on builder contract used by the public API. */
 export interface CqrsJoinOnBuilder<
   TLeftSchema extends ATS.AnyTypeSchema,
   TRightSchema extends ATS.AnyTypeSchema,
@@ -316,6 +325,7 @@ export interface CqrsJoinOnBuilder<
   >(leftKey: TLeftKey, rightKey: TRightKey): CqrsJoinedQuery<TLeftSchema, TRightSchema, TKind, TParams>;
 }
 
+/** Describes the JIT cqrs joined query contract used by the public API. */
 export type CqrsJoinedQuery<
   TLeftSchema extends ATS.AnyTypeSchema,
   TRightSchema extends ATS.AnyTypeSchema,
@@ -458,6 +468,7 @@ interface CqrsQueryOps<
     outputMode?: "eager-array" | "generator" | "async-generator" | "visitor"
   ): ReturnType<QueryBuilder<ATS.ArraySchema<TSchema>, TOutput, TResult, TParams>["explain"]>;
 }
+/** Provides the JIT cqrs query operation for the supplied input. */
 export type CqrsQuery<
   TSchema extends ATS.AnyTypeSchema,
   TOutput = Row<TSchema>,
@@ -486,6 +497,7 @@ export function cqrsQuery<TElement>(
   target: BinaryArray<TElement> | BinaryRowSet<TElement>
 ): BinaryQueryBuilder<TElement, TElement, TElement[]>;
 export function cqrsQuery<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): CqrsQueryFor<TSchema>;
+/** Provides the JIT cqrs query operation for the supplied input. */
 export function cqrsQuery(
   schema: SchemaInput | BinaryArray<unknown> | BinaryRowSet<unknown>
 ):
@@ -523,6 +535,7 @@ type QueryElement<TSchema extends ATS.AnyTypeSchema> =
         ? TElement
         : never;
 
+/** Describes the JIT cqrs query for contract used by the public API. */
 export type CqrsQueryFor<TSchema extends ATS.AnyTypeSchema> = TSchema extends {
   readonly type: "array";
   readonly def: Readonly<{ readonly element: infer TElement extends ATS.AnyTypeSchema }>;
@@ -908,6 +921,7 @@ function isStandardData(value: unknown, seen = new Set<object>()): boolean {
   return Object.values(value).every((item) => isStandardData(item, seen));
 }
 
+/** Provides the JIT cqrs input operation for the supplied input. */
 export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   options: CqrsInputOptions<TSchema>
@@ -1576,6 +1590,7 @@ function aggregateSpec<TResult>(op: QueryAggregateOperator, key?: string): CqrsA
   });
 }
 
+/** Provides the JIT cqrs operation for the supplied input. */
 export const cqrs = Object.freeze({
   query: cqrsQuery,
   param,

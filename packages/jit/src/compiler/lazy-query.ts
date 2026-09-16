@@ -14,14 +14,17 @@ import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./source/access.js";
 import { emitLiteral } from "./source/literal.js";
 
+/** Describes the JIT query execution mode contract used by the public API. */
 export type QueryExecutionMode = "eager-array" | "generator" | "async-generator" | "visitor";
 
+/** Describes the JIT lazy query program contract used by the public API. */
 export interface LazyQueryProgram {
   readonly nodes: readonly QueryPipelineNode[];
   readonly bindings: readonly unknown[];
   readonly params?: readonly string[];
 }
 
+/** Describes the JIT query execution plan contract used by the public API. */
 export interface QueryExecutionPlan {
   readonly outputMode: QueryExecutionMode;
   readonly materializes: boolean;
@@ -37,6 +40,7 @@ export interface QueryExecutionPlan {
   readonly physical?: PhysicalQueryExplain;
 }
 
+/** Describes the JIT query iterator compiled contract used by the public API. */
 export type QueryIteratorCompiled<
   TElement,
   TOutput,
@@ -45,6 +49,7 @@ export type QueryIteratorCompiled<
   ? (input: Iterable<TElement>) => IterableIterator<TOutput>
   : (input: Iterable<TElement>, params: TParams) => IterableIterator<TOutput>;
 
+/** Describes the JIT query array compiled contract used by the public API. */
 export type QueryArrayCompiled<
   TElement,
   TOutput,
@@ -53,6 +58,7 @@ export type QueryArrayCompiled<
   ? (input: Iterable<TElement>) => TOutput[]
   : (input: Iterable<TElement>, params: TParams) => TOutput[];
 
+/** Describes the JIT query async iterator compiled contract used by the public API. */
 export type QueryAsyncIteratorCompiled<
   TElement,
   TOutput,
@@ -61,6 +67,7 @@ export type QueryAsyncIteratorCompiled<
   ? (input: AsyncIterable<TElement> | Iterable<TElement>) => AsyncGenerator<TOutput>
   : (input: AsyncIterable<TElement> | Iterable<TElement>, params: TParams) => AsyncGenerator<TOutput>;
 
+/** Describes the JIT query visitor compiled contract used by the public API. */
 export type QueryVisitorCompiled<
   TElement,
   TOutput,
@@ -69,6 +76,7 @@ export type QueryVisitorCompiled<
   ? (input: Iterable<TElement>, consume: (value: TOutput) => void) => number
   : (input: Iterable<TElement>, params: TParams, consume: (value: TOutput) => void) => number;
 
+/** Provides the JIT explain query execution operation for the supplied input. */
 export function explainQueryExecution(program: LazyQueryProgram, outputMode: QueryExecutionMode): QueryExecutionPlan {
   const barriers = program.nodes.filter((node) => node.kind === "orderBy").map(() => "orderBy");
   const retainedState: string[] = [];
@@ -112,6 +120,7 @@ export function explainQueryExecution(program: LazyQueryProgram, outputMode: Que
   };
 }
 
+/** Emits deterministic source for the JIT emit query iterator source operation. */
 export function emitQueryIteratorSource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): string {
   return wrapDistinctSource(emitPipelineSource(schema, program, false), resolveLazyDistinct(schema, program));
 }
@@ -126,6 +135,7 @@ export function emitQueryArraySource(schema: ATS.AnyTypeSchema, program: LazyQue
   return `(function() {\nconst iterate = ${iterator};\nfunction query(input${hasParams ? ", params" : ""}) {\n  return Array.from(iterate(input${hasParams ? ", params" : ""}));\n}\nreturn query;\n})()`;
 }
 
+/** Creates the JIT compile query array artifact from the supplied input. */
 export function compileQueryArray<
   TElement,
   TOutput,
@@ -166,10 +176,12 @@ export function compileQueryArray<
   return compiled;
 }
 
+/** Emits deterministic source for the JIT emit query async iterator source operation. */
 export function emitQueryAsyncIteratorSource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): string {
   return wrapDistinctSource(emitPipelineSource(schema, program, true), resolveLazyDistinct(schema, program));
 }
 
+/** Creates the JIT compile query iterator artifact from the supplied input. */
 export function compileQueryIterator<
   TElement,
   TOutput,
@@ -186,6 +198,7 @@ export function compileQueryIterator<
   >;
 }
 
+/** Creates the JIT compile query async iterator artifact from the supplied input. */
 export function compileQueryAsyncIterator<
   TElement,
   TOutput,
@@ -203,6 +216,7 @@ export function compileQueryAsyncIterator<
   ) as QueryAsyncIteratorCompiled<TElement, TOutput, TParams>;
 }
 
+/** Creates the JIT compile query visitor artifact from the supplied input. */
 export function compileQueryVisitor<
   TElement,
   TOutput,
@@ -269,6 +283,7 @@ export function compileQueryVisitor<
   return visitor;
 }
 
+/** Emits deterministic source for the JIT emit query visitor source operation. */
 export function emitQueryVisitorSource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): string {
   const collection = resolveCollection(schema);
   validatePipeline(program.nodes, collection.props);

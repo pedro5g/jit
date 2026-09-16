@@ -528,6 +528,7 @@ function validateQueryPlan(schema: QueryObjectSchema, plan: OptimizedQueryPlan):
   }
 }
 
+/** Provides the JIT expect collection object schema operation for the supplied input. */
 export function expectCollectionObjectSchema(schema: ATS.AnyTypeSchema, compilerName: string): QueryTarget {
   const resolved = resolveWrappers(schema).base;
 

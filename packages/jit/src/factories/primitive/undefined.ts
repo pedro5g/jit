@@ -15,4 +15,5 @@ function undefinedType(message?: ValidationMessage): Builder<UndefinedSchema> {
   );
 }
 
+/** Provides the JIT undefined operation for the supplied input. */
 export { undefinedType as undefined };

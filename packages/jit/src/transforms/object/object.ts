@@ -247,18 +247,21 @@ export function required<
   );
 }
 
+/** Restricts an object schema to declared keys and rejects unknown properties. */
 export function strict<TShape extends SchemaShape, TCatchall extends AnyTypeSchema | undefined>(
   schema: ObjectSchema<TShape, ObjectUnknownKeys, TCatchall>
 ): ObjectSchema<TShape, "strict", TCatchall> {
   return withUnknownKeys(schema, "strict");
 }
 
+/** Allows unknown object properties to pass through unchanged. */
 export function loose<TShape extends SchemaShape, TCatchall extends AnyTypeSchema | undefined>(
   schema: ObjectSchema<TShape, ObjectUnknownKeys, TCatchall>
 ): ObjectSchema<TShape, "passthrough", TCatchall> {
   return withUnknownKeys(schema, "passthrough");
 }
 
+/** Validates unknown object properties with a catchall schema. */
 export function catchall<TShape extends SchemaShape, TCatchall extends AnyTypeSchema>(
   schema: ObjectSchema<TShape, ObjectUnknownKeys, AnyTypeSchema | undefined>,
   catchallSchema: TCatchall
@@ -285,6 +288,7 @@ function keyOf<TShape extends SchemaShape>(
   });
 }
 
+/** Public `keyof` alias that turns declared object keys into an enum schema. */
 export { keyOf as keyof };
 
 type KeyOfValues<TShape extends SchemaShape> = readonly Extract<keyof TShape, string>[];

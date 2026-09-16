@@ -10,10 +10,12 @@ import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 
+/** Provides the JIT csv schema options operation for the supplied input. */
 export type CsvSchemaOptions<TRow> = Omit<CsvOptions, "columns"> & {
   readonly columns?: Partial<Record<keyof TRow, string>>;
 };
 
+/** Provides the JIT csv parse plan operation for the supplied input. */
 export interface CsvParsePlan<TRow> {
   (input: CsvInput): TRow[];
   readonly to: {
@@ -22,6 +24,7 @@ export interface CsvParsePlan<TRow> {
   };
 }
 
+/** Provides the JIT csv stringify plan operation for the supplied input. */
 export interface CsvStringifyPlan<TRow> {
   (value: readonly TRow[]): string;
   readonly to: {
@@ -73,6 +76,7 @@ function stringify<TSchema extends ATS.AnyTypeSchema>(
   return result;
 }
 
+/** Describes the JIT csv namespace contract used by the public API. */
 export interface CsvNamespace {
   readonly parse: typeof parse;
   readonly stringify: typeof stringify;
@@ -81,4 +85,5 @@ export interface CsvNamespace {
 /** RFC 4180 transport plans compiled from an object row schema. */
 export const csv: CsvNamespace = Object.freeze({ parse, stringify });
 
+/** Provides the JIT type operation for the supplied input. */
 export type { CsvChunk, CsvInput };

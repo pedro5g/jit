@@ -79,6 +79,7 @@ export interface CollectionState<TSchema extends AnyTypeSchema, TRow> {
   readonly schema: TSchema;
 }
 
+/** Describes the JIT collection mutation host contract used by the public API. */
 export type CollectionMutationHost = <TRow, TParams>(
   schema: AnyTypeSchema,
   descriptor: CollectionMutationDescriptor,

@@ -25,15 +25,7 @@ function collectFromFile(context: QualityContext, file: string, visited: Set<str
   visited.add(source.fileName);
   for (const statement of source.statements) {
     if (ts.isExportDeclaration(statement)) {
-      if (statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)) {
-        const target = ts.resolveModuleName(
-          statement.moduleSpecifier.text,
-          source.fileName,
-          context.tsProgram.getCompilerOptions(),
-          ts.sys
-        ).resolvedModule?.resolvedFileName;
-        if (target) collectFromFile(context, toRepoPath(context.root, target), visited, result);
-      }
+      if (collectReExport(context, source, statement, visited, result)) continue;
       for (const element of statement.exportClause && ts.isNamedExports(statement.exportClause)
         ? statement.exportClause.elements
         : []) {
@@ -45,7 +37,7 @@ function collectFromFile(context: QualityContext, file: string, visited: Set<str
     if (ts.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations)
         if (ts.isIdentifier(declaration.name))
-          result.push(symbolRecord(context, source, declaration.name.text, declaration, "variable"));
+          result.push(symbolRecord(context, source, declaration.name.text, statement, "variable"));
     } else if (
       ts.isFunctionDeclaration(statement) ||
       ts.isClassDeclaration(statement) ||
@@ -58,6 +50,42 @@ function collectFromFile(context: QualityContext, file: string, visited: Set<str
         result.push(symbolRecord(context, source, statement.name.text, statement, ts.SyntaxKind[statement.kind]));
     }
   }
+}
+
+function collectReExport(
+  context: QualityContext,
+  source: ts.SourceFile,
+  statement: ts.ExportDeclaration,
+  visited: Set<string>,
+  result: PublicSymbol[]
+): boolean {
+  if (!statement.moduleSpecifier || !ts.isStringLiteral(statement.moduleSpecifier)) return false;
+  const target = ts.resolveModuleName(
+    statement.moduleSpecifier.text,
+    source.fileName,
+    context.tsProgram.getCompilerOptions(),
+    ts.sys
+  ).resolvedModule?.resolvedFileName;
+  if (!target) return false;
+
+  const targetPath = toRepoPath(context.root, target);
+  collectFromFile(context, targetPath, visited, result);
+  for (const element of statement.exportClause && ts.isNamedExports(statement.exportClause)
+    ? statement.exportClause.elements
+    : []) {
+    const targetName = element.propertyName?.text ?? element.name.text;
+    const targetSymbol =
+      [...result].reverse().find((symbol) => symbol.path === targetPath && symbol.name === targetName) ??
+      [...result].reverse().find((symbol) => symbol.name === targetName);
+    result.push({
+      name: element.name.text,
+      path: targetSymbol?.path ?? targetPath,
+      line: targetSymbol?.line ?? source.getLineAndCharacterOfPosition(element.getStart(source)).line + 1,
+      kind: "export",
+      documented: targetSymbol?.documented ?? false,
+    });
+  }
+  return true;
 }
 
 function symbolRecord(
@@ -78,9 +106,34 @@ function symbolRecord(
 
 function hasDocumentation(node: ts.Node, source: ts.SourceFile): boolean {
   const text = readFileSync(source.fileName, "utf8");
-  return (ts.getLeadingCommentRanges(text, node.getFullStart()) ?? []).some((range) =>
-    text.slice(range.pos, range.end).startsWith("/**")
-  );
+  let candidate: ts.Node | undefined = node;
+  for (let depth = 0; candidate && depth < 3; depth += 1) {
+    if (
+      (ts.getLeadingCommentRanges(text, candidate.getFullStart()) ?? []).some((range) =>
+        text.slice(range.pos, range.end).startsWith("/**")
+      )
+    )
+      return true;
+    candidate = candidate.parent;
+  }
+
+  if (ts.isFunctionDeclaration(node) && node.name) {
+    const index = source.statements.indexOf(node);
+
+    for (let previous = index - 1; previous >= 0; previous -= 1) {
+      const sibling = source.statements[previous];
+
+      if (!ts.isFunctionDeclaration(sibling) || sibling.name?.text !== node.name.text) break;
+      if (
+        (ts.getLeadingCommentRanges(text, sibling.getFullStart()) ?? []).some((range) =>
+          text.slice(range.pos, range.end).startsWith("/**")
+        )
+      )
+        return true;
+    }
+  }
+
+  return false;
 }
 
 function hasExportModifier(node: ts.Node): boolean {

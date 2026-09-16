@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { QualityContext } from "../core/context.js";
 import { finding, type QualityFinding } from "../core/finding.js";
 import { runLocalBinary } from "../core/process.js";
@@ -30,7 +30,7 @@ export function codegenGate(context: QualityContext): QualityFinding[] {
             "Move dynamic enumeration out of the generated hot path or document the genuinely dynamic boundary.",
         })
       );
-    if (/Object\.keys\s*\(/.test(text))
+    if (emitsObjectKeys(text))
       findings.push(
         finding({
           code: "QG-CODEGEN-004",
@@ -42,7 +42,7 @@ export function codegenGate(context: QualityContext): QualityFinding[] {
           remediation: "Use static property emission or isolate the dynamic operation outside generated code.",
         })
       );
-    if (/\bFunction\s*\(/.test(text) && !/new Function/.test(text))
+    if (hasUnqualifiedFunctionCall(text))
       findings.push(
         finding({
           code: "QG-CODEGEN-002",
@@ -66,6 +66,17 @@ export function codegenGate(context: QualityContext): QualityFinding[] {
   return findings;
 }
 
+function emitsObjectKeys(source: string): boolean {
+  return source.split("\n").some((line) => {
+    if (!/\b(?:writer|this\.writer)\.line\s*\(/.test(line)) return false;
+    return /Object\.keys\s*\(/.test(line);
+  });
+}
+
+function hasUnqualifiedFunctionCall(source: string): boolean {
+  return /(?<![\w$.])Function\s*\(/.test(source) && !/\bnew\s+Function\s*\(/.test(source);
+}
+
 function runCodegenTests(context: QualityContext): QualityFinding[] {
   const result = runLocalBinary(context.root, "vitest", [
     "run",
@@ -86,25 +97,4 @@ function runCodegenTests(context: QualityContext): QualityFinding[] {
       remediation: "Fix deterministic source, syntax, differential or runtime/AOT parity failures before continuing.",
     }),
   ];
-}
-
-export function writeSourceMetrics(
-  context: QualityContext,
-  sources: readonly { readonly operation: string; readonly source: string }[]
-): void {
-  mkdirSync(context.reportsDirectory, { recursive: true });
-  const metrics = Object.fromEntries(
-    [...sources]
-      .sort((left, right) => left.operation.localeCompare(right.operation))
-      .map((item) => [
-        item.operation,
-        {
-          bytes: Buffer.byteLength(item.source),
-          lines: item.source.split("\n").length,
-          helpers: (item.source.match(/\bfunction\s+[A-Za-z_$][\w$]*/g) ?? []).length,
-          bindings: (item.source.match(/__q\d+|__v\d+|__m\d+|__c\d+/g) ?? []).length,
-        },
-      ])
-  );
-  writeFileSync(join(context.reportsDirectory, "codegen-metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
 }

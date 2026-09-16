@@ -20,11 +20,13 @@ export type ReconcileDelta = readonly (
   | { readonly type: "remove"; readonly path: readonly PropertyKey[] }
 )[];
 
+/** Provides the JIT reconcile change operation for the supplied input. */
 export interface ReconcileChange<TRow> {
   readonly before: TRow;
   readonly after: TRow;
 }
 
+/** Provides the JIT reconcile change with diff operation for the supplied input. */
 export interface ReconcileChangeWithDiff<TRow> extends ReconcileChange<TRow> {
   readonly diff: ReconcileDelta;
 }
@@ -45,6 +47,7 @@ export type ReconcileResult<TRow, TChannels, TChange> = {
     : K]: K extends "changed" ? TChange[] : TRow[];
 };
 
+/** Provides the JIT reconcile event operation for the supplied input. */
 export type ReconcileEvent<TRow, TChange> =
   | { readonly type: "added"; readonly value: TRow }
   | { readonly type: "removed"; readonly value: TRow }
@@ -59,6 +62,7 @@ export interface ReconcileVisitor<TRow> {
   changed?(before: TRow, after: TRow, diff?: ReconcileDelta): void;
 }
 
+/** Describes the JIT reconcile sinks contract used by the public API. */
 export interface ReconcileSinks<TRow, TChange> {
   /** Streams results as they are found, materializing nothing. */
   iterator(): (previous: readonly TRow[], current: readonly TRow[]) => IterableIterator<ReconcileEvent<TRow, TChange>>;
@@ -66,6 +70,7 @@ export interface ReconcileSinks<TRow, TChange> {
   visitor(): (previous: readonly TRow[], current: readonly TRow[], visitor: ReconcileVisitor<TRow>) => void;
 }
 
+/** Provides the JIT reconcile plan operation for the supplied input. */
 export interface ReconcilePlan<TSchema extends ATS.AnyTypeSchema, TChannels, TChange> {
   (
     previous: readonly RowOf<TSchema>[],

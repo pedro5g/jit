@@ -7,6 +7,7 @@ import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./source/access.js";
 import { emitLiteral } from "./source/literal.js";
 
+/** Describes the JIT match descriptor contract used by the public API. */
 export interface MatchDescriptor {
   readonly schema: ATS.AnyTypeSchema;
   readonly discriminator: string;
@@ -20,6 +21,7 @@ export interface MatchDescriptor {
 
 type DiscriminatedUnion = ATS.AnyTypeSchema & { readonly def: ATS.DiscriminatedUnionDef };
 
+/** Returns the JIT resolve match descriptor result for the supplied input. */
 export function resolveMatchDescriptor(
   schema: ATS.AnyTypeSchema,
   handled: readonly (string | number | boolean)[],
@@ -122,10 +124,12 @@ export function emitMatchSource(descriptor: MatchDescriptor): string {
   return writer.toString();
 }
 
+/** Provides the JIT match cache key operation for the supplied input. */
 export function matchCacheKey(descriptor: MatchDescriptor): string {
   return `match:${descriptor.discriminator}:${JSON.stringify(descriptor.handled)}:${descriptor.hasFallback}`;
 }
 
+/** Creates the JIT compile match artifact from the supplied input. */
 export function compileMatch<TValue, TResult>(
   descriptor: MatchDescriptor,
   handlers: readonly ((value: TValue) => TResult)[],

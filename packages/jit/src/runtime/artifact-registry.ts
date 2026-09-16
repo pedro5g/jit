@@ -398,6 +398,7 @@ interface ClassArtifact {
   };
 }
 
+/** Creates the JIT compiled artifact artifact from the supplied input. */
 export type CompiledArtifact =
   | SourceArtifact
   | QueryPlanArtifact
@@ -432,32 +433,13 @@ export type CompiledArtifact =
 
 const REGISTRY = new WeakMap<object, CompiledArtifact>();
 
+/** Creates the JIT register artifact artifact from the supplied input. */
 export function registerArtifact(value: object, artifact: CompiledArtifact): void {
   REGISTRY.set(value, artifact);
 }
 
+/** Returns the JIT get artifact result for the supplied input. */
 export function getArtifact(value: unknown): CompiledArtifact | undefined {
   if ((typeof value !== "object" || value === null) && typeof value !== "function") return undefined;
   return REGISTRY.get(value as object);
-}
-
-/** Updates class-only declarative metadata without changing the class identity. */
-export function setClassMutationArtifact(
-  value: object,
-  mutation: {
-    readonly updatedAt?: string;
-    readonly touchAt?: string;
-    readonly version?: string;
-    readonly deletedAt?: string;
-    readonly timestampClock?: unknown;
-    readonly deletionClock?: unknown;
-    readonly touchMethod?: string;
-    readonly deleteMethod?: string;
-    readonly restoreMethod?: string;
-    readonly isDeletedMember?: string;
-  }
-): void {
-  const artifact = REGISTRY.get(value);
-  if (artifact?.kind !== "class") return;
-  REGISTRY.set(value, { ...artifact, mutation });
 }

@@ -8,8 +8,10 @@ import { emitMapperPlanFunctionSource } from "./mapper.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitLiteral } from "./source/literal.js";
 
+/** Describes the JIT migration version contract used by the public API. */
 export type MigrationVersion = string | number;
 
+/** Describes the JIT migration edge contract used by the public API. */
 export interface MigrationEdge {
   readonly source: ATS.AnyTypeSchema;
   readonly target: ATS.AnyTypeSchema;
@@ -18,6 +20,7 @@ export interface MigrationEdge {
   readonly mapper: MapperPlan;
 }
 
+/** Describes the JIT migration descriptor contract used by the public API. */
 export interface MigrationDescriptor {
   readonly schemas: readonly ATS.AnyTypeSchema[];
   readonly versions: readonly MigrationVersion[];
@@ -28,6 +31,7 @@ export interface MigrationDescriptor {
 
 type ObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
 
+/** Creates the JIT create migration descriptor artifact from the supplied input. */
 export function createMigrationDescriptor(schema: ATS.AnyTypeSchema): MigrationDescriptor {
   const version = resolveMigrationVersion(schema);
 
@@ -40,6 +44,7 @@ export function createMigrationDescriptor(schema: ATS.AnyTypeSchema): MigrationD
   });
 }
 
+/** Provides the JIT append migration edge operation for the supplied input. */
 export function appendMigrationEdge(
   descriptor: MigrationDescriptor,
   target: ATS.AnyTypeSchema,
@@ -116,6 +121,7 @@ export function emitMigrationSource(descriptor: MigrationDescriptor): string {
   return writer.toString();
 }
 
+/** Creates the JIT compile migration artifact from the supplied input. */
 export function compileMigration<TInput, TOutput>(descriptor: MigrationDescriptor): (value: TInput) => TOutput {
   const source = emitMigrationSource(descriptor);
   const compiled = globalThis.Function(
@@ -127,6 +133,7 @@ export function compileMigration<TInput, TOutput>(descriptor: MigrationDescripto
   return compiled;
 }
 
+/** Returns the JIT resolve migration version result for the supplied input. */
 export function resolveMigrationVersion(schema: ATS.AnyTypeSchema): MigrationVersion {
   const base = resolveWrappers(schema).base;
 

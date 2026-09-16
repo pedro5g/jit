@@ -24,10 +24,3 @@ export interface HashHint {
   readonly type?: "hash";
   readonly strategy?: "ordered" | "unordered" | "identity" | "reference";
 }
-
-export interface HintSet<T = unknown> {
-  readonly entity?: EntityHint<T>;
-  readonly index?: IndexHint;
-  readonly order?: OrderHint<T>;
-  readonly hash?: HashHint;
-}

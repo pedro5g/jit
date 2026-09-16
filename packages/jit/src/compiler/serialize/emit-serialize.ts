@@ -319,7 +319,7 @@ function emitBaseAppend(context: SerializeContext, schema: AnySchema, valueExpr:
       const item = nextVar(context, "e");
 
       writer.line(`s += "{";`);
-      writer.line(`const ${keys} = Object.keys(${holder});`);
+      writer.dynamicLine(`const ${keys} = Object.keys(${holder});`);
       writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
       writer.indent(() => {
         writer.line(`if (${index} !== 0) s += ",";`);

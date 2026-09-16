@@ -8,8 +8,11 @@ import { emitLiteral } from "./source/literal.js";
 /** A compiled schema-aware string cleaner with structural sharing. */
 export type Sanitize<T = unknown> = (value: T) => T;
 
+/** Provides the JIT script block regex configuration used by the public contract. */
 export const SCRIPT_BLOCK_REGEX = /<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1\s*>/gi;
+/** Provides the JIT html tag regex configuration used by the public contract. */
 export const HTML_TAG_REGEX = /<[^>]*>/g;
+/** Provides the JIT html tag parts regex configuration used by the public contract. */
 export const HTML_TAG_PARTS_REGEX = /<\s*(\/?)\s*([A-Za-z][A-Za-z0-9-]*)(?:\s[^>]*)?>/g;
 const AMP_REGEX = /&/g;
 const LT_REGEX = /</g;
@@ -51,6 +54,7 @@ const SANITIZE_VALUES = [
   PATH_SEGMENT_REGEX,
 ] as const;
 
+/** Provides the JIT sanitize chain bindings configuration used by the public contract. */
 export const sanitizeChainBindings = {
   names: SANITIZE_BINDINGS,
   values: SANITIZE_VALUES,
@@ -109,10 +113,12 @@ export function emitSanitizeChain(
   return output;
 }
 
+/** Emits deterministic source for the JIT emit sanitize source operation. */
 export function emitSanitizeSource(schema: ATS.AnyTypeSchema): string {
   return emitScrub(schema, selectSanitize).source;
 }
 
+/** Creates the JIT compile sanitize artifact from the supplied input. */
 export function compileSanitize<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions

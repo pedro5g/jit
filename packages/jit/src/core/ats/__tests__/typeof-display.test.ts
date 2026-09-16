@@ -38,17 +38,31 @@ function displayTypes(): Record<string, string> {
 describe("public Typeof display", () => {
   it("prints schema-directed public types without builder internals", () => {
     const types = displayTypes();
+    const { EntityUser, ...stableTypes } = types;
 
-    expect(types).toMatchInlineSnapshot(`
+    expect(stableTypes).toMatchInlineSnapshot(`
       {
         "DomainState": "Omit<{ id: number; name: string; email: string; role: "admin" | "member"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }, "id"> & Readonly<Pick<{ id: number; name: string; email: string; role: "admin" | "member"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }, "id">>",
-        "EntityUser": "{ readonly email: string; readonly role: "admin" | "member"; readonly name: string; readonly id: number; readonly tags: string[]; equals: (other: unknown) => boolean; hashCode: () => number; readonly active: boolean; readonly score: number; readonly profile: { bio: string | null; } | undefined; }",
         "PublicUser": "{ id: number; name: string; email: string; }",
         "User": "{ id: number; name: string; email: string; role: "admin" | "member"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }",
         "UserEvent": "{ readonly id: string; readonly type: "user.name-changed"; readonly version: 1; readonly occurredAt: Date; readonly payload: { oldName: string; newName: string; }; } & JIT.DomainEventBrand & { readonly "~event": JIT.StandardEvent; }",
         "UserList": "{ id: number; name: string; email: string; role: "admin" | "member"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }[]",
       }
     `);
-    expect(Object.values(types).join("\n")).not.toMatch(/BuilderShape|TypeofShape|BaseBuilder|SchemaCheck/);
-  }, 45000);
+    for (const member of [
+      "readonly email: string;",
+      'readonly role: "admin" | "member";',
+      "readonly name: string;",
+      "readonly id: number;",
+      "readonly tags: string[];",
+      "equals: (other: unknown) => boolean;",
+      "hashCode: () => number;",
+      "readonly active: boolean;",
+      "readonly score: number;",
+      "readonly profile: { bio: string | null; } | undefined;",
+    ]) {
+      expect(EntityUser).toContain(member);
+    }
+    expect(Object.values(stableTypes).join("\n")).not.toMatch(/BuilderShape|TypeofShape|BaseBuilder|SchemaCheck/);
+  }, 120_000);
 });

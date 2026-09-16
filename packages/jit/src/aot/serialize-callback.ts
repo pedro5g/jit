@@ -135,7 +135,7 @@ function serializeFunction(value: Function): string | undefined {
 
   try {
     // Syntax validation happens only in the build-time compilation path.
-    Function(`return (${source});`);
+    globalThis.Function(`return (${source});`);
   } catch {
     return undefined;
   }

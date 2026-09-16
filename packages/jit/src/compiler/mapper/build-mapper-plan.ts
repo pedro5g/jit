@@ -26,11 +26,13 @@ export type MapperFieldSource =
   | { readonly kind: "computed"; readonly binding: string }
   | { readonly kind: "default"; readonly from: string | undefined; readonly binding: string };
 
+/** Describes the JIT mapper field plan contract used by the public API. */
 export interface MapperFieldPlan {
   readonly key: string;
   readonly source: MapperFieldSource;
 }
 
+/** Describes the JIT mapper plan contract used by the public API. */
 export interface MapperPlan {
   readonly fields: readonly MapperFieldPlan[];
   readonly bindingNames: readonly string[];
@@ -43,6 +45,7 @@ interface MapperOverrideRecord {
   readonly default?: unknown;
 }
 
+/** Describes the JIT mapper overrides input contract used by the public API. */
 export type MapperOverridesInput = Readonly<Record<string, unknown>>;
 
 /**

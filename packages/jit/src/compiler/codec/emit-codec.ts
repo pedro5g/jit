@@ -563,7 +563,7 @@ function emitBaseSizeInner(context: CodecContext, schema: AnySchema, valueExpr: 
       const keys = nextVar(context, "k");
       const index = nextVar(context, "i");
 
-      writer.line(`const ${keys} = Object.keys(${holder});`);
+      writer.dynamicLine(`const ${keys} = Object.keys(${holder});`);
       writer.line("size += 4;");
       writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
       writer.indent(() => {
@@ -832,7 +832,7 @@ function emitBaseWriteInner(context: CodecContext, schema: AnySchema, valueExpr:
       const keys = nextVar(context, "k");
       const index = nextVar(context, "i");
 
-      writer.line(`const ${keys} = Object.keys(${holder});`);
+      writer.dynamicLine(`const ${keys} = Object.keys(${holder});`);
       writer.line(`dv.setUint32(o, ${keys}.length, true); o += 4;`);
       writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
       writer.indent(() => {

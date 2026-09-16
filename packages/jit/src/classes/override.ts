@@ -6,6 +6,7 @@
  */
 const OVERRIDE = Symbol("jit.class.override");
 
+/** Provides the JIT override descriptor operation for the supplied input. */
 export interface OverrideDescriptor<TValue = unknown> {
   readonly [OVERRIDE]: true;
   readonly value: TValue;
@@ -20,6 +21,7 @@ export function override<TThis extends object, TResult = unknown>(
   value: (this: TThis, ...args: never[]) => TResult
 ): OverrideDescriptor<(this: TThis, ...args: never[]) => TResult>;
 export function override<TValue>(value: TValue): OverrideDescriptor<TValue>;
+/** Provides the JIT override operation for the supplied input. */
 export function override<TValue>(value: TValue): OverrideDescriptor<TValue> {
   return Object.freeze({
     [OVERRIDE]: true as const,
@@ -27,6 +29,7 @@ export function override<TValue>(value: TValue): OverrideDescriptor<TValue> {
   });
 }
 
+/** Returns whether the JIT is override descriptor condition holds. */
 export function isOverrideDescriptor(value: unknown): value is OverrideDescriptor {
   return typeof value === "object" && value !== null && (value as Partial<OverrideDescriptor>)[OVERRIDE] === true;
 }

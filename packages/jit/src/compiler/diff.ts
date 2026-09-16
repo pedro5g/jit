@@ -31,6 +31,7 @@ export type DiffChange<T = unknown> =
  * @returns The structural changes needed to transform `left` into `right`.
  */
 export type Diff<T = unknown> = (left: T, right: T) => DiffChange[];
+/** Describes the JIT diff method contract used by the public API. */
 export type DiffMethod<T = unknown> = (this: T, other: T) => DiffChange[];
 
 /**

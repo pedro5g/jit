@@ -37,6 +37,7 @@ export interface RuleOutcomeDescriptor {
   readonly binding?: string | undefined;
 }
 
+/** Describes the JIT rule descriptor contract used by the public API. */
 export interface RuleDescriptor {
   readonly id: string;
   readonly condition: QueryConditionNode;
@@ -49,6 +50,7 @@ export interface RuleDescriptor {
   readonly outcome: RuleOutcomeDescriptor | undefined;
 }
 
+/** Describes the JIT rules descriptor contract used by the public API. */
 export interface RulesDescriptor {
   readonly subject: ATS.AnyTypeSchema;
   readonly inputs?: ATS.AnyTypeSchema | undefined;
@@ -59,6 +61,7 @@ export interface RulesDescriptor {
   readonly bindings: readonly unknown[];
 }
 
+/** Describes the JIT rules sink contract used by the public API. */
 export type RulesSink =
   | "plan"
   | "test"
@@ -74,6 +77,7 @@ export type RulesSink =
   | "predicate"
   | "explain";
 
+/** Describes the JIT rules explanation contract used by the public API. */
 export interface RulesExplanation {
   readonly matched: readonly string[];
   readonly evaluated: readonly string[];
@@ -95,6 +99,7 @@ export interface RulesInspection {
   readonly strategy: "inline";
 }
 
+/** Describes the JIT rules emit options contract used by the public API. */
 export interface RulesEmitOptions {
   /** Rule id for the `predicate` sink. */
   readonly ruleId?: string | undefined;
@@ -108,6 +113,7 @@ type RuleDeclarationOutcome = Omit<RuleOutcomeDescriptor, "fields" | "binding"> 
   readonly factory?: unknown;
 };
 
+/** Describes the JIT rule declaration contract used by the public API. */
 export type RuleDeclaration = {
   readonly id: string;
   readonly condition: QueryConditionNode;
@@ -651,6 +657,7 @@ function emitBindings(writer: CodeWriter, bindings: readonly SharedBinding[]): v
   for (const binding of bindings) writer.line(`const ${binding.local} = ${binding.source};`);
 }
 
+/** Emits deterministic source for the JIT emit rules test source operation. */
 export function emitRulesTestSource(descriptor: RulesDescriptor): string {
   const writer = new CodeWriter();
 
@@ -671,6 +678,7 @@ export function emitRulesTestSource(descriptor: RulesDescriptor): string {
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit rules predicate source operation. */
 export function emitRulesPredicateSource(descriptor: RulesDescriptor, ruleId: string): string {
   const rule = descriptor.rules.find((candidate) => candidate.id === ruleId);
 
@@ -680,6 +688,7 @@ export function emitRulesPredicateSource(descriptor: RulesDescriptor, ruleId: st
   return `function rulesPredicate(${paramList(descriptor, SUBJECT)}) {\n  return ${emitCondition(rule, EMPTY_PLAN)};\n}\n`;
 }
 
+/** Emits deterministic source for the JIT emit rules some source operation. */
 export function emitRulesSomeSource(descriptor: RulesDescriptor): string {
   const rules = descriptor.rules.filter((rule) => rule.constant !== false);
   const always = rules.some((rule) => rule.constant === true);
@@ -692,6 +701,7 @@ export function emitRulesSomeSource(descriptor: RulesDescriptor): string {
   return `function rulesSome(${paramList(descriptor, SUBJECT)}) {\n  return ${expression};\n}\n`;
 }
 
+/** Emits deterministic source for the JIT emit rules first source operation. */
 export function emitRulesFirstSource(descriptor: RulesDescriptor): string {
   const writer = new CodeWriter();
 
@@ -711,6 +721,7 @@ export function emitRulesFirstSource(descriptor: RulesDescriptor): string {
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit rules match source operation. */
 export function emitRulesMatchSource(descriptor: RulesDescriptor): string {
   const rules = orderedRules(descriptor);
   const plan = planShared(rules);
@@ -739,6 +750,7 @@ function outcomeRules(descriptor: RulesDescriptor): readonly RuleDescriptor[] {
   return orderedRules(descriptor).filter((rule) => rule.outcome !== undefined);
 }
 
+/** Emits deterministic source for the JIT emit rules run source operation. */
 export function emitRulesRunSource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const rules = outcomeRules(descriptor);
   const plan = planShared(rules);
@@ -762,6 +774,7 @@ export function emitRulesRunSource(descriptor: RulesDescriptor, options: RulesEm
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit rules visitor source operation. */
 export function emitRulesVisitorSource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const rules = orderedRules(descriptor);
   const plan = planShared(rules);
@@ -784,6 +797,7 @@ export function emitRulesVisitorSource(descriptor: RulesDescriptor, options: Rul
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit rules iterator source operation. */
 export function emitRulesIteratorSource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const rules = outcomeRules(descriptor);
   const plan = planShared(rules);
@@ -827,6 +841,7 @@ function emitManyBody(
   writer.line("}");
 }
 
+/** Emits deterministic source for the JIT emit rules many source operation. */
 export function emitRulesManySource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const rules = outcomeRules(descriptor);
   const plan = planShared(rules, true);
@@ -843,6 +858,7 @@ export function emitRulesManySource(descriptor: RulesDescriptor, options: RulesE
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit rules many visitor source operation. */
 export function emitRulesManyVisitorSource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const rules = orderedRules(descriptor);
   const plan = planShared(rules, true);
@@ -864,6 +880,7 @@ export function emitRulesManyVisitorSource(descriptor: RulesDescriptor, options:
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit rules many iterator source operation. */
 export function emitRulesManyIteratorSource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const rules = outcomeRules(descriptor);
   const plan = planShared(rules, true);
@@ -877,6 +894,7 @@ export function emitRulesManyIteratorSource(descriptor: RulesDescriptor, options
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit rules explain source operation. */
 export function emitRulesExplainSource(descriptor: RulesDescriptor): string {
   const rules = orderedRules(descriptor);
   const plan = planShared(rules);
@@ -980,6 +998,7 @@ function emitRulesPlanSource(descriptor: RulesDescriptor, options: RulesEmitOpti
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit rules sink source operation. */
 export function emitRulesSinkSource(
   descriptor: RulesDescriptor,
   sink: RulesSink,
@@ -1015,6 +1034,7 @@ export function emitRulesSinkSource(
   }
 }
 
+/** Creates the JIT compile rules sink artifact from the supplied input. */
 export function compileRulesSink<TFunction extends (...args: never[]) => unknown>(
   descriptor: RulesDescriptor,
   sink: Exclude<RulesSink, "plan">,
@@ -1069,6 +1089,7 @@ export function inspectRules(descriptor: RulesDescriptor): RulesInspection {
 /* Query lowering                                                             */
 /* -------------------------------------------------------------------------- */
 
+/** Describes the JIT lowered rule condition contract used by the public API. */
 export type LoweredRuleCondition =
   | { readonly kind: "always"; readonly bindings: readonly unknown[] }
   | { readonly kind: "never"; readonly bindings: readonly unknown[] }

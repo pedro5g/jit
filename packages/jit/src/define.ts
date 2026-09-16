@@ -155,6 +155,7 @@ type RuntimeCollectionDescriptor = {
   select(...fields: string[]): RuntimeCollectionDescriptor;
 };
 
+/** Describes the JIT typeof contract used by the public API. */
 export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
 export type { Strict } from "./core/builder/types.js";
 
@@ -3018,6 +3019,7 @@ export const JIT = {
   };
 };
 
+/** Describes the JIT namespace contract used by the public API. */
 export namespace JIT {
   export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
   export type Input<TSchemaLike> = import("./core/ats/input.js").Input<TSchemaLike>;

@@ -4,6 +4,7 @@ import type { ExecutionPlan, ExecutionStage } from "./execution-plan.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { canUseFastParse } from "./validate/emit-validate.js";
 
+/** Describes the JIT semantic fact kind contract used by the public API. */
 export type SemanticFactKind =
   | "IsString"
   | "IsNumber"
@@ -35,8 +36,10 @@ export interface SemanticEffects {
   readonly mutates: boolean;
 }
 
+/** Describes the JIT execution barrier contract used by the public API. */
 export type ExecutionBarrier = "throws" | "allocation" | "async" | "user-code" | "mutation" | "construction";
 
+/** Describes the JIT analyzed execution stage contract used by the public API. */
 export interface AnalyzedExecutionStage {
   readonly stage: ExecutionStage;
   readonly factsBefore: readonly SemanticFact[];
@@ -45,6 +48,7 @@ export interface AnalyzedExecutionStage {
   readonly barriers: readonly ExecutionBarrier[];
 }
 
+/** Describes the JIT execution optimization pass contract used by the public API. */
 export interface ExecutionOptimizationPass {
   readonly name: string;
   run(plan: ExecutionPlan): ExecutionPlan;

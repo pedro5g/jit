@@ -2,6 +2,7 @@ import type { SchemaAnnotations } from "./schema-annotation.js";
 import type { AnyTypeName } from "./type-name.js";
 import type { BaseSchema } from "./type-schema.js";
 
+/** Creates the JIT create schema artifact from the supplied input. */
 export function createSchema<TOutput, TName extends AnyTypeName, TDef>(
   type: TName,
   def: Readonly<TDef>,

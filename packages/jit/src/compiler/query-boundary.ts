@@ -2,7 +2,7 @@ import { JITError } from "../errors/index.js";
 import { queryBoundaryMaxCost } from "./query-cost.js";
 
 /** One filter capability resolved before an untrusted request is parsed. */
-export interface QueryBoundaryField {
+interface QueryBoundaryField {
   readonly path: readonly string[];
   readonly operators: readonly string[];
   /**
@@ -15,18 +15,18 @@ export interface QueryBoundaryField {
   readonly shorthand: boolean;
 }
 
-export interface QueryBoundaryRelation {
+interface QueryBoundaryRelation {
   readonly path: readonly string[];
   readonly boundary: QueryBoundary;
 }
 
-export interface QueryBoundaryCollection {
+interface QueryBoundaryCollection {
   readonly path: readonly string[];
   readonly operations: readonly ("some" | "every" | "none")[];
   readonly boundary: QueryBoundary;
 }
 
-export interface QueryBoundaryLogical {
+interface QueryBoundaryLogical {
   readonly and: boolean;
   readonly or: boolean;
   readonly not: boolean;
@@ -46,7 +46,7 @@ export type QueryBoundaryPagination =
       readonly maxLimit: number;
     };
 
-export interface QueryBoundaryLimits {
+interface QueryBoundaryLimits {
   readonly maxFilters: number;
   readonly maxConditions: number;
   readonly maxSortFields: number;

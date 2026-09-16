@@ -15,6 +15,7 @@ export interface ClassifiedDeclarations {
   readonly schemas: Record<string, SchemaInput>;
 }
 
+/** Describes the JIT declaration kind contract used by the public API. */
 export type DeclarationKind = "artifact" | "group" | "schema";
 
 /** Decides what a single top-level binding contributes to generation. */

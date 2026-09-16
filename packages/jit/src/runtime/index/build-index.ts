@@ -1,3 +1,4 @@
+/** Builds a map from an item key; later items replace earlier duplicate keys. */
 export function buildIndex<TItem, TKey extends keyof TItem>(
   items: readonly TItem[],
   key: TKey

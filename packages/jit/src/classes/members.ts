@@ -1,7 +1,7 @@
 import type { AnyTypeSchema } from "../core/ats/index.js";
 
-export type ResolvedMemberKind = "field" | "method" | "getter" | "setter" | "factory";
-export type ResolvedMemberSource = "schema" | "preset" | "capability" | "extension" | "override";
+type ResolvedMemberKind = "field" | "method" | "getter" | "setter" | "factory";
+type ResolvedMemberSource = "schema" | "preset" | "capability" | "extension" | "override";
 
 /** One declaration-level member used for collision and override resolution. */
 export interface ResolvedClassMember {

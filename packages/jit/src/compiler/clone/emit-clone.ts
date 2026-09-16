@@ -8,6 +8,7 @@ import { emitSchemaGuard, literalDiscriminatorValue } from "../source/guard.js";
 import { emitLiteral, emitObjectKey } from "../source/literal.js";
 import type { CloneIRNode, CloneIRProgram } from "./build-clone-ir.js";
 
+/** Describes the JIT clone bindings contract used by the public API. */
 export interface CloneBindings {
   readonly names: string[];
   readonly values: unknown[];
@@ -20,6 +21,7 @@ interface CloneEmitContext {
   readonly ids: Map<Function, string>;
 }
 
+/** Emits deterministic source for the JIT emit clone operation. */
 export function emitClone(program: CloneIRProgram): string {
   const writer = new CodeWriter();
   const context = createContext(false, true);
@@ -34,10 +36,12 @@ export function emitClone(program: CloneIRProgram): string {
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit clone body operation. */
 export function emitCloneBody(program: CloneIRProgram): string {
   return emitCloneBodyWithBindings(program).source;
 }
 
+/** Emits deterministic source for the JIT emit clone body with bindings operation. */
 export function emitCloneBodyWithBindings(
   program: CloneIRProgram,
   options: {
@@ -321,7 +325,7 @@ function emitRecordClone(
   const key = state.nextVar("key");
   const clonedValue = state.nextVar("clonedValue");
 
-  writer.line(`const ${keys} = Object.keys(${source});`);
+  writer.dynamicLine(`const ${keys} = Object.keys(${source});`);
   writer.line(`const ${target} = {};`);
   writer.line(`for (let ${index} = 0, ${len} = ${keys}.length; ${index} < ${len}; ${index}++) {`);
   writer.indent(() => {

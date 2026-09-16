@@ -32,6 +32,7 @@ type PathValue<TState, TPath extends string> = TPath extends `${infer THead}.${i
     ? TState[TPath]
     : never;
 
+/** Provides the JIT derived explanation operation for the supplied input. */
 export interface DerivedExplanation {
   /** Fields the computation reads, in the order it reads them. */
   readonly reads: readonly string[];
@@ -64,6 +65,7 @@ export interface DerivedComputation<TState, TResult> {
   layout(): ChangeLayout;
 }
 
+/** Provides the JIT derived builder operation for the supplied input. */
 export interface DerivedBuilder<TState> {
   /** Declares the fields the computation reads; they become its dependencies. */
   select<const TPaths extends readonly DerivablePath<TState>[]>(

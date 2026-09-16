@@ -2,6 +2,7 @@ import type { IRProgram } from "../ir/ir.js";
 import { CodeWriter } from "./code-writer.js";
 import { emitNode } from "./emit-node.js";
 
+/** Emits deterministic source for the JIT emit equal operation. */
 export function emitEqual(program: IRProgram): string {
   const writer = new CodeWriter();
   const [left, right] = program.params;
@@ -16,6 +17,7 @@ export function emitEqual(program: IRProgram): string {
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit equal body operation. */
 export function emitEqualBody(program: IRProgram): string {
   const writer = new CodeWriter();
 

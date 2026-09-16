@@ -39,7 +39,7 @@ export type CollectionMutationKind =
 
 export type CollectionMutationMode = "first" | "all";
 
-export interface CollectionMutationFacts {
+interface CollectionMutationFacts {
   readonly reads: readonly (readonly string[])[];
   readonly writes: readonly (readonly string[])[];
   readonly changesLength: boolean;

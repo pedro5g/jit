@@ -70,6 +70,7 @@ type TypeofParamShape<TShape extends ParamSchemaShape> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema> ? ATS.TypeofSchema<TSchema> : never;
 };
 type QueryComparable<TValue> = TValue | QueryConstRef<TValue> | QueryParamRef;
+/** Describes the JIT query runtime params contract used by the public API. */
 export type QueryRuntimeParams<TParams extends Readonly<Record<string, unknown>>> = {
   readonly [TKey in keyof TParams]: QueryParamRef<TParams[TKey]>;
 };
@@ -279,6 +280,7 @@ export interface QueryBuilderOps<
   explain(outputMode?: "eager-array" | "generator" | "async-generator" | "visitor"): QueryExecutionPlan;
 }
 
+/** Describes the JIT query sinks contract used by the public API. */
 export interface QuerySinks<
   TSchema extends ATS.AnyTypeSchema,
   TOutput,
@@ -314,6 +316,7 @@ export type BinaryQueryBuilder<
 > = BinaryQueryCompiledFunction<TElement, TResult, TParams> &
   BinaryQueryBuilderOps<TElement, TOutput, TResult, TParams>;
 
+/** Describes the JIT binary query builder ops contract used by the public API. */
 export interface BinaryQueryBuilderOps<
   TElement,
   TOutput,
@@ -352,21 +355,25 @@ export interface BinaryQueryBuilderOps<
   ): BinaryQueryBuilder<TElement, TOutput, number | undefined, TParams>;
 }
 
+/** Describes the JIT query param ref contract used by the public API. */
 export interface QueryParamRef<TValue = unknown> {
   readonly __jitQueryValue: "param";
   readonly name: string;
   readonly _type?: TValue;
 }
 
+/** Describes the JIT query const ref contract used by the public API. */
 export interface QueryConstRef<TValue = unknown> {
   readonly __jitQueryValue: "const";
   readonly value: TValue;
 }
 
+/** Provides the JIT param operation for the supplied input. */
 export function param<const TName extends string>(name: TName): QueryParamRef<never> & { readonly name: TName } {
   return { __jitQueryValue: "param", name, _type: null as never };
 }
 
+/** Provides the JIT constant operation for the supplied input. */
 export function constant<const TValue extends string | number | bigint | boolean | null | undefined>(
   value: TValue
 ): QueryConstRef<TValue> {
@@ -392,6 +399,7 @@ export function query<TSchema extends ATS.AnyTypeSchema>(
   CollectionElementOf<ATS.TypeofSchema<TSchema>>[]
 >;
 
+/** Provides the JIT query operation for the supplied input. */
 export function query(schema: unknown): unknown {
   if (isBinaryArray(schema) || isBinaryRowSet(schema)) {
     return createBinaryQueryBuilder(schema, [], [], []);
@@ -923,6 +931,7 @@ function createPatchBindings(
   return { patch: boundPatch, bindings };
 }
 
+/** Creates the JIT create condition builder artifact from the supplied input. */
 export function createConditionBuilder(startIndex: number): {
   readonly builder: QueryConditionBuilder<unknown>;
   readonly bindings: readonly unknown[];

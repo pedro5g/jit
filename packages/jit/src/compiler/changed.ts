@@ -27,6 +27,7 @@ interface ChangedField {
   readonly schema: ATS.AnyTypeSchema;
 }
 
+/** Describes the JIT changed descriptor contract used by the public API. */
 export interface ChangedDescriptor {
   readonly tree: ProjectionTree;
   readonly representation: MaskRepresentation;
@@ -52,6 +53,7 @@ export function allFieldPaths(schema: ATS.AnyTypeSchema, operation: string): rea
   return Object.keys(expectProjectionObject(schema, operation).def.props);
 }
 
+/** Returns the JIT resolve changed descriptor result for the supplied input. */
 export function resolveChangedDescriptor(schema: ATS.AnyTypeSchema, paths: readonly string[]): ChangedDescriptor {
   const tree = buildProjectionTree(schema, paths, "JIT.compare.changed()");
   const fields = tree.paths.map((path) => {
@@ -135,10 +137,12 @@ function leafSchema(tree: ProjectionTree, path: string): ATS.AnyTypeSchema {
   return leafSchema((node as { children: ProjectionTree }).children, path.slice(dot + 1));
 }
 
+/** Provides the JIT changed cache key operation for the supplied input. */
 export function changedCacheKey(descriptor: ChangedDescriptor): string {
   return `changed:${descriptor.representation}:${descriptor.fields.map((field) => field.path).join(",")}`;
 }
 
+/** Creates the JIT compile changed artifact from the supplied input. */
 export function compileChanged<TValue, TMask>(
   schema: ATS.AnyTypeSchema,
   descriptor: ChangedDescriptor,

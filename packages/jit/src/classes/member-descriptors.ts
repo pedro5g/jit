@@ -6,8 +6,10 @@ import { JITError } from "../errors/index.js";
 
 const CLASS_MEMBER_DESCRIPTOR = Symbol("jit.class.member");
 
+/** Visibility applied to a generated class member. */
 export type ClassMemberVisibility = "public" | "protected" | "private";
 
+/** Describes a persisted field and its optional accessor behavior. */
 export interface ClassFieldMemberDescriptor {
   readonly kind: "field";
   readonly schema?: SchemaInput<ATS.AnyTypeSchema>;
@@ -17,6 +19,7 @@ export interface ClassFieldMemberDescriptor {
   readonly noConstructor?: true;
 }
 
+/** Describes a validated class method implementation. */
 export interface ClassMethodMemberDescriptor {
   readonly kind: "method";
   readonly schema: ATS.AnyTypeSchema;
@@ -25,6 +28,7 @@ export interface ClassMethodMemberDescriptor {
   readonly async?: boolean;
 }
 
+/** Describes an accessor backed by a schema field or custom implementation. */
 export interface ClassAccessorMemberDescriptor {
   readonly kind: "accessor";
   /** Schema source for a persisted field-backed accessor. */
@@ -34,6 +38,7 @@ export interface ClassAccessorMemberDescriptor {
   readonly setter?: true | Function;
 }
 
+/** Describes a named factory used during create or hydrate construction. */
 export interface ClassFactoryMemberDescriptor {
   readonly kind: "factory";
   readonly name: string;
@@ -41,16 +46,19 @@ export interface ClassFactoryMemberDescriptor {
   readonly phase: "create" | "hydrate";
 }
 
+/** Construction context passed to a custom class factory. */
 export interface ClassFactoryContext<TInstance = unknown> {
   readonly construct: (state: unknown) => TInstance;
 }
 
+/** Union of supported runtime class member declarations. */
 export type ClassMemberDefinition =
   | ClassFieldMemberDescriptor
   | ClassMethodMemberDescriptor
   | ClassAccessorMemberDescriptor
   | ClassFactoryMemberDescriptor;
 
+/** Branded wrapper accepted by `.extends()` for class member declarations. */
 export interface ClassMemberDescriptor<TDefinition extends ClassMemberDefinition = ClassMemberDefinition> {
   readonly [CLASS_MEMBER_DESCRIPTOR]: true;
   readonly definition: TDefinition;
@@ -111,8 +119,10 @@ type MergedDefinition<
       : never
     : never;
 
+/** Schema input accepted for a class method parameter or result. */
 export type ClassMethodInput = SchemaInput<ATS.AnyTypeSchema>;
 
+/** Input and output schemas for a class method builder. */
 export interface ClassMethodOptions<
   TInput extends readonly ClassMethodInput[],
   TOutput extends ClassMethodInput | undefined = undefined,
@@ -130,6 +140,7 @@ type UnwrapInput<TInput extends readonly ClassMethodInput[]> = {
 type UnwrapOutput<TOutput extends ClassMethodInput | undefined> =
   TOutput extends SchemaInput<infer TSchema extends ATS.AnyTypeSchema> ? TSchema : undefined;
 
+/** Attaches a synchronous or asynchronous implementation to a class method schema. */
 export interface ClassMethodBuilder<
   TInput extends readonly ClassMethodInput[],
   TOutput extends ClassMethodInput | undefined = undefined,
@@ -162,6 +173,7 @@ export interface ClassMethodBuilder<
   >;
 }
 
+/** Returns whether a value was created by a class member descriptor helper. */
 export function isClassMemberDescriptor(value: unknown): value is ClassMemberDescriptor {
   return (
     typeof value === "object" &&
@@ -259,6 +271,7 @@ function mergeDefinitions(
   } as ClassFieldMemberDescriptor | ClassAccessorMemberDescriptor);
 }
 
+/** Declares a public field, accessor, or method member. */
 export function classPublic<
   TValue extends SchemaInput<ATS.AnyTypeSchema> | ClassMemberDescriptor,
   const TMembers extends readonly ClassMemberDescriptor[],
@@ -266,6 +279,7 @@ export function classPublic<
 export function classPublic<const TMembers extends readonly ClassMemberDescriptor[]>(
   ...members: TMembers
 ): ClassMemberDescriptor<MergedDefinition<undefined, TMembers, "public">>;
+/** Provides the JIT class public operation for the supplied input. */
 export function classPublic(
   value?: SchemaInput<ATS.AnyTypeSchema> | ClassMemberDescriptor,
   ...members: readonly ClassMemberDescriptor[]
@@ -273,6 +287,7 @@ export function classPublic(
   return mergeDefinitions(value === undefined ? members : [value, ...members], "public");
 }
 
+/** Declares a protected field, accessor, or method member. */
 export function classProtected<
   TValue extends SchemaInput<ATS.AnyTypeSchema> | ClassMemberDescriptor,
   const TMembers extends readonly ClassMemberDescriptor[],
@@ -280,6 +295,7 @@ export function classProtected<
 export function classProtected<const TMembers extends readonly ClassMemberDescriptor[]>(
   ...members: TMembers
 ): ClassMemberDescriptor<MergedDefinition<undefined, TMembers, "protected">>;
+/** Provides the JIT class protected operation for the supplied input. */
 export function classProtected(
   value?: SchemaInput<ATS.AnyTypeSchema> | ClassMemberDescriptor,
   ...members: readonly ClassMemberDescriptor[]
@@ -287,6 +303,7 @@ export function classProtected(
   return mergeDefinitions(value === undefined ? members : [value, ...members], "protected");
 }
 
+/** Declares a private field, accessor, or method member. */
 export function classPrivate<
   TValue extends SchemaInput<ATS.AnyTypeSchema> | ClassMemberDescriptor,
   const TMembers extends readonly ClassMemberDescriptor[],
@@ -294,6 +311,7 @@ export function classPrivate<
 export function classPrivate<const TMembers extends readonly ClassMemberDescriptor[]>(
   ...members: TMembers
 ): ClassMemberDescriptor<MergedDefinition<undefined, TMembers, "private">>;
+/** Provides the JIT class private operation for the supplied input. */
 export function classPrivate(
   value?: SchemaInput<ATS.AnyTypeSchema> | ClassMemberDescriptor,
   ...members: readonly ClassMemberDescriptor[]
@@ -301,6 +319,7 @@ export function classPrivate(
   return mergeDefinitions(value === undefined ? members : [value, ...members], "private");
 }
 
+/** Declares a getter backed by a schema or custom implementation. */
 export function classGetter<TSchema extends SchemaInput<ATS.AnyTypeSchema>>(
   schema: TSchema
 ): ClassMemberDescriptor<{ readonly kind: "accessor"; readonly schema: TSchema; readonly getter: true }>;
@@ -308,6 +327,7 @@ export function classGetter<TImplementation extends Function>(
   implementation: TImplementation
 ): ClassMemberDescriptor<{ readonly kind: "accessor"; readonly getter: TImplementation }>;
 export function classGetter(): ClassMemberDescriptor<{ readonly kind: "accessor"; readonly getter: true }>;
+/** Provides the JIT class getter operation for the supplied input. */
 export function classGetter(schemaOrImplementation?: SchemaInput<ATS.AnyTypeSchema> | Function): ClassMemberDescriptor {
   if (typeof schemaOrImplementation === "function")
     return descriptor({ kind: "accessor", getter: schemaOrImplementation });
@@ -318,10 +338,12 @@ export function classGetter(schemaOrImplementation?: SchemaInput<ATS.AnyTypeSche
   });
 }
 
+/** Declares a setter backed by a custom implementation. */
 export function classSetter<TImplementation extends Function>(
   implementation: TImplementation
 ): ClassMemberDescriptor<{ readonly kind: "accessor"; readonly setter: TImplementation }>;
 export function classSetter(): ClassMemberDescriptor<{ readonly kind: "accessor"; readonly setter: true }>;
+/** Provides the JIT class setter operation for the supplied input. */
 export function classSetter(implementation?: Function): ClassMemberDescriptor {
   return descriptor({ kind: "accessor", setter: implementation ?? true });
 }
@@ -337,12 +359,14 @@ type NoConstructorDefinition<TValue> =
         readonly noConstructor: true;
       };
 
+/** Declares a field that is excluded from generated constructor input. */
 export function classNoConstructor<TValue extends SchemaInput<ATS.AnyTypeSchema>>(
   value: TValue
 ): ClassMemberDescriptor<NoConstructorDefinition<TValue>>;
 export function classNoConstructor<TDefinition extends ClassFieldMemberDescriptor>(
   value: ClassMemberDescriptor<TDefinition>
 ): ClassMemberDescriptor<NoConstructorDefinition<ClassMemberDescriptor<TDefinition>>>;
+/** Provides the JIT class no constructor operation for the supplied input. */
 export function classNoConstructor(
   value: SchemaInput<ATS.AnyTypeSchema> | ClassMemberDescriptor<ClassFieldMemberDescriptor>
 ): ClassMemberDescriptor {
@@ -358,6 +382,7 @@ export function classNoConstructor(
   } as ClassFieldMemberDescriptor);
 }
 
+/** Builds a method descriptor from input and output schemas. */
 export function classMethod<
   const TInput extends readonly ClassMethodInput[],
   TOutput extends ClassMethodInput | undefined = undefined,
@@ -380,11 +405,13 @@ export function classMethod<
   } as ClassMethodBuilder<TInput, TOutput>;
 }
 
+/** Declares a custom create or hydrate factory for a runtime class. */
 export function classFactory<TData = unknown, TInstance = unknown>(
   name: string,
   implementation: (data: TData, context: ClassFactoryContext<TInstance>) => unknown,
   phase?: "create" | "hydrate"
 ): ClassMemberDescriptor<ClassFactoryMemberDescriptor>;
+/** Provides the JIT class factory operation for the supplied input. */
 export function classFactory(
   name: string,
   implementation: Function,

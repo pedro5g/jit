@@ -207,6 +207,9 @@ var CodeWriter = class {
   line(text = "") {
     this.#lines.push(`${"  ".repeat(this.#indent)}${text}`);
   }
+  dynamicLine(text) {
+    this.line(text);
+  }
   indent(fn) {
     this.#indent++;
     fn();
@@ -233,13 +236,11 @@ __export(parse_exports, {
   createIdentifier: () => createIdentifier,
   escapeString: () => escapeString,
   ident: () => ident,
-  index_accessor: () => index_accessor,
   isQuoted: () => isQuoted,
   isValidIdentifier: () => isValidIdentifier,
   join_path: () => join_path,
   key_access: () => key_access,
   parseKey: () => parseKey,
-  stringify_key: () => stringify_key,
   stringify_literal: () => stringify_literal
 });
 var isQuoted = (text) => {
@@ -520,12 +521,10 @@ var utils_exports = {};
 __export(utils_exports, {
   Is_Array: () => Is_Array,
   Object_hasOwn: () => Object_hasOwn,
-  Object_is: () => Object_is,
   Object_keys: () => Object_keys
 });
 var Object_keys = globalThis.Object.keys;
 var Object_hasOwn = (x, k) => !!x && (typeof x === "object" || typeof x === "function") && globalThis.Object.prototype.hasOwnProperty.call(x, k);
-var Object_is = globalThis.Object.is;
 var Is_Array = globalThis.Array.isArray;
 
 // ../../packages/jit/src/core/ats/type-name.ts
@@ -2103,7 +2102,7 @@ function emitCanonicalFunction(writer, object2, name, nested) {
   writer.line(`function ${name}(value) {`);
   writer.indent(() => {
     writer.line('if (value === null || typeof value !== "object") return value;');
-    writer.line("const keys = Object.keys(value);");
+    writer.dynamicLine("const keys = Object.keys(value);");
     const ordered = keys.map((key, index2) => `keys[${index2}] === ${JSON.stringify(key)}`).join(" && ");
     writer.line(`let canonical = keys.length === ${keys.length}${ordered === "" ? "" : ` && ${ordered}`};`);
     for (const [key, child] of children2) {
@@ -2969,6 +2968,45 @@ function buildSchemaNode(schema, buildNode) {
     default:
       return void 0;
   }
+}
+function buildStructuralIR(schema, recursive, operation) {
+  return buildRecursiveProgram(
+    schema,
+    (current, recurse) => buildStructuralNode(current, recurse, operation),
+    (id) => ({ kind: "recursive", id }),
+    recursive
+  );
+}
+function buildStructuralNode(schema, recurse, operation) {
+  if (schema.type === TypeName.date) return { kind: "date" };
+  if (schema.type === TypeName.union) {
+    const union3 = schema;
+    if (union3.def.options.every((option) => isPrimitiveLikeSchema(option))) return { kind: "reuse" };
+    return {
+      kind: "union",
+      options: union3.def.options.map((option) => ({ schema: option, node: recurse(option) }))
+    };
+  }
+  if (schema.type === TypeName.intersection) {
+    const flattened = flattenObjectIntersection(schema);
+    if (flattened !== void 0) return buildStructuralNode(flattened, recurse, operation);
+    return {
+      kind: "intersection",
+      options: schema.def.options.map(recurse)
+    };
+  }
+  if (schema.type === TypeName.discriminatedUnion) {
+    const discriminated = schema;
+    return {
+      kind: "discriminatedUnion",
+      discriminator: discriminated.def.discriminator,
+      options: discriminated.def.options.map((option) => ({ schema: option, node: recurse(option) }))
+    };
+  }
+  const node = buildSchemaNode(schema, recurse);
+  if (node) return node;
+  if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
+  throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler ${operation} IR for type: ${schema.type}`);
 }
 function isPrimitiveLikeSchema(schema) {
   switch (schema.type) {
@@ -4349,56 +4387,8 @@ function compileChanged(schema, descriptor2, options) {
 
 // ../../packages/jit/src/compiler/clone/build-clone-ir.ts
 function buildCloneIR(schema) {
-  const { body, helpers } = buildRecursiveProgram(
-    schema,
-    (current, recurse) => buildCloneNode(current, recurse),
-    (id) => ({ kind: "recursive", id }),
-    findRecursiveSchemas(schema)
-  );
+  const { body, helpers } = buildStructuralIR(schema, findRecursiveSchemas(schema), "clone");
   return { kind: "program", param: "value", body, helpers };
-}
-function buildCloneNode(schema, recurse) {
-  if (schema.type === TypeName.date) return { kind: "date" };
-  if (schema.type === TypeName.union) return buildUnionNode(schema, recurse);
-  if (schema.type === TypeName.intersection) {
-    const flattened = flattenObjectIntersection(schema);
-    if (flattened !== void 0) return buildCloneNode(flattened, recurse);
-    return buildIntersectionNode(schema, recurse);
-  }
-  if (schema.type === TypeName.discriminatedUnion)
-    return buildDiscriminatedUnionNode(schema, recurse);
-  const node = buildSchemaNode(schema, recurse);
-  if (node) return node;
-  if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
-  throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler clone IR for type: ${schema.type}`);
-}
-function buildUnionNode(schema, recurse) {
-  if (schema.def.options.every((option) => isPrimitiveLikeSchema(option))) {
-    return { kind: "reuse" };
-  }
-  return {
-    kind: "union",
-    options: schema.def.options.map((option) => ({
-      schema: option,
-      node: recurse(option)
-    }))
-  };
-}
-function buildIntersectionNode(schema, recurse) {
-  return {
-    kind: "intersection",
-    options: schema.def.options.map(recurse)
-  };
-}
-function buildDiscriminatedUnionNode(schema, recurse) {
-  return {
-    kind: "discriminatedUnion",
-    discriminator: schema.def.discriminator,
-    options: schema.def.options.map((option) => ({
-      schema: option,
-      node: recurse(option)
-    }))
-  };
 }
 
 // ../../packages/jit/src/compiler/emitter/emit-state.ts
@@ -4614,7 +4604,7 @@ function emitRecordClone(writer, state3, node, source, target, context) {
   const index2 = state3.nextVar("i");
   const key = state3.nextVar("key");
   const clonedValue = state3.nextVar("clonedValue");
-  writer.line(`const ${keys} = Object.keys(${source});`);
+  writer.dynamicLine(`const ${keys} = Object.keys(${source});`);
   writer.line(`const ${target} = {};`);
   writer.line(`for (let ${index2} = 0, ${len} = ${keys}.length; ${index2} < ${len}; ${index2}++) {`);
   writer.indent(() => {
@@ -5159,7 +5149,7 @@ function emitBaseSizeInner(context, schema, valueExpr) {
       const holder = hoist(context, valueExpr);
       const keys = nextVar(context, "k");
       const index2 = nextVar(context, "i");
-      writer.line(`const ${keys} = Object.keys(${holder});`);
+      writer.dynamicLine(`const ${keys} = Object.keys(${holder});`);
       writer.line("size += 4;");
       writer.line(`for (let ${index2} = 0; ${index2} < ${keys}.length; ${index2}++) {`);
       writer.indent(() => {
@@ -5395,7 +5385,7 @@ function emitBaseWriteInner(context, schema, valueExpr) {
       const holder = hoist(context, valueExpr);
       const keys = nextVar(context, "k");
       const index2 = nextVar(context, "i");
-      writer.line(`const ${keys} = Object.keys(${holder});`);
+      writer.dynamicLine(`const ${keys} = Object.keys(${holder});`);
       writer.line(`dv.setUint32(o, ${keys}.length, true); o += 4;`);
       writer.line(`for (let ${index2} = 0; ${index2} < ${keys}.length; ${index2}++) {`);
       writer.indent(() => {
@@ -5719,7 +5709,7 @@ function hoist(context, expr) {
   return holder;
 }
 
-// ../../packages/jit/src/factories/ops.ts
+// ../../packages/jit/src/core/ops.ts
 var OPS = "__jitOps";
 function isOpChain(value) {
   return typeof value === "object" && value !== null && Array.isArray(value[OPS]);
@@ -7458,7 +7448,7 @@ var ValidatorEmitter = class {
         const keys = this.nextVar("k");
         const index2 = this.nextVar("i");
         if (build) this.writer.line(`${out} = {};`);
-        this.writer.line(`const ${keys} = Object.keys(${value});`);
+        this.writer.dynamicLine(`const ${keys} = Object.keys(${value});`);
         this.writer.line(`for (let ${index2} = 0; ${index2} < ${keys}.length; ${index2}++) {`);
         this.writer.indent(() => {
           const valueOut = this.emitNode(
@@ -7509,7 +7499,7 @@ var ValidatorEmitter = class {
           const index2 = this.nextVar("i");
           const keyTest = keys.map((key) => `${known}[${index2}] !== ${emitLiteral(key)}`).join(" && ");
           const unknownTest = keys.length === 0 ? "true" : keyTest;
-          this.writer.line(`const ${known} = Object.keys(${value});`);
+          this.writer.dynamicLine(`const ${known} = Object.keys(${value});`);
           this.writer.line(`for (let ${index2} = 0; ${index2} < ${known}.length; ${index2}++) {`);
           this.writer.indent(() => {
             if (unknownKeys === "strict") {
@@ -8852,56 +8842,8 @@ function compileCsvStringify(descriptor2) {
 
 // ../../packages/jit/src/compiler/diff/build-diff-ir.ts
 function buildDiffIR(schema) {
-  const { body, helpers } = buildRecursiveProgram(
-    schema,
-    (current, recurse) => buildDiffNode(current, recurse),
-    (id) => ({ kind: "recursive", id }),
-    findRecursiveSchemas(schema)
-  );
+  const { body, helpers } = buildStructuralIR(schema, findRecursiveSchemas(schema), "diff");
   return { kind: "program", leftParam: "left", rightParam: "right", body, helpers };
-}
-function buildDiffNode(schema, recurse) {
-  if (schema.type === TypeName.date) return { kind: "date" };
-  if (schema.type === TypeName.union) return buildUnionNode2(schema, recurse);
-  if (schema.type === TypeName.intersection) {
-    const flattened = flattenObjectIntersection(schema);
-    if (flattened !== void 0) return buildDiffNode(flattened, recurse);
-    return buildIntersectionNode2(schema, recurse);
-  }
-  if (schema.type === TypeName.discriminatedUnion)
-    return buildDiscriminatedUnionNode2(schema, recurse);
-  const node = buildSchemaNode(schema, recurse);
-  if (node) return node;
-  if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
-  throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler diff IR for type: ${schema.type}`);
-}
-function buildUnionNode2(schema, recurse) {
-  if (schema.def.options.every((option) => isPrimitiveLikeSchema(option))) {
-    return { kind: "reuse" };
-  }
-  return {
-    kind: "union",
-    options: schema.def.options.map((option) => ({
-      schema: option,
-      node: recurse(option)
-    }))
-  };
-}
-function buildIntersectionNode2(schema, recurse) {
-  return {
-    kind: "intersection",
-    options: schema.def.options.map(recurse)
-  };
-}
-function buildDiscriminatedUnionNode2(schema, recurse) {
-  return {
-    kind: "discriminatedUnion",
-    discriminator: schema.def.discriminator,
-    options: schema.def.options.map((option) => ({
-      schema: option,
-      node: recurse(option)
-    }))
-  };
 }
 
 // ../../packages/jit/src/compiler/diff/emit-diff.ts
@@ -9153,8 +9095,8 @@ function emitRecordDiff(writer, state3, node, left, right, path) {
   const rightBase = hoistOperand(writer, state3, right, "rr");
   writer.line(`if (!Object.is(${leftBase}, ${rightBase})) {`);
   writer.indent(() => {
-    writer.line(`const ${leftKeys} = Object.keys(${leftBase});`);
-    writer.line(`const ${rightKeys} = Object.keys(${rightBase});`);
+    writer.dynamicLine(`const ${leftKeys} = Object.keys(${leftBase});`);
+    writer.dynamicLine(`const ${rightKeys} = Object.keys(${rightBase});`);
     writer.line(`for (let ${index2} = 0, ${len} = ${rightKeys}.length; ${index2} < ${len}; ${index2}++) {`);
     writer.indent(() => {
       writer.line(`const ${key} = ${rightKeys}[${index2}];`);
@@ -10003,7 +9945,7 @@ function emitBaseAppend(context, schema, valueExpr) {
       const index2 = nextVar3(context, "i");
       const item = nextVar3(context, "e");
       writer.line(`s += "{";`);
-      writer.line(`const ${keys} = Object.keys(${holder});`);
+      writer.dynamicLine(`const ${keys} = Object.keys(${holder});`);
       writer.line(`for (let ${index2} = 0; ${index2} < ${keys}.length; ${index2}++) {`);
       writer.indent(() => {
         writer.line(`if (${index2} !== 0) s += ",";`);
@@ -15344,9 +15286,9 @@ function buildUpdateIR(schema) {
 function buildUpdateNode(schema, recurse) {
   if (resolveRuntimeTypeOperation(schema) !== void 0) return { kind: "reuse" };
   if (schema.type === TypeName.date) return { kind: "date" };
-  if (schema.type === TypeName.union) return buildUnionNode3(schema, recurse);
+  if (schema.type === TypeName.union) return buildUnionNode(schema, recurse);
   if (schema.type === TypeName.discriminatedUnion)
-    return buildDiscriminatedUnionNode3(schema, recurse);
+    return buildDiscriminatedUnionNode(schema, recurse);
   if (schema.type === TypeName.intersection) {
     const flattened = flattenObjectIntersection(schema);
     if (flattened !== void 0) return buildUpdateNode(flattened, recurse);
@@ -15357,7 +15299,7 @@ function buildUpdateNode(schema, recurse) {
   if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
   throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler update IR for type: ${schema.type}`);
 }
-function buildUnionNode3(schema, recurse) {
+function buildUnionNode(schema, recurse) {
   if (schema.def.options.every((option) => isPrimitiveLikeSchema(option))) {
     return { kind: "reuse" };
   }
@@ -15369,7 +15311,7 @@ function buildUnionNode3(schema, recurse) {
     }))
   };
 }
-function buildDiscriminatedUnionNode3(schema, recurse) {
+function buildDiscriminatedUnionNode(schema, recurse) {
   return {
     kind: "discriminatedUnion",
     discriminator: schema.def.discriminator,
@@ -15644,8 +15586,8 @@ function emitRecordUpdateTo(writer, state3, node, value, patch3, target) {
   writer.line(`if (${patch3} !== undefined && !Object.is(${value}, ${patch3})) {`);
   writer.indent(() => {
     writer.line(`let changed = false;`);
-    writer.line(`const ${keys} = Object.keys(${value});`);
-    writer.line(`const ${patchKeys} = Object.keys(${patch3});`);
+    writer.dynamicLine(`const ${keys} = Object.keys(${value});`);
+    writer.dynamicLine(`const ${patchKeys} = Object.keys(${patch3});`);
     writer.line(`if (${keys}.length !== ${patchKeys}.length) {`);
     writer.indent(() => writer.line("changed = true;"));
     writer.line("}");
@@ -17211,6 +17153,23 @@ function serializeValue2(value) {
   }
 }
 
+// ../../packages/jit/src/core/builder/checks.ts
+function appendCheck(schema, check) {
+  const def = schema.def;
+  const entry = {
+    kind: check.kind,
+    ...check.value !== void 0 ? { value: check.value } : {},
+    ...check.message !== void 0 ? { message: check.message } : {}
+  };
+  return { ...schema, def: { ...schema.def, checks: [...def.checks ?? [], entry] } };
+}
+function appendSingletonCheck(schema, check) {
+  const def = schema.def;
+  if (def.checks?.some((entry) => entry.kind === check.kind))
+    throw new JITError("INVALID_OPERATION", `${check.kind} cannot be applied twice to the same schema`);
+  return appendCheck(schema, check);
+}
+
 // ../../packages/jit/src/core/builder/unwrap-schema.ts
 function unwrapSchema(schemaLike) {
   return "schema" in schemaLike ? schemaLike.schema : schemaLike;
@@ -17466,7 +17425,7 @@ var baseBuilderPrototype = {
     const options = isCheckOptions(patternOrMessageOrOptions);
     const override2 = options?.pattern ?? (patternOrMessageOrOptions instanceof RegExp ? patternOrMessageOrOptions : void 0);
     const text = options?.message ?? (typeof patternOrMessageOrOptions === "string" ? patternOrMessageOrOptions : message);
-    return createBuilder(appendCheck(this.schema, { kind: "email", value: override2, message: text }));
+    return createBuilder(appendSingletonCheck(this.schema, { kind: "email", value: override2, message: text }));
   },
   uuid(versionOrMessageOrOptions, message) {
     const options = isCheckOptions(versionOrMessageOrOptions);
@@ -17705,19 +17664,6 @@ Object.defineProperty(baseBuilderPrototype, "~standard", {
     return getStandardSchema(this.schema);
   }
 });
-function appendCheck(schema, check) {
-  const def = schema.def;
-  const entry = {
-    kind: check.kind,
-    ...check.value !== void 0 ? { value: check.value } : {},
-    ...check.message !== void 0 ? { message: check.message } : {}
-  };
-  const checks = def.checks ? [...def.checks, entry] : [entry];
-  return {
-    ...schema,
-    def: { ...schema.def, checks }
-  };
-}
 var UNSAFE_HTML_TAGS = /* @__PURE__ */ new Set([
   "base",
   "embed",
@@ -18526,7 +18472,7 @@ function serializeFunction(value) {
   }
   if (source === "") return void 0;
   try {
-    Function(`return (${source});`);
+    globalThis.Function(`return (${source});`);
   } catch {
     return void 0;
   }

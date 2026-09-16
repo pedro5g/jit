@@ -170,6 +170,7 @@ function emitMapper(plan: MapperPlan, operations: readonly MapperOp[]): string {
   return writer.toString();
 }
 
+/** Emits deterministic source for the JIT emit mapper plan function source operation. */
 export function emitMapperPlanFunctionSource(
   plan: MapperPlan,
   operation: MapperOp = "map",

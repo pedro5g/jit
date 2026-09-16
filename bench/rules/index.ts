@@ -65,7 +65,7 @@ const OPERATORS: Readonly<Record<Operator, (left: never, right: never) => boolea
 };
 
 /** Counters proving how much work the optimizer removes. */
-export const work = { factReads: 0, conditionEvaluations: 0 };
+const work = { factReads: 0, conditionEvaluations: 0 };
 
 class Almanac {
   readonly #subject: Readonly<Record<string, unknown>>;

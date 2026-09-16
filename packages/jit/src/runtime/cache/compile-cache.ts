@@ -21,6 +21,7 @@ export interface CompileCacheOptions {
 
 let cacheStore = new WeakMap<object, Map<string, unknown>>();
 
+/** Returns the JIT get compile cached result for the supplied input. */
 export function getCompileCached<TValue>(
   schema: object,
   key: string,

@@ -22,8 +22,10 @@ import { reorderConditions } from "./passes/reorder-conditions.js";
  */
 export const optimizeEqualIRPasses = [flattenBlocks, optimizeCost, inlineVars, reorderCompares] as const;
 
+/** Describes the JIT irpass contract used by the public API. */
 export type IRPass = (program: IRProgram) => IRProgram;
 
+/** Provides the JIT optimize irwith operation for the supplied input. */
 export function optimizeIRWith(program: IRProgram, passes: readonly IRPass[]): IRProgram {
   let next = program;
 
@@ -44,12 +46,15 @@ export function optimizeIRWith(program: IRProgram, passes: readonly IRPass[]): I
   };
 }
 
+/** Provides the JIT optimize ir operation for the supplied input. */
 export function optimizeIR(program: IRProgram): IRProgram {
   return optimizeIRWith(program, optimizeEqualIRPasses);
 }
 
+/** Provides the JIT optimize query irpasses configuration used by the public contract. */
 export const optimizeQueryIRPasses = [flattenBlocks, normalizeLogic, reorderConditions] as const;
 
+/** Provides the JIT optimize query ir operation for the supplied input. */
 export function optimizeQueryIR(program: IRProgram): IRProgram {
   return optimizeIRWith(program, optimizeQueryIRPasses);
 }

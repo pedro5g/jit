@@ -5,9 +5,12 @@ import { JITError } from "../errors/index.js";
 import { resolveRowField, resolveRowObjectSchema, resolveScalarKeyKind } from "./row-keys.js";
 import { emitPropertyAccess } from "./source/access.js";
 
+/** Describes the JIT distinct node contract used by the public API. */
 export type DistinctNode = QueryUniqueNode | QueryDistinctNode;
+/** Describes the JIT distinct strategy contract used by the public API. */
 export type DistinctStrategy = "set" | "compound-trie" | "structural-hash" | "adjacent";
 
+/** Describes the JIT distinct descriptor contract used by the public API. */
 export interface DistinctDescriptor {
   readonly fields: readonly string[];
   readonly valueKinds: readonly import("./row-keys.js").ScalarKeyKind[];
@@ -103,6 +106,7 @@ function emitDistinctKey(descriptor: DistinctDescriptor, index: number): string 
   return descriptor.valueKinds[index] === "date" ? `(${access} == null ? ${access} : ${access}.getTime())` : access;
 }
 
+/** Provides the JIT wrap distinct source operation for the supplied input. */
 export function wrapDistinctSource(source: string, descriptor: DistinctDescriptor | undefined): string {
   if (!descriptor) return source;
   return `(function () {\n${emitDistinctAcceptSource(descriptor)}\nreturn (${source});\n})()`;

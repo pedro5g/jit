@@ -22,18 +22,13 @@ export function resolveChangeLayout(schema: ATS.AnyTypeSchema, paths?: readonly 
   return changeLayoutOf(resolveChangedDescriptor(schema, paths ?? allFieldPaths(schema, "JIT.compare.changed()")));
 }
 
-export function changeLayoutOf(descriptor: ChangedDescriptor): ChangeLayout {
+function changeLayoutOf(descriptor: ChangedDescriptor): ChangeLayout {
   const paths = descriptor.fields.map((field) => field.path);
   return Object.freeze({
     paths: Object.freeze(paths),
     representation: descriptor.representation,
     id: `${descriptor.representation}:${paths.join(",")}`,
   });
-}
-
-export function changeLayoutBit(layout: ChangeLayout, path: string): number | undefined {
-  const bit = layout.paths.indexOf(path);
-  return bit === -1 ? undefined : bit;
 }
 
 /**

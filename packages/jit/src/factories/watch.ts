@@ -39,7 +39,9 @@ export type WatchInput<TValue> = WatchOptions<CollectionElement<TValue>>;
  * @returns Added, removed, updated, and change-summary information.
  */
 export type RuntimeWatch<TValue> = Watch<TValue>;
+/** Provides the JIT type operation for the supplied input. */
 export type { WatchedListOptions, WatchedListSnapshot, WatchedListUpdate };
+/** Provides the JIT keyed watched list operation for the supplied input. */
 export { KeyedWatchedList, WatchedList };
 
 /**

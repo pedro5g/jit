@@ -18,6 +18,7 @@ export interface AssertionDescriptor {
   readonly field: string | undefined;
 }
 
+/** Describes the JIT assertion input contract used by the public API. */
 export interface AssertionInput {
   readonly condition: QueryConditionNode;
   readonly bindings: readonly unknown[];
@@ -27,6 +28,7 @@ export interface AssertionInput {
   readonly priority?: number;
 }
 
+/** Returns the JIT resolve assertion descriptor result for the supplied input. */
 export function resolveAssertionDescriptor(input: AssertionInput): AssertionDescriptor {
   const fields = conditionFields(input.condition, new Set());
   const field = fields.size === 1 ? [...fields][0] : undefined;
@@ -137,6 +139,7 @@ export function assertionError(issues: readonly AssertionIssue[]): DomainAsserti
 
 const GENERIC_RULE = "a domain invariant";
 
+/** Describes the JIT assertion error factory contract used by the public API. */
 export type AssertionErrorFactory = (value: unknown, descriptor: AssertionDescriptor) => unknown;
 
 function conditionFields(condition: QueryConditionNode, into: Set<string>): Set<string> {

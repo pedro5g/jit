@@ -26,6 +26,7 @@ import {
 import type { Ability, AccessPlan } from "./access.js";
 import type { QueryParamRef } from "./query.js";
 
+/** Provides the JIT reactive update operation for the supplied input. */
 export type ReactiveUpdate<T> = ReactiveUpdateController<T, UpdateInput<T>>;
 export type {
   ReactiveChange,
@@ -110,6 +111,7 @@ export interface CompiledPatch<T, TPatch> {
   result<const TChannels extends MutationChannels>(channels: TChannels): CompiledMutation<T, TPatch, TChannels>;
 }
 
+/** Describes the JIT compiled mutation contract used by the public API. */
 export interface CompiledMutation<T, TPatch, TChannels extends MutationChannels> {
   compile(): ((value: T, params: UpdatePatchParams<TPatch>) => MutationResult<T, TChannels>) & {
     /** The path-to-bit agreement the mask was produced against. */
@@ -118,12 +120,14 @@ export interface CompiledMutation<T, TPatch, TChannels extends MutationChannels>
   explain(): MutationExplanation;
 }
 
+/** Describes the JIT mutation result contract used by the public API. */
 export type MutationResult<T, TChannels extends MutationChannels> = {
   readonly value: T;
 } & (TChannels["changed"] extends undefined | false ? Record<never, never> : { readonly changed: number | bigint }) &
   (TChannels["patch"] extends true ? { readonly patch: UpdatePatch<T> | undefined } : Record<never, never>) &
   (TChannels["inverse"] extends true ? { readonly inverse: UpdatePatch<T> | undefined } : Record<never, never>);
 
+/** Describes the JIT mutation explanation contract used by the public API. */
 export interface MutationExplanation {
   /** `"specialized"` rebuilds only the changed levels; `"generic"` runs the deep-partial update. */
   readonly strategy: "specialized" | "generic";
@@ -132,6 +136,7 @@ export interface MutationExplanation {
   readonly params: readonly string[];
 }
 
+/** Describes the JIT update patch template contract used by the public API. */
 export type UpdatePatchTemplate<T> = T extends object
   ? {
       readonly [TKey in keyof T]?: UpdatePatchTemplate<T[TKey]> | QueryParamRef<T[TKey]> | T[TKey];
@@ -149,6 +154,7 @@ type UpdatePatchParamNames<TPatch> =
           }[keyof TPatch]
         : never;
 
+/** Describes the JIT update patch params contract used by the public API. */
 export type UpdatePatchParams<TPatch> = [UpdatePatchParamNames<TPatch>] extends [never]
   ? Readonly<Record<never, never>>
   : Readonly<Record<Extract<UpdatePatchParamNames<TPatch>, string>, unknown>>;

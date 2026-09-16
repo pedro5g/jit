@@ -34,6 +34,7 @@ export interface OverrideContext {
   readonly target: JsonSchemaTarget;
 }
 
+/** Provides the JIT to json schema options operation for the supplied input. */
 export interface ToJsonSchemaOptions {
   /**
    * Protocol version to emit.
@@ -98,6 +99,7 @@ export interface RefineContext {
   readonly schema: ATS.AnyTypeSchema;
 }
 
+/** Provides the JIT from json schema options operation for the supplied input. */
 export interface FromJsonSchemaOptions {
   /**
    * Adds what the document could not say. It runs for every node, after the

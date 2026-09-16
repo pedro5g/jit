@@ -40,6 +40,7 @@ export type Projected<TValue, TPaths extends string> = {
       : never;
 };
 
+/** Provides the JIT project builder operation for the supplied input. */
 export interface ProjectBuilder<TValue> {
   authorize<TAction extends string, TActor>(
     ability: Ability<TValue, TAction> | AccessPlan<TValue, TActor, TAction>,

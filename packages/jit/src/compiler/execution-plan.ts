@@ -40,6 +40,7 @@ export interface StageDescriptor {
   readonly effects: ExecutionEffects;
 }
 
+/** Describes the JIT value source stage contract used by the public API. */
 export interface ValueSourceStage extends StageDescriptor {
   readonly kind: "value";
   readonly input: "value";
@@ -47,6 +48,7 @@ export interface ValueSourceStage extends StageDescriptor {
   readonly schema: ATS.AnyTypeSchema;
 }
 
+/** Describes the JIT json decode stage contract used by the public API. */
 export interface JsonDecodeStage extends StageDescriptor {
   readonly kind: "json.decode";
   readonly input: "json-text";
@@ -54,6 +56,7 @@ export interface JsonDecodeStage extends StageDescriptor {
   readonly schema: ATS.AnyTypeSchema;
 }
 
+/** Describes the JIT binary decode stage contract used by the public API. */
 export interface BinaryDecodeStage extends StageDescriptor {
   readonly kind: "binary.decode";
   readonly input: "binary";
@@ -61,6 +64,7 @@ export interface BinaryDecodeStage extends StageDescriptor {
   readonly schema: ATS.AnyTypeSchema;
 }
 
+/** Describes the JIT validate stage contract used by the public API. */
 export interface ValidateStage extends StageDescriptor {
   readonly kind: "validate";
   readonly input: "value";
@@ -83,6 +87,7 @@ export interface ConstructStage extends StageDescriptor {
   ) => unknown;
 }
 
+/** Describes the JIT json encode stage contract used by the public API. */
 export interface JsonEncodeStage extends StageDescriptor {
   readonly kind: "json.encode";
   readonly input: "value";
@@ -93,6 +98,7 @@ export interface JsonEncodeStage extends StageDescriptor {
   readonly chunkBytes?: number;
 }
 
+/** Describes the JIT binary encode stage contract used by the public API. */
 export interface BinaryEncodeStage extends StageDescriptor {
   readonly kind: "binary.encode";
   readonly input: "value";
@@ -100,6 +106,7 @@ export interface BinaryEncodeStage extends StageDescriptor {
   readonly schema: ATS.AnyTypeSchema;
 }
 
+/** Describes the JIT map stage contract used by the public API. */
 export interface MapStage extends StageDescriptor {
   readonly kind: "map";
   readonly input: "value";
@@ -143,6 +150,7 @@ export interface SecurityStage extends StageDescriptor {
   readonly many: boolean;
 }
 
+/** Describes the JIT query stage contract used by the public API. */
 export interface QueryStage extends StageDescriptor {
   readonly kind: "query";
   readonly input: "value";
@@ -167,6 +175,7 @@ export interface AggregateStage extends StageDescriptor {
   readonly program: QueryProgram;
 }
 
+/** Describes the JIT array sink stage contract used by the public API. */
 export interface ArraySinkStage extends StageDescriptor {
   readonly kind: "to.array";
   readonly input: "value";
@@ -180,6 +189,7 @@ export interface OperationStage extends StageDescriptor {
   readonly schema: ATS.AnyTypeSchema;
 }
 
+/** Describes the JIT execution stage contract used by the public API. */
 export type ExecutionStage =
   | ValueSourceStage
   | JsonDecodeStage
@@ -204,12 +214,14 @@ export interface ExecutionPlan {
   readonly stages: readonly ExecutionStage[];
 }
 
+/** Provides the JIT no effects configuration used by the public contract. */
 export const NO_EFFECTS: ExecutionEffects = Object.freeze({
   mayThrow: false,
   mayAllocate: false,
   usesExternalBindings: false,
 });
 
+/** Provides the JIT throwing effects configuration used by the public contract. */
 export const THROWING_EFFECTS: ExecutionEffects = Object.freeze({
   mayThrow: true,
   mayAllocate: false,

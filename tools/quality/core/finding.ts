@@ -1,4 +1,4 @@
-export type QualitySeverity = "error" | "warning";
+type QualitySeverity = "error" | "warning";
 
 export interface QualityFinding {
   readonly code: string;
@@ -22,7 +22,7 @@ export function finding(input: QualityFinding): QualityFinding {
   };
 }
 
-export function fingerprintOf(input: Pick<QualityFinding, "code" | "path" | "line" | "message">): string {
+function fingerprintOf(input: Pick<QualityFinding, "code" | "path" | "line" | "message">): string {
   return [input.code, input.path ?? "", input.line ?? "", input.message].join("|");
 }
 
@@ -36,8 +36,4 @@ export function sortFindings(findings: readonly QualityFinding[]): QualityFindin
     );
     return leftKey.localeCompare(rightKey);
   });
-}
-
-export function hasErrors(findings: readonly QualityFinding[]): boolean {
-  return findings.some((item) => item.severity === "error");
 }

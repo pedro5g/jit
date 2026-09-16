@@ -24,6 +24,7 @@ export interface AccessRule {
   readonly metadata?: { readonly id?: string; readonly reason?: string } | undefined;
 }
 
+/** Describes the JIT access descriptor contract used by the public API. */
 export interface AccessDescriptor {
   readonly subject: ATS.AnyTypeSchema;
   readonly actor?: ATS.AnyTypeSchema | undefined;
@@ -33,6 +34,7 @@ export interface AccessDescriptor {
   readonly actionPlans: readonly AccessActionPlan[];
 }
 
+/** Describes the JIT access action plan contract used by the public API. */
 export interface AccessActionPlan {
   readonly action: string;
   readonly allow: readonly AccessRule[];
@@ -41,11 +43,13 @@ export interface AccessActionPlan {
   readonly actorPaths: readonly string[];
 }
 
+/** Describes the JIT access ability context contract used by the public API. */
 export interface AccessAbilityContext {
   readonly descriptor: AccessDescriptor;
   readonly actor: unknown;
 }
 
+/** Describes the JIT lowered access condition contract used by the public API. */
 export interface LoweredAccessCondition {
   readonly kind: "allow" | "deny" | "condition";
   readonly condition?: QueryConditionNode;
@@ -60,14 +64,17 @@ export interface ComposedAccessCondition {
 
 const ACCESS_ABILITIES = new WeakMap<object, AccessAbilityContext>();
 
+/** Creates the JIT register access ability artifact from the supplied input. */
 export function registerAccessAbility(ability: object, descriptor: AccessDescriptor, actor: unknown): void {
   ACCESS_ABILITIES.set(ability, Object.freeze({ descriptor, actor }));
 }
 
+/** Returns the JIT get access ability result for the supplied input. */
 export function getAccessAbility(ability: object): AccessAbilityContext | undefined {
   return ACCESS_ABILITIES.get(ability);
 }
 
+/** Returns the JIT resolve access context result for the supplied input. */
 export function resolveAccessContext(value: object, actor?: unknown): AccessAbilityContext | undefined {
   const ability = getAccessAbility(value);
   if (ability !== undefined) return ability;
@@ -75,6 +82,7 @@ export function resolveAccessContext(value: object, actor?: unknown): AccessAbil
   return artifact?.kind === "access-plan" ? Object.freeze({ descriptor: artifact.descriptor, actor }) : undefined;
 }
 
+/** Returns the JIT resolve access descriptor result for the supplied input. */
 export function resolveAccessDescriptor(
   subject: ATS.AnyTypeSchema,
   actor: ATS.AnyTypeSchema | undefined,
@@ -331,10 +339,12 @@ function emitConditionAt(condition: QueryConditionNode, subject: string, actor: 
   return emitQueryConditionSource(condition, { fieldBase: subject, paramBase: actor });
 }
 
+/** Provides the JIT access cache key operation for the supplied input. */
 export function accessCacheKey(descriptor: AccessDescriptor): string {
   return `access:${JSON.stringify(descriptor.rules)}`;
 }
 
+/** Creates the JIT compile access artifact from the supplied input. */
 export function compileAccess<TActor, TAbility>(
   descriptor: AccessDescriptor,
   options?: CompileCacheOptions
@@ -391,6 +401,7 @@ export function composeAccessCondition(descriptor: AccessDescriptor, action: str
   return Object.freeze({ kind: "condition", condition: semantic });
 }
 
+/** Converts the supplied input into the JIT lower access to query condition representation. */
 export function lowerAccessToQueryCondition(
   context: AccessAbilityContext,
   action: string,
@@ -416,6 +427,7 @@ export function compileAccessMutationGuard(
   ) => void;
 }
 
+/** Emits deterministic source for the JIT emit access mutation guard source operation. */
 export function emitAccessMutationGuardSource(descriptor: AccessDescriptor, action: string): string {
   const object = expectProjectionObject(descriptor.subject, "authorized mutation");
   const writer = new CodeWriter();

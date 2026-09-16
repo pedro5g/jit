@@ -6,6 +6,7 @@ import { getCompileCached } from "../runtime/cache/compile-cache.js";
 /** Deterministic sample generator compiled for one schema. */
 export type Mock<TValue> = (options?: MockOptions) => TValue;
 
+/** Provides the JIT mock options operation for the supplied input. */
 export interface MockOptions {
   /** Same seed, same value — fixtures stay reproducible across runs. */
   readonly seed?: number;

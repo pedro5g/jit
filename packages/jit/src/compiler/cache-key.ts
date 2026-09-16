@@ -8,8 +8,10 @@ import { buildProjectionTree, type ProjectionTree, projectionCacheKey } from "./
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./source/access.js";
 
+/** Describes the JIT cache key form contract used by the public API. */
 export type CacheKeyForm = "string" | "hash";
 
+/** Describes the JIT cache key descriptor contract used by the public API. */
 export interface CacheKeyDescriptor {
   readonly tree: ProjectionTree;
   readonly form: CacheKeyForm;
@@ -28,6 +30,7 @@ interface CacheKeyPart {
 /** The separator. `` cannot appear unescaped in the parts, so keys cannot collide. */
 const SEPARATOR = "";
 
+/** Returns the JIT resolve cache key descriptor result for the supplied input. */
 export function resolveCacheKeyDescriptor(
   schema: ATS.AnyTypeSchema,
   paths: readonly string[],
@@ -204,10 +207,12 @@ export function cacheKeyHashBindings(descriptor: CacheKeyDescriptor): readonly {
   return bindings;
 }
 
+/** Provides the JIT cache key cache key operation for the supplied input. */
 export function cacheKeyCacheKey(descriptor: CacheKeyDescriptor): string {
   return `cacheKey:${descriptor.form}:${projectionCacheKey(descriptor.tree)}`;
 }
 
+/** Creates the JIT compile cache key artifact from the supplied input. */
 export function compileCacheKey<TValue, TKey>(
   schema: ATS.AnyTypeSchema,
   descriptor: CacheKeyDescriptor,

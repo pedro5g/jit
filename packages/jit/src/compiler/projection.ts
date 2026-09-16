@@ -22,6 +22,7 @@ export interface ProjectionTree {
   readonly nodes: readonly ProjectionNode[];
 }
 
+/** Describes the JIT projection node contract used by the public API. */
 export interface ProjectionNode {
   readonly key: string;
   /** The field's own schema, with its wrappers intact. */
@@ -30,6 +31,7 @@ export interface ProjectionNode {
   readonly children?: ProjectionTree;
 }
 
+/** Provides the JIT expect projection object operation for the supplied input. */
 export function expectProjectionObject(schema: ATS.AnyTypeSchema, operation: string): ObjectSchema {
   const base = resolveWrappers(schema).base;
 
@@ -150,6 +152,7 @@ export function emitProjectionLiteral(tree: ProjectionTree, source: string): str
   return `{ ${parts.join(", ")} }`;
 }
 
+/** Provides the JIT projection cache key operation for the supplied input. */
 export function projectionCacheKey(tree: ProjectionTree): string {
   return tree.paths.join(",");
 }

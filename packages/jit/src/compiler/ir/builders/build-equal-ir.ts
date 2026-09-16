@@ -30,6 +30,7 @@ import { Scope } from "../scope.js";
 
 type EqualSchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
 
+/** Creates the JIT build equal ir artifact from the supplied input. */
 export function buildEqualIR(
   schema: ATS.AnyTypeSchema,
   strategy: EqualStrategy = resolveEqualStrategy(schema)

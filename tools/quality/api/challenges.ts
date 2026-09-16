@@ -86,31 +86,23 @@ function exclusiveChallenges(contracts: readonly OperationContract[]): ApiChalle
   }
   const result: ApiChallenge[] = [];
   for (const [groupName, members] of groups) {
-    const orderedMembers = members.sort(compareContracts);
-    for (let index = 0; index < orderedMembers.length; index += 1) {
-      for (let nextIndex = index + 1; nextIndex < orderedMembers.length; nextIndex += 1) {
-        const left = orderedMembers[index];
-        const right = orderedMembers[nextIndex];
-        const first = transition(initialState(), left);
-        const second = first.valid ? transition(first.state, right) : first;
-        result.push(
-          challenge({
-            id: `exclusive:${groupName}:${left.id}:${right.id}`,
-            kind: "exclusive",
-            steps: [left, right],
-            question: `Can ${left.name} combine with ${right.name}, or would that silently replace ${groupName} and need to disappear from the next TypeScript state?`,
-            expected: "invalid",
-            actual: actualOf(second.valid),
-            contracts: [left, right],
-            evidence: [
-              `exclusive group: ${groupName}`,
-              `${left.name} -> ${right.name}: ${second.reason ?? "accepted"}`,
-            ],
-            remediation:
-              "Reject the second singleton policy in the type and runtime surfaces, or introduce an explicit replacement operation with documented semantics.",
-          })
-        );
-      }
+    for (const [left, right] of contractPairs(members)) {
+      const first = transition(initialState(), left);
+      const second = first.valid ? transition(first.state, right) : first;
+      result.push(
+        challenge({
+          id: `exclusive:${groupName}:${left.id}:${right.id}`,
+          kind: "exclusive",
+          steps: [left, right],
+          question: `Can ${left.name} combine with ${right.name}, or would that silently replace ${groupName} and need to disappear from the next TypeScript state?`,
+          expected: "invalid",
+          actual: actualOf(second.valid),
+          contracts: [left, right],
+          evidence: [`exclusive group: ${groupName}`, `${left.name} -> ${right.name}: ${second.reason ?? "accepted"}`],
+          remediation:
+            "Reject the second singleton policy in the type and runtime surfaces, or introduce an explicit replacement operation with documented semantics.",
+        })
+      );
     }
   }
   return result;
@@ -229,30 +221,30 @@ function aliasChallenges(contracts: readonly OperationContract[]): ApiChallenge[
   }
   const result: ApiChallenge[] = [];
   for (const [semanticKey, members] of groups) {
-    const orderedMembers = members.sort(compareContracts);
-    for (let index = 0; index < orderedMembers.length; index += 1) {
-      for (let nextIndex = index + 1; nextIndex < orderedMembers.length; nextIndex += 1) {
-        const left = orderedMembers[index];
-        const right = orderedMembers[nextIndex];
-        const first = transition(initialState(), left);
-        const second = first.valid ? transition(first.state, right) : first;
-        result.push({
+    for (const [left, right] of contractPairs(members)) {
+      const first = transition(initialState(), left);
+      const second = first.valid ? transition(first.state, right) : first;
+      const semantics = left.aliasSemantics ?? right.aliasSemantics;
+      const expected: ApiChallengeExpectation = semantics === "accumulate" ? "valid" : "invalid";
+      result.push(
+        challenge({
           id: `alias:${semanticKey}:${left.id}:${right.id}`,
           kind: "alias",
-          sequence: [left.name, right.name],
           steps: [left, right],
-          question: `Do ${left.name} and ${right.name} represent the same intent, and if so should this chain be legal, redundant, or an explicit replacement?`,
-          expected: "decision-required",
+          question: `Do ${left.name} and ${right.name} follow their declared alias policy?`,
+          expected,
           actual: actualOf(second.valid),
-          status: "needs-design",
+          contracts: [left, right],
+          reviewed: semantics !== undefined,
           evidence: [
             `shared semantic key: ${semanticKey}`,
+            `alias semantics: ${semantics ?? "undeclared"}`,
             `${left.name} -> ${right.name}: ${second.reason ?? "accepted"}`,
           ],
           remediation:
-            "Choose one semantic policy: allow accumulation with documented meaning, reject the second alias in types and runtime, or add an explicit replacement operation.",
-        });
-      }
+            "Declare whether aliases accumulate, are forbidden together, or require an explicit replacement operation, then prove it in the type and runtime surfaces.",
+        })
+      );
     }
   }
   return result;
@@ -261,42 +253,44 @@ function aliasChallenges(contracts: readonly OperationContract[]): ApiChallenge[
 function combinationChallenges(contracts: readonly OperationContract[]): ApiChallenge[] {
   const result: ApiChallenge[] = [];
   for (const contract of contracts) {
-    const partner = relatedPartner(contract, contracts);
-    if (!partner) continue;
-    const first = transition(initialState(), contract);
-    const second = first.valid ? transition(first.state, partner) : first;
-    result.push({
-      id: `combination:${contract.id}:${partner.id}`,
-      kind: "combination",
-      sequence: [contract.name, partner.name],
-      steps: [contract, partner],
-      question: `Does ${contract.name} combine with ${partner.name} in this order, and is the result valid, redundant, or fused?`,
-      expected: "decision-required",
-      actual: actualOf(second.valid),
-      status: "needs-design",
-      evidence: [
-        `selected deterministic partner from family ${partner.family}`,
-        second.reason ?? "the transition is currently accepted",
-      ],
-      remediation:
-        "Record the intended transition in the semantic contract. If it is invalid, remove it from the type surface and reject dynamic calls; if valid, document its ordering and fusion behavior.",
-    });
+    for (const combination of contract.combinesWith ?? []) {
+      const partner = findReferencedContract(combination.operation, contracts);
+      if (!partner) {
+        result.push({
+          id: `combination:${contract.id}:${referenceKey(combination.operation)}`,
+          kind: "combination",
+          sequence: [contract.name, combination.operation],
+          steps: [contract],
+          question: `Does ${contract.name} combine with ${combination.operation} as declared?`,
+          expected: combination.expected,
+          actual: "invalid",
+          status: "blocked",
+          evidence: [`combination partner ${combination.operation} was not found in the public fluent inventory`],
+          remediation:
+            "Expose the declared operation in the inventory or remove the combination until the public contract exists.",
+        });
+        continue;
+      }
+      const first = transition(initialState(), contract);
+      const second = first.valid ? transition(first.state, partner) : first;
+      result.push(
+        challenge({
+          id: `combination:${contract.id}:${partner.id}`,
+          kind: "combination",
+          steps: [contract, partner],
+          question: `Does ${contract.name} combine with ${partner.name} as declared?`,
+          expected: combination.expected,
+          actual: actualOf(second.valid),
+          contracts: [contract, partner],
+          reviewed: true,
+          evidence: [`declared combination: ${combination.notes}`, second.reason ?? "the transition is legal"],
+          remediation:
+            "Keep the fluent type, runtime grammar and declared combination policy aligned, with a focused transition test.",
+        })
+      );
+    }
   }
   return result;
-}
-
-function relatedPartner(
-  contract: OperationContract,
-  contracts: readonly OperationContract[]
-): OperationContract | undefined {
-  const sameFamily = contracts.filter(
-    (candidate) =>
-      candidate.id !== contract.id &&
-      candidate.family === contract.family &&
-      candidate.semanticKey !== contract.semanticKey &&
-      !candidate.terminal
-  );
-  return sameFamily.sort(compareContracts)[0] ?? contracts.find((candidate) => candidate.id !== contract.id);
 }
 
 function prepareRequirements(
@@ -338,7 +332,10 @@ function findReferencedContract(
   contracts: readonly OperationContract[]
 ): OperationContract | undefined {
   const name = reference.includes(".") ? reference.slice(reference.lastIndexOf(".") + 1) : reference;
-  return contracts.find((contract) => contract.name === name);
+  return (
+    contracts.find((contract) => contract.id === reference || `${contract.family}.${contract.name}` === reference) ??
+    contracts.find((contract) => contract.name === name)
+  );
 }
 
 function referenceKey(reference: string): string {
@@ -353,6 +350,7 @@ function challenge(input: {
   readonly expected: ApiChallengeExpectation;
   readonly actual: ApiChallengeActual;
   readonly contracts: readonly OperationContract[];
+  readonly reviewed?: boolean;
   readonly evidence: readonly string[];
   readonly remediation: string;
 }): ApiChallenge {
@@ -361,7 +359,9 @@ function challenge(input: {
       ? "blocked"
       : input.expected === "decision-required"
         ? "needs-design"
-        : reviewedStatus(input.contracts);
+        : input.reviewed === true || reviewedStatus(input.contracts) === "verified"
+          ? "verified"
+          : "needs-design";
   return {
     id: input.id,
     kind: input.kind,
@@ -397,4 +397,15 @@ function compareContracts(left: OperationContract, right: OperationContract): nu
   return [left.family, left.name, left.id]
     .join("\u0000")
     .localeCompare([right.family, right.name, right.id].join("\u0000"));
+}
+
+function* contractPairs(
+  contracts: readonly OperationContract[]
+): Generator<readonly [OperationContract, OperationContract]> {
+  const ordered = [...contracts].sort(compareContracts);
+  for (let index = 0; index < ordered.length; index += 1) {
+    for (let nextIndex = index + 1; nextIndex < ordered.length; nextIndex += 1) {
+      yield [ordered[index], ordered[nextIndex]] as const;
+    }
+  }
 }

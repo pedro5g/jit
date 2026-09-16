@@ -15,4 +15,5 @@ function voidType(message?: ValidationMessage): Builder<VoidSchema> {
   );
 }
 
+/** Provides the JIT void operation for the supplied input. */
 export { voidType as void };

@@ -50,6 +50,7 @@ export type ReactivePathValue<TValue, TPath extends readonly PathKey[]> = TPath 
       : never
   : TValue;
 
+/** Describes one structural change observed during a reactive update. */
 export interface ReactiveChange {
   readonly type: "add" | "remove" | "update";
   readonly path: readonly PropertyKey[];
@@ -57,6 +58,7 @@ export interface ReactiveChange {
   readonly value: unknown;
 }
 
+/** Describes a root update and its lazily materialized changes. */
 export interface ReactiveUpdateEvent<TValue> {
   readonly previous: TValue;
   readonly value: TValue;
@@ -65,6 +67,7 @@ export interface ReactiveUpdateEvent<TValue> {
   readonly changes: readonly ReactiveChange[];
 }
 
+/** Describes a change observed at a selected path. */
 export interface ReactivePathEvent<TValue, TSelected = unknown> {
   readonly path: readonly PathKey[];
   readonly previous: TSelected;
@@ -74,6 +77,7 @@ export interface ReactivePathEvent<TValue, TSelected = unknown> {
   readonly version: number;
 }
 
+/** Describes a change observed through a selector function. */
 export interface ReactiveSelectionEvent<TValue, TSelected> {
   readonly previous: TSelected;
   readonly value: TSelected;
@@ -82,16 +86,20 @@ export interface ReactiveSelectionEvent<TValue, TSelected> {
   readonly version: number;
 }
 
+/** Controls whether a subscription receives its current value immediately. */
 export interface ReactiveSubscribeOptions {
   readonly immediate?: boolean;
 }
 
+/** Controls immediate delivery and equality suppression for a watcher. */
 export interface ReactiveWatchOptions<TValue> extends ReactiveSubscribeOptions {
   readonly equals?: (previous: TValue, value: TValue) => boolean;
 }
 
+/** Selects synchronous, microtask, or custom scheduling for reactive delivery. */
 export type ReactiveScheduler = "sync" | "microtask" | ((flush: () => void) => void);
 
+/** Configures scheduling and subscriber-error handling for a reactive controller. */
 export interface ReactiveUpdateOptions {
   /** `sync` by default; `microtask` coalesces all writes in the current turn. */
   readonly schedule?: ReactiveScheduler;
@@ -99,6 +107,7 @@ export interface ReactiveUpdateOptions {
   readonly onError?: (error: unknown) => void;
 }
 
+/** Mutable reactive facade that preserves the compiled update contract. */
 export interface ReactiveUpdateController<TValue, TInput> {
   readonly value: TValue;
   readonly version: number;

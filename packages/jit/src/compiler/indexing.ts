@@ -14,6 +14,7 @@ import {
 } from "./row-keys.js";
 import { emitPropertyAccess } from "./source/access.js";
 
+/** Describes the JIT index key contract used by the public API. */
 export interface IndexKey {
   readonly key: string;
   readonly valueKind: ScalarKeyKind;
@@ -41,6 +42,7 @@ export interface IndexDescriptor {
   readonly uniqueByFact: boolean;
 }
 
+/** Describes the JIT compiled index contract used by the public API. */
 export interface CompiledIndex<TRow, TIndex> {
   (value: readonly TRow[]): TIndex;
   readonly cached: (value: readonly TRow[]) => TIndex;
@@ -61,6 +63,7 @@ export function resolveIndexKeysFromFacts(schema: ATS.AnyTypeSchema): readonly s
   return key ? [key] : undefined;
 }
 
+/** Returns the JIT resolve index descriptor result for the supplied input. */
 export function resolveIndexDescriptor(
   schema: ATS.AnyTypeSchema,
   keys: readonly string[] | undefined,
@@ -156,6 +159,7 @@ export function emitIndexBuilder(
   writer.line(close);
 }
 
+/** Emits deterministic source for the JIT emit index source operation. */
 export function emitIndexSource(descriptor: IndexDescriptor): string {
   const writer = new CodeWriter();
   emitIndexBuilder(writer, descriptor);
@@ -188,10 +192,12 @@ export function emitIndexKeyRead(row: string, key: IndexKey): string {
   return key.nullish ? `(${access} == null ? ${access} : ${access}.getTime())` : `${access}.getTime()`;
 }
 
+/** Provides the JIT index cache key operation for the supplied input. */
 export function indexCacheKey(descriptor: IndexDescriptor): string {
   return `index:${descriptor.shape}:${descriptor.keys.map(({ key, valueKind, nullish }) => `${key}:${valueKind}:${nullish}`).join(",")}`;
 }
 
+/** Creates the JIT compile index artifact from the supplied input. */
 export function compileIndex<TRow, TIndex>(
   schema: ATS.AnyTypeSchema,
   descriptor: IndexDescriptor,

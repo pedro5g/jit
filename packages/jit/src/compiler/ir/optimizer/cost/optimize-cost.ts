@@ -1,5 +1,6 @@
 import type { IRExpr, IRNode, IRProgram } from "../../ir.js";
 
+/** Provides the JIT optimize cost operation for the supplied input. */
 export function optimizeCost(program: IRProgram): IRProgram {
   return { ...program, body: optimizeNodes(program.body) };
 }

@@ -21,6 +21,7 @@ export function emitProjectSource(tree: ProjectionTree): string {
   return `function project(value) {\n  return ${emitProjectionLiteral(tree, "value")};\n}`;
 }
 
+/** Creates the JIT compile project artifact from the supplied input. */
 export function compileProject<TInput, TOutput>(
   schema: ATS.AnyTypeSchema,
   paths: readonly string[],
@@ -57,6 +58,7 @@ export function emitAuthorizedProjectSource(context: AccessAbilityContext, actio
   return lines.join("\n");
 }
 
+/** Creates the JIT compile authorized project artifact from the supplied input. */
 export function compileAuthorizedProject<TValue>(
   context: AccessAbilityContext,
   action: string

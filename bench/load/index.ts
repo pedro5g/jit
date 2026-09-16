@@ -124,7 +124,7 @@ const typeboxCompiledErrors = (value: unknown): unknown => {
   return { success: false, issues: [...typeboxCompiledUsers.Errors(value)] };
 };
 
-export async function registerLoadScenarios(): Promise<void> {
+async function registerLoadScenarios(): Promise<void> {
   const validate = { is: JIT.validate.is(UsersSchema), safeParse: JIT.validate.safeParse(UsersSchema) };
   const aot = await loadAotUsers();
 

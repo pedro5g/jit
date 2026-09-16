@@ -265,7 +265,7 @@ function resolveScrubWrappers(schema: ATS.AnyTypeSchema): ResolvedScrubWrappers 
 }
 
 /** True when any leaf in the subtree is selected for rewriting. */
-export function subtreeMatches(
+function subtreeMatches(
   schema: ATS.AnyTypeSchema,
   selector: ScrubSelector,
   seen: Set<ATS.AnyTypeSchema> = new Set()

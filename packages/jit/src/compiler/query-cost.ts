@@ -16,7 +16,7 @@ export const QUERY_COST_WEIGHTS = Object.freeze({
   collection: 8,
 });
 
-export type QueryCostWeights = typeof QUERY_COST_WEIGHTS;
+type QueryCostWeights = typeof QUERY_COST_WEIGHTS;
 
 /** Semantic weight of one normalized condition operator. */
 export function queryOperatorCost(operator: string): number {

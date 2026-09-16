@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "esbuild";
 import { AOT, JIT } from "../../index.js";
+import { createPriorityRules } from "./aot-test-utils.js";
 
 describe("JIT AOT tree-shaking (real bundler proof)", () => {
   let outDir: string;
@@ -140,16 +141,7 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
   });
 
   it("should ship only the selected rules sink", async () => {
-    const Transaction = JIT.object({ amount: JIT.number(), country: JIT.string() });
-    const Rules = JIT.rules(Transaction)
-      .inputs({ risk: JIT.number() })
-      .rule("review", {
-        when: (query, input) => query.or(query.gte("amount", 10_000), query.gte(input.field("risk"), 80)),
-      })
-      .rule("block", {
-        priority: 100,
-        when: (query, input) => query.and(query.eq("country", "BR"), query.gte(input.field("risk"), 95)),
-      });
+    const Rules = createPriorityRules();
 
     AOT.generate({ artifacts: { testRule: Rules.test }, outDir });
     const bundled = await bundle(

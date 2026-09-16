@@ -100,6 +100,7 @@ function defaultTo<
   return /* @__PURE__ */ createBuilder(Transform.default(unwrapSchema(schema), defaultValue));
 }
 
+/** Provides the JIT default operation for the supplied input. */
 export { defaultTo as default };
 
 /**
@@ -195,4 +196,5 @@ export interface CoerceFactory extends NativeCoercions {
   ): Builder<CoerceSchema<TSchema>>;
 }
 
+/** Provides the JIT coerce configuration used by the public contract. */
 export const coerce: CoerceFactory = Object.assign(coerceWith, nativeCoercions);

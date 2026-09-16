@@ -48,7 +48,7 @@ describe("JIT.state.patch.merge (RFC 7396)", () => {
     expect(merge(value, { name: "Ada" })).toBe(value);
   });
 
-  it("does not mutate the input", () => {
+  it("does not mutate the input while applying a merge patch", () => {
     merge(value, { address: { city: "Paris" }, name: null });
     expect(value).toEqual({ id: 1, name: "Ada", address: { city: "London", zip: "E1" }, tags: ["a", "b"] });
   });

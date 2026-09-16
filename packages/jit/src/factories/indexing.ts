@@ -48,6 +48,7 @@ export interface KeyedIndexPlan<TRow, TIndex> extends IndexPlan<TRow, TIndex> {
   grouped(): IndexPlan<TRow, Grouped<TIndex>>;
 }
 
+/** Provides the JIT index builder operation for the supplied input. */
 export interface IndexBuilder<TSchema extends ATS.AnyTypeSchema>
   extends KeyedIndexPlan<RowOf<TSchema>, Map<unknown, RowOf<TSchema>>> {
   by<const TKeys extends readonly [RowKey<TSchema>, ...RowKey<TSchema>[]]>(

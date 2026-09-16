@@ -24,6 +24,7 @@ import { emitPropertyAccess } from "./source/access.js";
  * @returns A deterministic numeric hash.
  */
 export type Hash<T = unknown> = (value: T) => number;
+/** Describes the JIT hash method contract used by the public API. */
 export type HashMethod<T = unknown> = (this: T) => number;
 
 type HashSchema = ATS.AnyTypeSchema & {

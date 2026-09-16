@@ -1,5 +1,6 @@
 import { type IRVar, irVar } from "./ir.js";
 
+/** Describes the JIT scope contract used by the public API. */
 export class Scope {
   readonly #counts = new Map<string, number>();
   readonly #names = new Set<string>();

@@ -7,6 +7,7 @@ import { JIT as DefineJIT } from "../define.js";
 import { AOT } from "../index.js";
 import { getArtifact } from "../runtime/artifact-registry.js";
 import { JIT as RuntimeJIT } from "../runtime.js";
+import { createSecurityPipeline } from "./pipeline-fixture.js";
 
 type UnknownArtifact = (...args: unknown[]) => unknown;
 
@@ -600,23 +601,7 @@ describe("runtime and define entrypoints", () => {
     const outDir = mkdtempSync(join(tmpdir(), "jit-define-full-pipeline-"));
 
     try {
-      const User = DefineJIT.object({
-        id: DefineJIT.number(),
-        role: DefineJIT.enum(["admin", "member"]),
-        name: DefineJIT.string(),
-        email: DefineJIT.string().pii("mask"),
-        note: DefineJIT.string().sanitize(),
-      });
-      const publicUsers = DefineJIT.json
-        .parse(DefineJIT.array(User))
-        .validate()
-        .transform(User, { name: (name) => name.trim().toUpperCase() })
-        .update({ name: "PUBLIC" })
-        .sanitize()
-        .mask()
-        .filter((query) => query.eq("role", "admin"))
-        .select("id", "name", "email", "note")
-        .to.json();
+      const publicUsers = createSecurityPipeline(DefineJIT);
 
       AOT.generate({ schemas: {}, artifacts: { publicUsers }, outDir });
 

@@ -1,44 +1,19 @@
-import * as ATS from "../../core/ats/index.js";
-import { JITError } from "../../errors/index.js";
-import type { RuntimeTypeNode } from "../runtime-type/runtime-type-node.js";
+import type * as ATS from "../../core/ats/index.js";
 import {
-  type ArrayNode,
-  buildRecursiveProgram,
-  buildSchemaNode,
-  flattenObjectIntersection,
-  type GuardNode,
-  isPrimitiveLikeSchema,
-  type MapNode,
-  type ObjectNode,
-  type RecordNode,
+  buildStructuralIR,
   type RecursiveHelper,
-  type RecursiveNode,
-  type SetNode,
-  type TupleNode,
+  type StructuralIRNode,
+  type StructuralIROption,
 } from "../schema-nodes.js";
 import { findRecursiveSchemas } from "../schema-recursion.js";
 
-export type DiffIRNode =
-  | { readonly kind: "reuse" }
-  | { readonly kind: "date" }
-  | { readonly kind: "union"; readonly options: readonly DiffIROption[] }
-  | { readonly kind: "intersection"; readonly options: readonly DiffIRNode[] }
-  | { readonly kind: "discriminatedUnion"; readonly discriminator: string; readonly options: readonly DiffIROption[] }
-  | ObjectNode<DiffIRNode>
-  | RecordNode<DiffIRNode>
-  | TupleNode<DiffIRNode>
-  | ArrayNode<DiffIRNode>
-  | SetNode<DiffIRNode>
-  | MapNode<DiffIRNode>
-  | RuntimeTypeNode<DiffIRNode>
-  | GuardNode<DiffIRNode>
-  | RecursiveNode;
+/** Describes the node tree consumed by the diff emitter. */
+export type DiffIRNode = StructuralIRNode;
 
-export interface DiffIROption {
-  readonly schema: ATS.AnyTypeSchema;
-  readonly node: DiffIRNode;
-}
+/** Associates a source schema with the diff node built for it. */
+export type DiffIROption = StructuralIROption;
 
+/** Describes a complete diff program before JavaScript emission. */
 export interface DiffIRProgram {
   readonly kind: "program";
   readonly leftParam: "left";
@@ -48,72 +23,9 @@ export interface DiffIRProgram {
   readonly helpers: readonly RecursiveHelper<DiffIRNode>[];
 }
 
+/** Creates the JIT build diff ir artifact from the supplied input. */
 export function buildDiffIR(schema: ATS.AnyTypeSchema): DiffIRProgram {
-  const { body, helpers } = buildRecursiveProgram<DiffIRNode>(
-    schema,
-    (current, recurse) => buildDiffNode(current, recurse),
-    (id) => ({ kind: "recursive", id }),
-    findRecursiveSchemas(schema)
-  );
+  const { body, helpers } = buildStructuralIR(schema, findRecursiveSchemas(schema), "diff");
 
   return { kind: "program", leftParam: "left", rightParam: "right", body, helpers };
-}
-
-function buildDiffNode(schema: ATS.AnyTypeSchema, recurse: (child: ATS.AnyTypeSchema) => DiffIRNode): DiffIRNode {
-  if (schema.type === ATS.TypeName.date) return { kind: "date" };
-  if (schema.type === ATS.TypeName.union) return buildUnionNode(schema as ATS.UnionSchema, recurse);
-  if (schema.type === ATS.TypeName.intersection) {
-    // Options are merged at compile time so a key shared by two of them is
-    // visited once — otherwise the same change is reported twice.
-    const flattened = flattenObjectIntersection(schema);
-
-    if (flattened !== undefined) return buildDiffNode(flattened, recurse);
-    return buildIntersectionNode(schema as ATS.IntersectionSchema, recurse);
-  }
-  if (schema.type === ATS.TypeName.discriminatedUnion)
-    return buildDiscriminatedUnionNode(schema as ATS.DiscriminatedUnionSchema, recurse);
-
-  const node = buildSchemaNode(schema, recurse);
-  if (node) return node;
-  if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
-
-  throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler diff IR for type: ${schema.type}`);
-}
-
-function buildUnionNode(schema: ATS.UnionSchema, recurse: (child: ATS.AnyTypeSchema) => DiffIRNode): DiffIRNode {
-  if (schema.def.options.every((option) => isPrimitiveLikeSchema(option))) {
-    return { kind: "reuse" };
-  }
-
-  return {
-    kind: "union",
-    options: schema.def.options.map((option) => ({
-      schema: option,
-      node: recurse(option),
-    })),
-  };
-}
-
-function buildIntersectionNode(
-  schema: ATS.IntersectionSchema,
-  recurse: (child: ATS.AnyTypeSchema) => DiffIRNode
-): DiffIRNode {
-  return {
-    kind: "intersection",
-    options: schema.def.options.map(recurse),
-  };
-}
-
-function buildDiscriminatedUnionNode(
-  schema: ATS.DiscriminatedUnionSchema,
-  recurse: (child: ATS.AnyTypeSchema) => DiffIRNode
-): DiffIRNode {
-  return {
-    kind: "discriminatedUnion",
-    discriminator: schema.def.discriminator,
-    options: schema.def.options.map((option) => ({
-      schema: option,
-      node: recurse(option),
-    })),
-  };
 }

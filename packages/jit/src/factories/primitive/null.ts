@@ -15,4 +15,5 @@ function nullType(message?: ValidationMessage): Builder<NullSchema> {
   );
 }
 
+/** Provides the JIT null operation for the supplied input. */
 export { nullType as null };

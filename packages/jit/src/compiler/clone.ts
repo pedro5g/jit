@@ -12,6 +12,7 @@ import { emitClone, emitCloneBodyWithBindings } from "./clone/emit-clone.js";
  * @returns A deep clone of `value`.
  */
 export type Clone<T = unknown> = (value: T) => T;
+/** Describes the JIT clone method contract used by the public API. */
 export type CloneMethod<T = unknown> = (this: T) => T;
 
 /**

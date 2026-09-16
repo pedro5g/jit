@@ -5,9 +5,12 @@ import { CodeWriter as OrderingCodeWriter } from "./emitter/code-writer.js";
 import { isNullishField, resolveRowField, resolveRowObjectSchema, resolveScalarKeyKind } from "./row-keys.js";
 import { emitPropertyAccess } from "./source/access.js";
 
+/** Describes the JIT order direction contract used by the public API. */
 export type OrderDirection = "asc" | "desc";
+/** Describes the JIT ordering value kind contract used by the public API. */
 export type OrderingValueKind = import("./row-keys.js").ScalarKeyKind;
 
+/** Describes the JIT ordering criterion contract used by the public API. */
 export interface OrderingCriterion {
   readonly key: string;
   readonly direction: OrderDirection;
@@ -20,6 +23,7 @@ export interface OrderingDescriptor {
   readonly criteria: readonly OrderingCriterion[];
 }
 
+/** Returns the JIT resolve ordering descriptor result for the supplied input. */
 export function resolveOrderingDescriptor(
   schema: ATS.AnyTypeSchema,
   criteria: readonly { readonly key: string; readonly direction: OrderDirection }[]
@@ -55,6 +59,7 @@ export function resolveOrderingDescriptor(
   return Object.freeze({ criteria: Object.freeze(resolved) });
 }
 
+/** Emits deterministic source for the JIT emit ordering comparator body operation. */
 export function emitOrderingComparatorBody(
   writer: CodeWriter,
   descriptor: OrderingDescriptor,
@@ -123,6 +128,7 @@ export function emitOrderingComparatorBody(
   if (!terminated) writer.line("return 0;");
 }
 
+/** Emits deterministic source for the JIT emit ordering comparator body source operation. */
 export function emitOrderingComparatorBodySource(descriptor: OrderingDescriptor): string {
   const writer = new OrderingCodeWriter();
   emitOrderingComparatorBody(writer, descriptor);

@@ -31,6 +31,7 @@ export type CallableArtifact<TFunction extends FunctionLike> = TFunction & {
   explain(): ExecutionPlan;
 };
 
+/** Provides the JIT execution artifact operation for the supplied input. */
 export type ExecutionArtifact<TInput, TOutput> = CallableArtifact<(input: TInput) => TOutput>;
 
 /**
@@ -41,6 +42,7 @@ export type StandardArtifact<TFunction extends FunctionLike, TOutput> = Callable
   readonly "~standard": StandardSchemaProps<unknown, TOutput>;
 };
 
+/** Provides the JIT value artifact operation for the supplied input. */
 export type ValueArtifact<TInput, TOutput, TSchema extends ATS.AnyTypeSchema> = ExecutionArtifact<TInput, TOutput> & {
   readonly schema: TSchema;
   /** Standard Schema interop; `validate` runs the compiled validator. */
@@ -60,6 +62,7 @@ export type ValueArtifact<TInput, TOutput, TSchema extends ATS.AnyTypeSchema> = 
   readonly to: ValueSinks<TInput, TOutput>;
 };
 
+/** Provides the JIT collection artifact operation for the supplied input. */
 export type CollectionArtifact<
   TInput,
   TElement,
@@ -92,18 +95,21 @@ export type CollectionArtifact<
   readonly to: CollectionSinks<TInput, TElement>;
 };
 
+/** Provides the JIT schema artifact operation for the supplied input. */
 export type SchemaArtifact<TInput, TSchema extends ATS.AnyTypeSchema> = [TSchema] extends [
   ATS.ArraySchema<infer TElement>,
 ]
   ? CollectionArtifact<TInput, ATS.TypeofSchema<TElement>, TSchema>
   : ValueArtifact<TInput, ATS.TypeofSchema<TSchema>, TSchema>;
 
+/** Describes the JIT value sinks contract used by the public API. */
 export interface ValueSinks<TInput, TOutput> {
   array(): ExecutionArtifact<TInput, TOutput>;
   json(): ExecutionArtifact<TInput, string>;
   binary(): ExecutionArtifact<TInput, Uint8Array>;
 }
 
+/** Describes the JIT collection sinks contract used by the public API. */
 export interface CollectionSinks<TInput, TElement> {
   array(): ExecutionArtifact<TInput, TElement[]>;
   json(): ExecutionArtifact<TInput, string>;
@@ -424,6 +430,7 @@ function runtimeConstructStage(schema: ATS.AnyTypeSchema): readonly ExecutionSta
   ];
 }
 
+/** Provides the JIT json stringify operation for the supplied input. */
 export function jsonStringify<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): ExecutionArtifact<ATS.TypeofSchema<TSchema>, string> {
@@ -452,6 +459,7 @@ export function jsonStringify<TSchema extends ATS.AnyTypeSchema>(
   return createExecutionArtifact(plan, () => compileSerialize(unwrapped));
 }
 
+/** Provides the JIT binary encode operation for the supplied input. */
 export function binaryEncode<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): ExecutionArtifact<ATS.TypeofSchema<TSchema>, Uint8Array> {
@@ -525,6 +533,7 @@ export function operationArtifact<TSchema extends ATS.AnyTypeSchema, TFunction e
   return artifact;
 }
 
+/** Converts the supplied input into the JIT mapped value representation. */
 export function mappedValue<TInput, TSource extends ATS.AnyTypeSchema, TTarget extends ATS.AnyTypeSchema>(
   source: ExecutionArtifact<TInput, ATS.TypeofSchema<TSource>>,
   sourceSchema: TSource,
@@ -541,6 +550,7 @@ export function mappedValue<TInput, TSource extends ATS.AnyTypeSchema, TTarget e
   return artifactForSchema(artifact, targetSchema) as SchemaArtifact<TInput, TTarget>;
 }
 
+/** Converts the supplied input into the JIT mapped collection representation. */
 export function mappedCollection<TInput, TSource extends ATS.AnyTypeSchema, TTarget extends ATS.AnyTypeSchema>(
   state: CollectionState<TInput, ATS.TypeofSchema<TSource>, ATS.ArraySchema<TSource>>,
   target: SchemaInput<TTarget>,

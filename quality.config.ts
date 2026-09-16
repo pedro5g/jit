@@ -34,7 +34,7 @@ const qualityConfig: QualityConfig = {
     { name: "compiler", patterns: ["packages/jit/src/compiler/**"], dependsOn: ["shared", "core", "runtime"] },
     {
       name: "runtime",
-      patterns: ["packages/jit/src/runtime/**", "packages/jit/src/runtime.ts"],
+      patterns: ["packages/jit/src/runtime/**"],
       dependsOn: ["shared", "core", "compiler"],
     },
     {
@@ -51,6 +51,7 @@ const qualityConfig: QualityConfig = {
       name: "host",
       patterns: [
         "packages/jit/src/index.ts",
+        "packages/jit/src/runtime.ts",
         "packages/jit/src/define.ts",
         "packages/jit/src/mcp.ts",
         "packages/jit/src/mcp-project.ts",
@@ -58,6 +59,15 @@ const qualityConfig: QualityConfig = {
       ],
       dependsOn: ["shared", "core", "compiler", "runtime", "factories", "aot"],
     },
+  ],
+  compositionRoots: [
+    "packages/jit/src/aot/generate.ts",
+    "packages/jit/src/compiler/execution-lower.ts",
+    "packages/jit/src/compiler/query.ts",
+    "packages/jit/src/define.ts",
+    "packages/jit/src/factories/class.ts",
+    "packages/jit/src/factories/runtime-ops.ts",
+    "tools/quality/cli.ts",
   ],
   ignoredPaths: [
     "node_modules/**",

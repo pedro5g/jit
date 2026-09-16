@@ -11,8 +11,10 @@ import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
  */
 
 export type ScalarKeyKind = "direct" | "numeric" | "date";
+/** Describes the JIT scalar key domain contract used by the public API. */
 export type ScalarKeyDomain = "string" | "number" | "bigint" | "boolean" | "date";
 
+/** Describes the JIT row object schema contract used by the public API. */
 export type RowObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
 
 /** Unwraps a row schema, an array/set of rows, or a Runtime Type over either. */

@@ -82,6 +82,7 @@ const DOMAIN_STATE = Symbol("jit.class.domainState");
 const EVENT_BUFFER = Symbol("jit.class.events");
 const CLASS_FIELD_BUILDER = Symbol("jit.class.fieldBuilder");
 const TRUSTED_MATERIALIZER = "__jitMaterialize";
+/** Describes the JIT construction mode contract used by the public API. */
 export type ConstructionMode = "constructor" | "factory";
 
 export type {
@@ -105,12 +106,14 @@ export type { FactoryReturnMode };
 
 const FACTORY_FAILURE: unique symbol = Symbol.for("jit.factory.failure") as never;
 
+/** Provides the JIT factory failure operation for the supplied input. */
 export interface FactoryFailure<TError> {
   readonly [FACTORY_FAILURE]: true;
   readonly ok: false;
   readonly error: TError;
 }
 
+/** Provides the JIT class json options operation for the supplied input. */
 export interface ClassJsonOptions {
   readonly method?: string;
 }
@@ -120,12 +123,14 @@ type ClassJsonMethods<TOptions extends ClassJsonOptions> = NamedMethod<
   () => string
 >;
 
+/** Provides the JIT class json capability operation for the supplied input. */
 export interface ClassJsonCapability<TOptions extends ClassJsonOptions = ClassJsonOptions>
   extends ClassCapability<ClassJsonMethods<TOptions>> {
   readonly kind: "class.json";
   readonly __options?: TOptions;
 }
 
+/** Provides the JIT factory either operation for the supplied input. */
 export type FactoryEither<TValue, TError> = TValue | FactoryFailure<TError>;
 
 type ClassRuntimeTraits = ATS.DefaultRuntimeTypeTraits;
@@ -171,10 +176,12 @@ export interface FactoryValidationOptions {
   readonly hydrate?: boolean;
 }
 
+/** Describes the JIT factory construction context contract used by the public API. */
 export interface FactoryConstructionContext<TInstance = unknown> {
   readonly construct: (state: unknown) => TInstance;
 }
 
+/** Describes the JIT assertion options contract used by the public API. */
 export interface AssertionOptions {
   /** Identifier reported by the failure; defaults to the field the condition names. */
   readonly rule?: string;
@@ -360,6 +367,7 @@ function policyFailure(policy: FactoryPolicyState, error: unknown): never | unkn
   throw error;
 }
 
+/** Returns whether the JIT is failure condition holds. */
 export function isFailure<TError>(value: unknown): value is FactoryFailure<TError> {
   return (
     Object_hasOwn(value, FACTORY_FAILURE) &&
@@ -676,6 +684,7 @@ type ExtensionOverrideMemberKeys<TExtension> =
 type IsAny<TValue> = 0 extends 1 & TValue ? true : false;
 type IsOverrideValue<TValue> = IsAny<TValue> extends true ? false : TValue extends OverrideDescriptor ? true : false;
 
+/** Provides the JIT class extension builder operation for the supplied input. */
 export interface ClassExtensionBuilder<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
@@ -754,6 +763,7 @@ type FieldBuilderDefinition<
 } & (TGetter extends Function ? { readonly getter: TGetter } : {}) &
   (TSetter extends Function ? { readonly setter: TSetter } : {});
 
+/** Provides the JIT class extension field builder operation for the supplied input. */
 export interface ClassExtensionFieldBuilder<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
@@ -886,11 +896,13 @@ export declare abstract class DomainStateCarrier<TProps extends object, TIdentit
   protected readonly _identityKeys: TIdentityKeys;
 }
 
+/** Provides the JIT public instance operation for the supplied input. */
 export type PublicInstance<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ResolveTypeofSchema<TSchema>,
 > = TInstance extends object ? { [TKey in keyof TInstance]: TInstance[TKey] } : TInstance;
 
+/** Provides the JIT internal instance operation for the supplied input. */
 export type InternalInstance<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
@@ -1123,9 +1135,7 @@ type AddSchemaFields<TSchema extends ATS.AnyTypeSchema, TExtension> =
         TCatchall
       >
     : TSchema;
-// The public value remains Date/number rather than `Readonly<Date>`. The
-// inner type is retained for the declaration-time managed-field marker; the
-// create boundary makes these fields optional explicitly below.
+// INVARIANT: The public value remains Date/number rather than `Readonly<Date>`; the inner type is retained for the declaration-time managed-field marker and the create boundary makes these fields optional explicitly below.
 type ManagedReadonlySchema<TInner extends ATS.AnyTypeSchema> = ATS.BaseSchema<
   ATS.TypeofSchema<TInner>,
   "readonly",
@@ -1329,6 +1339,7 @@ type AllHiddenClassMemberKeys<TExtensions extends readonly AnyClassExtension[]> 
   TExtensions[number] extends infer TExtension ? HiddenClassMemberKeys<NormalizedClassExtension<TExtension>> : never;
 type MutableSurface<TValue> = TValue extends object ? { -readonly [TKey in keyof TValue]: TValue[TKey] } : TValue;
 
+/** Executes the JIT runtime class operation for the supplied input. */
 export interface RuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,
@@ -1432,6 +1443,7 @@ export type ConstructorRuntimeClass<
       Omit<ConstructorRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, "accessors">;
   };
 
+/** Describes the JIT factory options contract used by the public API. */
 export interface FactoryOptions {
   readonly create?: string | false | ClassMemberDescriptor<ClassFactoryMemberDescriptor>;
   readonly hydrate?: string | false | ClassMemberDescriptor<ClassFactoryMemberDescriptor>;
@@ -1555,19 +1567,23 @@ type InitialRuntimeTypeTraits<TSchema extends ATS.AnyTypeSchema> = [NestedFactor
 
 type InheritedFactoryMode<TSchema extends ATS.AnyTypeSchema> = InheritedFactoryModeFor<TSchema>;
 
+/** Describes the JIT accessor visibility contract used by the public API. */
 export type AccessorVisibility = "public" | "protected" | "private" | false;
 
+/** Describes the JIT accessor member contract used by the public API. */
 export interface AccessorMember {
   readonly name?: string;
   readonly visibility?: AccessorVisibility;
 }
 
+/** Describes the JIT field accessor options contract used by the public API. */
 export interface FieldAccessorOptions {
   readonly field?: AccessorVisibility;
   readonly get?: AccessorVisibility | AccessorMember;
   readonly set?: AccessorVisibility | AccessorMember;
 }
 
+/** Describes the JIT accessor options contract used by the public API. */
 export interface AccessorOptions<TSchema extends ATS.AnyTypeSchema> {
   readonly default?: FieldAccessorOptions;
   readonly fields?: Partial<Record<Extract<keyof ATS.TypeofSchema<TSchema>, string>, FieldAccessorOptions>>;
@@ -1668,6 +1684,7 @@ type ResolvedAssertionError<TOptions, TError> = TOptions extends {
   ? TError | TNext
   : TError | DomainAssertionError;
 
+/** Describes the JIT configured runtime class contract used by the public API. */
 export type ConfiguredRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
@@ -1791,6 +1808,7 @@ export type ConfiguredRuntimeClass<
         ): ConfiguredRuntimeClass<TSchema, TInstance, TNext, TMode, TError, TValidated, true, TTraits, TEncapsulated>;
       });
 
+/** Describes the JIT factory runtime class contract used by the public API. */
 export type FactoryRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,
@@ -1967,6 +1985,7 @@ type MixinThisSurface<TFields extends ClassMethodsInput, TRequires extends Class
   ATS.ObjectSchema<SchemaFieldShape<TFields & TRequires>>
 >;
 
+/** Provides the JIT class mixin definition operation for the supplied input. */
 export interface ClassMixinDefinition<
   TFields extends ClassMethodsInput = ClassMethodsInput,
   TMethods extends ClassMethodsInput = ClassMethodsInput,
@@ -1978,6 +1997,7 @@ export interface ClassMixinDefinition<
   readonly methods?: TMethods & ThisType<MixinThisSurface<TFields, TRequires>>;
 }
 
+/** Provides the JIT class mixin operation for the supplied input. */
 export interface ClassMixin<
   TOutput extends ClassMethodsInput = ClassMethodsInput,
   TRequires extends ClassMethodsInput = ClassMethodsInput,
@@ -1998,6 +2018,7 @@ export function classMixin<
   readonly fields?: TFields;
   readonly methods?: TMethods & ThisType<MixinThisSurface<TFields, TRequires>>;
 }): ClassMixin<TFields & TMethods, TRequires>;
+/** Provides the JIT class mixin operation for the supplied input. */
 export function classMixin(definition: ClassMixinDefinition): ClassMixin {
   const fieldNames = new Set(Object.getOwnPropertyNames(definition.fields ?? {}));
   const methodNames = Object.getOwnPropertyNames(definition.methods ?? {});
@@ -2149,6 +2170,7 @@ export interface DomainEventBrand {
   readonly [DOMAIN_EVENT]: true;
 }
 
+/** Provides the JIT any domain event operation for the supplied input. */
 export type AnyDomainEvent = DomainEventBrand;
 
 type DomainEventConstructor = abstract new (...args: never[]) => DomainEventBrand;
@@ -2170,9 +2192,11 @@ interface CloneMethods {
   clone(): this;
 }
 type ValueAccessor<TValue> = { readonly value: TValue };
+/** Provides the JIT scalar value object operation for the supplied input. */
 export interface ScalarValueObject<TValue> extends EqualsMethods, HashCodeMethods {
   readonly value: TValue;
 }
+/** Provides the JIT timestamp options operation for the supplied input. */
 export interface TimestampOptions {
   readonly createdAt?: string;
   readonly updatedAt?: string;
@@ -2184,6 +2208,7 @@ export interface TimestampOptions {
     readonly touch?: string;
   };
 }
+/** Provides the JIT soft delete options operation for the supplied input. */
 export interface SoftDeleteOptions {
   readonly field?: string;
   /** Uses the timestamp clock when omitted and timestamps are installed. */
@@ -2194,6 +2219,7 @@ export interface SoftDeleteOptions {
     readonly isDeleted?: string;
   };
 }
+/** Provides the JIT versioned options operation for the supplied input. */
 export interface VersionedOptions {
   readonly field?: string;
 }
@@ -2220,24 +2246,28 @@ type SoftDeleteMethodsFor<TOptions> = NamedMethod<OptionMethodName<TOptions, "de
   NamedMethod<OptionMethodName<TOptions, "restore", "restore">, () => void> &
   Readonly<NamedMethod<OptionMethodName<TOptions, "isDeleted", "isDeleted">, boolean>>;
 
+/** Provides the JIT timestamp capability operation for the supplied input. */
 export interface TimestampCapability<TOptions extends TimestampOptions = TimestampOptions>
   extends ClassCapability<TimestampMethodsFor<TOptions>> {
   readonly kind: "ddd.timestamps";
   readonly __options?: TOptions;
 }
 
+/** Provides the JIT soft delete capability operation for the supplied input. */
 export interface SoftDeleteCapability<TOptions extends SoftDeleteOptions = SoftDeleteOptions>
   extends ClassCapability<SoftDeleteMethodsFor<TOptions>> {
   readonly kind: "ddd.softDelete";
   readonly __options?: TOptions;
 }
 
+/** Provides the JIT versioned capability operation for the supplied input. */
 export interface VersionedCapability<TOptions extends VersionedOptions = VersionedOptions>
   extends ClassCapability<VersionedMethods> {
   readonly kind: "ddd.versioned";
   readonly __options?: TOptions;
 }
 
+/** Provides the JIT aggregate runtime class operation for the supplied input. */
 export type AggregateRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
@@ -2368,6 +2398,7 @@ interface ClassDefinitionState {
   readonly identity: IdentityState;
 }
 
+/** Describes the JIT identity state contract used by the public API. */
 export type IdentityState =
   | { readonly state: "none" }
   | { readonly state: "resolved"; readonly key: string; readonly explicit: boolean }
@@ -4404,6 +4435,7 @@ function resolveAccessorMember(key: string, member: AccessorVisibility | Accesso
   return typeof member === "string" ? key : (member.name ?? key);
 }
 
+/** Provides the JIT class factory operation for the supplied input. */
 export interface ClassFactory {
   <TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): ConstructorRuntimeClass<TSchema>;
   abstract<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): AbstractRuntimeClass<TSchema>;
@@ -4497,6 +4529,7 @@ export const classType: ClassFactory = Object.assign(classFactory, {
 });
 export type { OverrideDescriptor } from "../classes/override.js";
 export { override } from "../classes/override.js";
+/** Provides the JIT class operation for the supplied input. */
 export { classType as class };
 
 const valueAccessorCapability = capability<ValueAccessor<unknown>>("value", (prototype) => {
@@ -4549,6 +4582,7 @@ type ValueObjectRuntimeClass<TSchema extends ATS.AnyTypeSchema> =
     ? FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>
     : ScalarFactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>;
 
+/** Provides the JIT abstract value object operation for the supplied input. */
 export function abstractValueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): ValueObjectRuntimeClass<TSchema> {
@@ -4582,6 +4616,7 @@ export function uniqueIdentifier(): IdentifierRuntimeClass<DefaultIdentifierSche
 export function uniqueIdentifier<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): IdentifierRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>>;
+/** Provides the JIT unique identifier operation for the supplied input. */
 export function uniqueIdentifier<TSchema extends ATS.AnyTypeSchema>(schema?: SchemaInput<TSchema>): unknown {
   const identifierSchema =
     schema === undefined
@@ -4708,6 +4743,7 @@ function findRuntimeTypeSchema(schema: ATS.AnyTypeSchema): ATS.RuntimeTypeSchema
 /** Adds structural timestamp fields and lifecycle mutation semantics. */
 export function timestamps(): TimestampCapability<{}>;
 export function timestamps<const TOptions extends TimestampOptions>(options?: TOptions): TimestampCapability<TOptions>;
+/** Provides the JIT timestamps operation for the supplied input. */
 export function timestamps<const TOptions extends TimestampOptions>(options?: TOptions): TimestampCapability<TOptions> {
   const resolved = options ?? ({} as TOptions);
   const touch = resolved.methods?.touch ?? "touch";
@@ -4722,6 +4758,7 @@ export function timestamps<const TOptions extends TimestampOptions>(options?: TO
 /** Adds structural soft-delete state and reversible lifecycle methods. */
 export function softDelete(): SoftDeleteCapability<{}>;
 export function softDelete<const TOptions extends SoftDeleteOptions>(options: TOptions): SoftDeleteCapability<TOptions>;
+/** Provides the JIT soft delete operation for the supplied input. */
 export function softDelete<const TOptions extends SoftDeleteOptions>(
   options?: TOptions
 ): SoftDeleteCapability<TOptions> {
@@ -4742,6 +4779,7 @@ export function softDelete<const TOptions extends SoftDeleteOptions>(
 /** Adds structural version state and lifecycle versioning. */
 export function versioned(): VersionedCapability<{}>;
 export function versioned<const TOptions extends VersionedOptions>(options?: TOptions): VersionedCapability<TOptions>;
+/** Provides the JIT versioned operation for the supplied input. */
 export function versioned<const TOptions extends VersionedOptions>(options?: TOptions): VersionedCapability<TOptions> {
   const resolved = options ?? ({} as TOptions);
   return Object.freeze({
@@ -4786,7 +4824,15 @@ function createEntity<TSchema extends ATS.AnyTypeSchema>(
   >;
 }
 
-/** Concrete factory-first Entity with explicit or inferred identity semantics. */
+/**
+ * Concrete factory-first Entity with explicit or inferred identity semantics.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }));
+ * const user = User.create({ id: "u1", name: "Ada" });
+ * ```
+ */
 export function entity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema> & (IsUnion<IdentityKeys<TSchema>> extends true ? never : unknown)
 ): EntityRuntimeClassFor<TSchema, DddInstance<TSchema>, InitialRuntimeTypeTraits<TSchema>>;
@@ -4845,7 +4891,16 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   return runtime as unknown as AggregateRuntimeClass<TSchema, DddInstance<TSchema>>;
 }
 
-/** Concrete Aggregate Root with controlled mutation and an ordered event buffer. */
+/**
+ * Concrete Aggregate Root with controlled mutation and an ordered event buffer.
+ *
+ * @example
+ * ```ts
+ * const Order = JIT.ddd.aggregateRoot(JIT.object({ id: JIT.string() }));
+ * const order = Order.create({ id: "o1" });
+ * order.pullEvents();
+ * ```
+ */
 export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema> & (IdentityKeys<TSchema> extends never ? never : unknown)
 ): AggregateRuntimeClass<TSchema, DddInstance<TSchema>>;
@@ -4902,6 +4957,7 @@ type DomainEventOutput<
 > = DomainEventState<TPayload, TType, TVersion> & {
   readonly "~event": StandardEvent;
 };
+/** Provides the JIT domain event operation for the supplied input. */
 export type DomainEvent<TPayload extends ATS.AnyTypeSchema, TType extends string, TVersion extends number> = Omit<
   RuntimeClass<EventSchema<TPayload, TType, TVersion>, DomainEventOutput<TPayload, TType, TVersion>>,
   "create" | "hydrate"

@@ -6,13 +6,16 @@ import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/com
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitSerializeSource } from "./serialize.js";
 
+/** Describes the JIT json chunks options contract used by the public API. */
 export interface JsonChunksOptions {
   /** Approximate UTF-16 code-unit budget per emitted chunk. Defaults to 16 KiB. */
   readonly chunkBytes?: number;
 }
 
+/** Describes the JIT stringify chunks contract used by the public API. */
 export type StringifyChunks<T> = (value: T) => IterableIterator<string>;
 
+/** Emits deterministic source for the JIT emit stringify chunks source operation. */
 export function emitStringifyChunksSource(schema: ATS.AnyTypeSchema, options: JsonChunksOptions = {}): string {
   const array = resolveWrappers(schema).base;
 
@@ -45,6 +48,7 @@ return stringifyChunks;
 })()`;
 }
 
+/** Creates the JIT compile stringify chunks artifact from the supplied input. */
 export function compileStringifyChunks<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   chunks: JsonChunksOptions = {},

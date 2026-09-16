@@ -3,6 +3,7 @@ import type { Builder } from "../core/builder/index.js";
 import type { Regexes } from "../shared/index.js";
 import { string } from "./primitive/string.js";
 
+/** Returns whether the JIT iso factories condition holds. */
 export interface IsoFactories {
   /** Strict calendar date in `YYYY-MM-DD` form. */
   date(message?: string): Builder<StringSchema>;

@@ -73,8 +73,11 @@ export function isTrivialComment(text: string): boolean {
 }
 
 export function isCommentedCode(text: string): boolean {
+  const value = text.trim();
+  if (/^\*?\s*(?:example|param|returns)\b/i.test(value)) return false;
   return (
-    /(?:^|\s)(?:if|for|while|const|let|return|throw|import|export)\s*\([^)]*\)|[{};]\s*$/.test(text) &&
-    !/^\*?\s*(?:example|param|returns)\b/i.test(text)
+    /^(?:if|for|while|switch|catch)\s*\(/.test(value) ||
+    /^(?:const|let|var|return|throw|import|export)\b/.test(value) ||
+    /^(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\(|^(?:[A-Za-z_$][\w$]*)\s*(?:\+\+|--)/.test(value)
   );
 }

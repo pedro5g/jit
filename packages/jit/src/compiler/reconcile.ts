@@ -17,9 +17,12 @@ export interface ReconcileChannels {
   readonly unchanged: boolean;
 }
 
+/** Describes the JIT reconcile changes contract used by the public API. */
 export type ReconcileChanges = "value" | "diff";
+/** Describes the JIT reconcile sink contract used by the public API. */
 export type ReconcileSink = "result" | "iterator" | "visitor";
 
+/** Describes the JIT reconcile descriptor contract used by the public API. */
 export interface ReconcileDescriptor {
   readonly key: string;
   /** A Date key is matched by timestamp, the way an index stores it. */
@@ -30,6 +33,7 @@ export interface ReconcileDescriptor {
   readonly sink: ReconcileSink;
 }
 
+/** Provides the JIT all channels configuration used by the public contract. */
 export const ALL_CHANNELS: ReconcileChannels = Object.freeze({
   added: true,
   removed: true,
@@ -37,6 +41,7 @@ export const ALL_CHANNELS: ReconcileChannels = Object.freeze({
   unchanged: true,
 });
 
+/** Returns the JIT resolve reconcile descriptor result for the supplied input. */
 export function resolveReconcileDescriptor(
   schema: ATS.AnyTypeSchema,
   key: string | undefined,
@@ -235,6 +240,7 @@ function readKey(descriptor: ReconcileDescriptor, row: string): string {
   return descriptor.date ? `${access}.getTime()` : access;
 }
 
+/** Provides the JIT reconcile cache key operation for the supplied input. */
 export function reconcileCacheKey(descriptor: ReconcileDescriptor): string {
   const { channels } = descriptor;
   const on = [channels.added && "a", channels.removed && "r", channels.changed && "c", channels.unchanged && "u"]
@@ -244,6 +250,7 @@ export function reconcileCacheKey(descriptor: ReconcileDescriptor): string {
   return `reconcile:${descriptor.sink}:${descriptor.key}:${descriptor.date}:${descriptor.changes}:${on}`;
 }
 
+/** Creates the JIT compile reconcile artifact from the supplied input. */
 export function compileReconcile<TResult>(
   schema: ATS.AnyTypeSchema,
   descriptor: ReconcileDescriptor,

@@ -1,6 +1,6 @@
 import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
-import { emitOpChain, isOpChain, type OpChain } from "../../factories/ops.js";
+import { emitOpChain, isOpChain, type OpChain } from "../../core/ops.js";
 import { Regexes } from "../../shared/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { emitSanitizeChain } from "../sanitize.js";
@@ -57,7 +57,7 @@ interface UnwrappedSchema {
  * not a sentence containing it. Only checks that have one declare it, so an
  * issue never allocates an object to say nothing.
  */
-export type CheckParams = Readonly<Record<string, string | number | boolean | readonly (string | number)[]>>;
+type CheckParams = Readonly<Record<string, string | number | boolean | readonly (string | number)[]>>;
 
 function emitCheckParams(params: CheckParams): string {
   const entries = Object.entries(params).map(([key, value]) => `${emitObjectKey(key)}: ${JSON.stringify(value)}`);
@@ -76,7 +76,7 @@ interface PathRef {
   readonly parts?: readonly string[];
 }
 
-export interface ValidatorBindings {
+interface ValidatorBindings {
   readonly names: readonly string[];
   readonly values: readonly unknown[];
 }
@@ -1650,7 +1650,7 @@ class ValidatorEmitter {
         const index = this.nextVar("i");
 
         if (build) this.writer.line(`${out} = {};`);
-        this.writer.line(`const ${keys} = Object.keys(${value});`);
+        this.writer.dynamicLine(`const ${keys} = Object.keys(${value});`);
         this.writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
         this.writer.indent(() => {
           const valueOut = this.emitNode(
@@ -1721,7 +1721,7 @@ class ValidatorEmitter {
           const keyTest = keys.map((key) => `${known}[${index}] !== ${emitLiteral(key)}`).join(" && ");
           const unknownTest = keys.length === 0 ? "true" : keyTest;
 
-          this.writer.line(`const ${known} = Object.keys(${value});`);
+          this.writer.dynamicLine(`const ${known} = Object.keys(${value});`);
           this.writer.line(`for (let ${index} = 0; ${index} < ${known}.length; ${index}++) {`);
           this.writer.indent(() => {
             if (unknownKeys === "strict") {
@@ -2323,7 +2323,7 @@ function hasNoEmptyCheck(schema: AnySchema): boolean {
 }
 
 /** True when parse output can differ from the input for this subtree. */
-export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
+function needsBuild(schema: ATS.AnyTypeSchema): boolean {
   const current = schema as AnySchema;
 
   switch (current.type) {

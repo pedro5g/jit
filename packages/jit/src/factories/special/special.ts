@@ -46,6 +46,7 @@ function nativeEnum<const TValues extends EnumValuesInput>(
   return /* @__PURE__ */ createBuilder(createSchema(TypeName.enum, withValidationMessage({ values }, message)));
 }
 
+/** Provides the JIT enum operation for the supplied input. */
 export { nativeEnum as enum };
 
 /**
@@ -98,6 +99,7 @@ export function custom<TOutput = unknown>(
   );
 }
 
+/** Provides the JIT template literal factory part operation for the supplied input. */
 export type TemplateLiteralFactoryPart = string | SchemaInput;
 
 /** Creates a template-literal string schema from literal and schema parts. */
@@ -115,6 +117,7 @@ export function templateLiteral<const TParts extends readonly TemplateLiteralFac
   );
 }
 
+/** Provides the JIT function schema options operation for the supplied input. */
 export interface FunctionSchemaOptions<
   TInput extends readonly SchemaInput[],
   TOutput extends SchemaInput | undefined = undefined,
@@ -157,6 +160,7 @@ function functionSchema<
   );
 }
 
+/** Provides the JIT function operation for the supplied input. */
 export { functionSchema as function, templateLiteral as templateLiterals };
 
 function temporalSchema<TKind extends TemporalKind>(kind: TKind): Builder<TemporalSchema<TKind, []>> {
@@ -167,6 +171,7 @@ function temporalSchema<TKind extends TemporalKind>(kind: TKind): Builder<Tempor
   );
 }
 
+/** Provides the JIT temporal factories operation for the supplied input. */
 export interface TemporalFactories {
   instant(): Builder<TemporalSchema<"instant", []>>;
   plainDate(): Builder<TemporalSchema<"plainDate", []>>;
@@ -178,6 +183,7 @@ export interface TemporalFactories {
   duration(): Builder<TemporalSchema<"duration", []>>;
 }
 
+/** Provides the JIT temporal operation for the supplied input. */
 export const temporal: TemporalFactories = {
   instant: () => temporalSchema("instant"),
   plainDate: () => temporalSchema("plainDate"),

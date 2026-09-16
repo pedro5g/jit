@@ -12,10 +12,14 @@ import { emitPropertyAccess } from "./source/access.js";
 import { emitLiteral } from "./source/literal.js";
 import { compileValidator } from "./validate.js";
 
+/** Provides the JIT ndjson chunk operation for the supplied input. */
 export type NdjsonChunk = string | Uint8Array;
+/** Provides the JIT ndjson input operation for the supplied input. */
 export type NdjsonInput = NdjsonChunk | Iterable<NdjsonChunk>;
+/** Describes the JIT ndjson sink contract used by the public API. */
 export type NdjsonSink = "result" | "iterator" | "visitor" | "ndjson";
 
+/** Describes the JIT ndjson descriptor contract used by the public API. */
 export interface NdjsonDescriptor {
   readonly schema: ATS.AnyTypeSchema;
   readonly outputSchema: ATS.AnyTypeSchema;
@@ -29,6 +33,7 @@ export interface NdjsonDescriptor {
 
 type ObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
 
+/** Creates the JIT create ndjson descriptor artifact from the supplied input. */
 export function createNdjsonDescriptor(schema: ATS.AnyTypeSchema, operation: "parse" | "stringify"): NdjsonDescriptor {
   expectNdjsonObject(schema);
   return Object.freeze({
@@ -43,6 +48,7 @@ export function createNdjsonDescriptor(schema: ATS.AnyTypeSchema, operation: "pa
   });
 }
 
+/** Provides the JIT append ndjson filter operation for the supplied input. */
 export function appendNdjsonFilter(
   descriptor: NdjsonDescriptor,
   condition: QueryConditionNode,
@@ -60,6 +66,7 @@ export function appendNdjsonFilter(
   });
 }
 
+/** Provides the JIT select ndjson operation for the supplied input. */
 export function selectNdjson(descriptor: NdjsonDescriptor, fields: readonly string[]): NdjsonDescriptor {
   const tree = buildProjectionTree(descriptor.schema, fields, "JIT.ndjson.parse().select()");
   return Object.freeze({
@@ -69,6 +76,7 @@ export function selectNdjson(descriptor: NdjsonDescriptor, fields: readonly stri
   });
 }
 
+/** Provides the JIT with ndjson sink operation for the supplied input. */
 export function withNdjsonSink(descriptor: NdjsonDescriptor, sink: NdjsonSink): NdjsonDescriptor {
   return Object.freeze({ ...descriptor, sink });
 }
@@ -97,6 +105,7 @@ function validateCondition(schema: ObjectSchema, condition: QueryConditionNode):
   }
 }
 
+/** Emits deterministic source for the JIT emit ndjson source operation. */
 export function emitNdjsonSource(descriptor: NdjsonDescriptor, validator = "__ndjsonValidator"): string {
   const writer = new CodeWriter();
 
@@ -253,6 +262,7 @@ function emitProjection(fields: readonly string[] | undefined): string {
   return `{ ${fields.map((field) => `${JSON.stringify(field)}: ${emitPropertyAccess("item", field)}`).join(", ")} }`;
 }
 
+/** Creates the JIT compile ndjson parse artifact from the supplied input. */
 export function compileNdjsonParse(descriptor: NdjsonDescriptor): (...args: never[]) => unknown {
   const validator = compileValidator(descriptor.schema);
   const source = emitNdjsonSource(descriptor);
@@ -266,6 +276,7 @@ export function compileNdjsonParse(descriptor: NdjsonDescriptor): (...args: neve
   return compiled;
 }
 
+/** Creates the JIT compile ndjson stringify artifact from the supplied input. */
 export function compileNdjsonStringify(descriptor: NdjsonDescriptor): (...args: never[]) => unknown {
   const compiled = globalThis.Function(`return ${emitNdjsonSource(descriptor)};`)() as (...args: never[]) => unknown;
   registerArtifact(compiled, { kind: "ndjson-plan", descriptor });

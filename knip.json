@@ -1,24 +1,39 @@
 {
   "workspaces": {
     ".": {
+      "includeEntryExports": true,
       "entry": [
         "packages/jit/src/index.ts",
         "packages/jit/src/runtime.ts",
         "packages/jit/src/define.ts",
         "packages/jit/src/aot/index.ts",
         "packages/jit/src/mcp.ts",
+        "packages/jit/src/compiler/index.ts",
+        "packages/jit/src/core/ast/index.ts",
+        "packages/jit/src/core/ats/index.ts",
+        "packages/jit/src/core/builder/index.ts",
+        "packages/jit/src/core/host.ts",
+        "packages/jit/src/errors/index.ts",
+        "packages/jit/src/factories/index.ts",
+        "packages/jit/src/runtime/runtime.ts",
+        "packages/jit/src/transforms/index.ts",
         "tools/quality/cli.ts",
+        "bench/**/*.ts",
         "scripts/*.ts",
         "tests/**/*.ts"
       ],
-      "project": ["packages/jit/src/**/*.ts", "tools/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+      "project": ["packages/jit/src/**/*.ts", "tools/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
+      "ignoreDependencies": ["jscpd"],
+      "ignoreBinaries": ["wasm-bindgen"]
     },
     "apps/site": {
-      "entry": ["app/**/*.{ts,tsx}", "lib/**/*.ts", "next.config.*"],
-      "project": ["app/**/*.{ts,tsx}", "lib/**/*.ts"]
+      "entry": ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.ts", "next.config.*"],
+      "project": ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.ts"],
+      "ignoreDependencies": ["monaco-editor", "tailwindcss"]
     },
     "packages/examples": {
-      "entry": ["runtime/**/*.ts", "compiled/**/*.ts"],
+      "includeEntryExports": true,
+      "entry": ["runtime/**/*.ts", "compiled/**/*.ts", "jit.config.ts"],
       "project": ["**/*.ts"]
     }
   },

@@ -26,7 +26,7 @@ The quantitative baseline records existing file metrics. Its ratchet is monotoni
 
 The import graph is resolved with the TypeScript Compiler API. Layer boundaries are declared in `quality.config.ts`, while type-only edges are kept distinct from runtime dependencies. Cycles, package-root imports from internal source and forbidden new layer edges are reported with locations and remediation.
 
-Structural metrics include logical lines, exports, imports, fan-out, functions, largest function, cyclomatic complexity and nesting. God-module detection combines these signals and is a watch/legacy indicator rather than a claim of mathematical SOLID proof. Existing oversized modules are debt; they cannot grow.
+Structural metrics include logical lines, exports, imports, fan-out, functions, largest function, cyclomatic complexity and nesting. God-module detection combines these signals and is a watch/legacy indicator rather than a claim of mathematical SOLID proof. Existing oversized modules are debt; they cannot grow. Explicit composition roots may have high fan-out when they are audited facades or lowering orchestrators; cycles, forbidden layer edges and growth ratchets still apply to them.
 
 ## Tests and coverage
 

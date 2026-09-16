@@ -42,6 +42,7 @@ export interface PhysicalQueryExplain {
   readonly facts: readonly string[];
 }
 
+/** Describes the JIT physical query plan contract used by the public API. */
 export interface PhysicalQueryPlan extends PhysicalQueryExplain {
   /** Set when the strategy reaches rows through a key. Never made public. */
   readonly access?: KeyedAccess;

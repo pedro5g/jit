@@ -90,6 +90,7 @@ export function emitMergePatchProgram(schema: ATS.AnyTypeSchema): string {
   return `(function () {\n${helpers.join("\n")}\n${root.toString()}\nreturn mergePatch;\n})()`;
 }
 
+/** Creates the JIT compile merge patch artifact from the supplied input. */
 export function compileMergePatch<TValue>(
   schema: ATS.AnyTypeSchema,
   options?: CompileCacheOptions
@@ -259,6 +260,7 @@ export const PATCH_EQUAL_HELPER = `function __patchEqual(left, right) {
   return true;
 }`;
 
+/** Creates the JIT compile json patch artifact from the supplied input. */
 export function compileJsonPatch<TValue>(
   schema: ATS.AnyTypeSchema,
   options?: CompileCacheOptions

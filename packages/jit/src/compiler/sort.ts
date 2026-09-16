@@ -4,12 +4,14 @@ import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/com
 import { CodeWriter } from "./emitter/code-writer.js";
 import { emitOrderingComparatorBody, type OrderingDescriptor, resolveOrderingDescriptor } from "./ordering.js";
 
+/** Describes the JIT compiled sort contract used by the public API. */
 export interface CompiledSort<T> {
   (value: readonly T[]): T[];
   readonly compare: (left: T, right: T) => number;
   readonly inPlace: (value: T[]) => T[];
 }
 
+/** Emits deterministic source for the JIT emit sort source operation. */
 export function emitSortSource(descriptor: OrderingDescriptor): string {
   const writer = new CodeWriter();
 
@@ -37,6 +39,7 @@ export function emitSortSource(descriptor: OrderingDescriptor): string {
   return writer.toString();
 }
 
+/** Creates the JIT compile sort artifact from the supplied input. */
 export function compileSort<T>(
   schema: ATS.AnyTypeSchema,
   descriptor: OrderingDescriptor,

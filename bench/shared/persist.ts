@@ -6,7 +6,7 @@ import { biasRegistry, scenarioRegistry } from "./scenario.js";
 
 const resultsDir = fileURLToPath(new URL("../results/", import.meta.url));
 
-export interface PersistedStats {
+interface PersistedStats {
   readonly avg: number;
   readonly min: number;
   readonly max: number;

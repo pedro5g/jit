@@ -17,6 +17,7 @@ import { createBuilder, unwrapSchema } from "../core/builder/index.js";
  */
 export type JsonSchemaBuilder<TNode> = Builder<ATS.TypeSchema<InferJsonSchema<TNode>>>;
 
+/** Describes the JIT json schema namespace contract used by the public API. */
 export interface JsonSchemaNamespace {
   /**
    * Describes a schema as a JSON Schema document — what OpenAPI, form

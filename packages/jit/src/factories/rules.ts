@@ -24,22 +24,26 @@ type TypeofInputShape<TShape extends InputShape> = {
 type InputArgs<TInputs> = keyof TInputs extends never ? readonly [] : readonly [inputs: TInputs];
 type NoInputs = Readonly<Record<never, never>>;
 
+/** Provides the JIT rule input value operation for the supplied input. */
 export interface RuleInputValue<TValue> {
   readonly kind: "param";
   readonly name: string;
   readonly __value?: TValue;
 }
 
+/** Describes the JIT rule field value contract used by the public API. */
 export interface RuleFieldValue<TValue> {
   readonly kind: "field";
   readonly key: string;
   readonly __value?: TValue;
 }
 
+/** Provides the JIT rule input ref operation for the supplied input. */
 export interface RuleInputRef<TInputs> {
   field<TKey extends Field<TInputs>>(key: TKey): RuleInputValue<TInputs[TKey]>;
 }
 
+/** Describes the JIT rule subject ref contract used by the public API. */
 export interface RuleSubjectRef<TSubject> {
   field<TKey extends Field<TSubject>>(key: TKey): RuleFieldValue<TSubject[TKey]>;
 }
@@ -83,6 +87,7 @@ type RuleOutcomeValues<TPayload> = {
   readonly [TKey in keyof TPayload]?: RuleFieldValue<TPayload[TKey]> | RuleInputValue<TPayload[TKey]> | TPayload[TKey];
 };
 
+/** Provides the JIT rule options operation for the supplied input. */
 export interface RuleOptions<TSubject, TInputs, TEmit> {
   readonly priority?: number;
   readonly when: (query: RuleConditionBuilder<TSubject>, inputs: RuleInputRef<TInputs>) => QueryConditionNode;
@@ -98,8 +103,10 @@ export interface RuleOptions<TSubject, TInputs, TEmit> {
 /** A single rule condition, reusable as a query predicate. */
 export type RulePredicate<TSubject, TInputs> = (subject: TSubject, ...args: InputArgs<TInputs>) => boolean;
 
+/** Describes the JIT rules visitor contract used by the public API. */
 export type RulesVisitor<TRuleId extends string, TOutcome> = (rule: TRuleId, outcome: TOutcome | undefined) => void;
 
+/** Describes the JIT rules many visitor contract used by the public API. */
 export type RulesManyVisitor<TRuleId extends string, TOutcome> = (
   rule: TRuleId,
   outcome: TOutcome | undefined,
@@ -118,11 +125,13 @@ export interface RulesManyPlan<TInputs, TRuleId extends string, TOutcome, TSubje
   };
 }
 
+/** Describes the JIT rules explained contract used by the public API. */
 export interface RulesExplained<TRuleId extends string> {
   readonly matched: readonly TRuleId[];
   readonly evaluated: readonly TRuleId[];
 }
 
+/** Provides the JIT rules plan operation for the supplied input. */
 export interface RulesPlan<
   TSubject,
   TInputs extends Readonly<Record<string, unknown>>,
@@ -164,6 +173,7 @@ export interface RulesPlan<
   inspect(): RulesInspection;
 }
 
+/** Provides the JIT rules builder operation for the supplied input. */
 export interface RulesBuilder<TSubject> extends RulesPlan<TSubject, NoInputs, never, never> {}
 
 /**
@@ -408,4 +418,5 @@ function isFieldValue(value: unknown): value is RuleFieldValue<unknown> {
   return typeof value === "object" && value !== null && (value as { readonly kind?: unknown }).kind === "field";
 }
 
+/** Provides the JIT type operation for the supplied input. */
 export type { RulesExplanation, RulesInspection };

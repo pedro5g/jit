@@ -1,13 +1,16 @@
 import type * as ATS from "../../core/ats/index.js";
 import type { OrderingDescriptor } from "../ordering.js";
 
+/** Names a variable in the compiler intermediate representation. */
 export interface IRVar {
   readonly kind: "var";
   readonly name: string;
 }
 
+/** Literal values that can be embedded directly in an IR expression. */
 export type IRLiteralValue = string | number | bigint | boolean | null | undefined;
 
+/** Binary operators supported by the compiler intermediate representation. */
 export type IRBinaryOperator =
   | "strictEqual"
   | "notStrictEqual"
@@ -20,6 +23,7 @@ export type IRBinaryOperator =
   | "lessThan"
   | "lessThanOrEqual";
 
+/** Expression nodes consumed by IR optimization and source emission. */
 export type IRExpr =
   | IRVar
   | { readonly kind: "literal"; readonly value: IRLiteralValue }
@@ -44,6 +48,7 @@ export type IRExpr =
   | { readonly kind: "array_literal"; readonly elements: readonly IRExpr[] }
   | { readonly kind: "construct"; readonly ctor: string; readonly args: readonly IRExpr[] };
 
+/** Statement nodes consumed by IR optimization and source emission. */
 export type IRNode =
   | { readonly kind: "block"; readonly body: readonly IRNode[] }
   | { readonly kind: "assign"; readonly target: IRVar; readonly expr: IRExpr }
@@ -106,6 +111,7 @@ export type IRNode =
     }
   | { readonly kind: "return"; readonly value: IRExpr };
 
+/** A complete IR program with parameters and executable statements. */
 export interface IRProgram {
   readonly kind: "program";
   readonly params: readonly IRVar[];
@@ -117,111 +123,138 @@ export interface IRProgram {
   readonly helpers?: readonly IRHelper[];
 }
 
+/** A named helper program referenced by an IR program. */
 export interface IRHelper {
   readonly name: string;
   readonly program: IRProgram;
 }
 
+/** Creates a variable reference for an IR expression. */
 export function irVar(name: string): IRVar {
   return { kind: "var", name };
 }
 
+/** Creates an IR literal expression from a safe literal value. */
 export function literal(value: IRLiteralValue): IRExpr {
   return { kind: "literal", value };
 }
 
+/** Creates a logical negation expression. */
 export function not(expr: IRExpr): IRExpr {
   return { kind: "not", expr };
 }
 
+/** Creates a strict equality expression. */
 export function strictEqual(left: IRExpr, right: IRExpr): IRExpr {
   return { kind: "binary", op: "strictEqual", left, right };
 }
 
+/** Creates a strict inequality expression. */
 export function notStrictEqual(left: IRExpr, right: IRExpr): IRExpr {
   return { kind: "binary", op: "notStrictEqual", left, right };
 }
 
+/** Creates a binary logical-or expression. */
 export function or(left: IRExpr, right: IRExpr): IRExpr {
   return { kind: "binary", op: "or", left, right };
 }
 
+/** Creates an addition expression. */
 export function add(left: IRExpr, right: IRExpr): IRExpr {
   return { kind: "binary", op: "add", left, right };
 }
 
+/** Creates an Object.is-style value comparison expression. */
 export function sameValue(left: IRExpr, right: IRExpr): IRExpr {
   return { kind: "sameValue", left, right };
 }
 
+/** Creates a numeric comparison expression with the IR numeric semantics. */
 export function sameNumber(left: IRExpr, right: IRExpr): IRExpr {
   return { kind: "sameNumber", left, right };
 }
 
+/** Creates an expression that validates a value against a schema. */
 export function schemaGuard(schema: ATS.AnyTypeSchema, value: IRExpr): IRExpr {
   return { kind: "schema_guard", schema, value };
 }
 
+/** Creates a property-load expression for a static property key. */
 export function loadProp(base: IRExpr, key: string): IRExpr {
   return { kind: "load_prop", base, key };
 }
 
+/** Creates an indexed-load expression. */
 export function loadIndex(base: IRExpr, index: IRExpr): IRExpr {
   return { kind: "load_index", base, index };
 }
 
+/** Creates a call expression with the supplied argument expressions. */
 export function call(callee: IRExpr, args: readonly IRExpr[] = []): IRExpr {
   return { kind: "call", callee, args };
 }
 
+/** Creates a binary expression for the requested IR operator. */
 export function binary(op: IRBinaryOperator, left: IRExpr, right: IRExpr): IRExpr {
   return { kind: "binary", op, left, right };
 }
 
+/** Creates a short-circuiting conjunction over the supplied expressions. */
 export function allOf(operands: readonly IRExpr[]): IRExpr {
   return { kind: "nary", op: "and", operands };
 }
 
+/** Creates a short-circuiting disjunction over the supplied expressions. */
 export function anyOf(operands: readonly IRExpr[]): IRExpr {
   return { kind: "nary", op: "or", operands };
 }
 
+/** Creates an object literal expression from named IR entries. */
 export function objectLiteral(entries: readonly { readonly key: string; readonly value: IRExpr }[]): IRExpr {
   return { kind: "object_literal", entries };
 }
 
+/** Creates an array literal expression. */
 export function arrayLiteral(elements: readonly IRExpr[] = []): IRExpr {
   return { kind: "array_literal", elements };
 }
 
+/** Creates a constructor-call expression by constructor name. */
 export function construct(ctor: string, args: readonly IRExpr[] = []): IRExpr {
   return { kind: "construct", ctor, args };
 }
 
+/** Creates a local declaration statement, optionally with an initializer. */
 export function letDecl(target: IRVar, expr?: IRExpr): IRNode {
   return expr === undefined ? { kind: "let", target } : { kind: "let", target, expr };
 }
 
+/** Creates an assignment statement for an IR target expression. */
 export function store(target: IRExpr, expr: IRExpr): IRNode {
   return { kind: "store", target, expr };
 }
 
+/** Creates a statement that evaluates an expression for its effects. */
 export function exprStmt(expr: IRExpr): IRNode {
   return { kind: "expr_stmt", expr };
 }
 
+/** Creates a range loop statement over a numeric IR length. */
 export function forRange(index: IRVar, length: IRExpr, body: readonly IRNode[]): IRNode {
   return { kind: "for_range", index, length, body };
 }
 
+/** Creates a loop statement over an iterable expression. */
 export function forOf(item: IRVar, iterable: IRExpr, body: readonly IRNode[]): IRNode {
   return { kind: "for_of", item, iterable, body };
 }
 
+/** Creates the optimized append statement used by collection emitters. */
 export function append(target: IRVar, cursor: IRVar, value: IRExpr): IRNode {
   return { kind: "append", target, cursor, value };
 }
 
+/** Creates a sort statement using a compiler ordering descriptor. */
 export function sortByKey(target: IRVar, ordering: OrderingDescriptor): IRNode {
   return { kind: "sort_by_key", target, ordering };
 }
