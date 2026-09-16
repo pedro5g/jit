@@ -244,8 +244,7 @@ export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = Elemen
   const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
   const descriptor = resolvePlanDistinct(schema, plan);
   const structural = descriptor?.strategy === "structural-hash";
-  // Bindings are user values, so only the pure source template is cached;
-  // every compile re-applies its own bindings to a fresh closure.
+  // PERF: cache only the pure template; user bindings are applied per compile.
   const template = getCompileCached(
     schema,
     `query:${serializeQueryNodes(program.nodes)}`,

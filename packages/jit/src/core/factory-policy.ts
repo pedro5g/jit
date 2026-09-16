@@ -1,8 +1,10 @@
 /** The only return shapes a Runtime Type factory can expose after declaration. */
 export type FactoryReturnMode = "throw" | "either" | "tuple";
 
+/** Accepts the supported result policy syntax at a Runtime Type declaration boundary. */
 export type FactoryReturnModeInput = FactoryReturnMode;
 
+/** Candidate policy selected after declaration options have been normalized. */
 export interface FactoryPolicyCandidate {
   readonly mode: FactoryReturnMode;
   readonly priority: number;

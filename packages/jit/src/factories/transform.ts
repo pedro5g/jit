@@ -36,6 +36,7 @@ export type TransformFieldOps<TValue> = TValue extends string
       trim(): TransformExpression<string, string>;
     }
   : {
+      /** Leaves the field unchanged while keeping it in the transform plan. */
       identity(): TransformExpression<TValue, TValue>;
     };
 
@@ -45,13 +46,16 @@ type TransformMapperResult<TValue, TSource, TResult> =
 
 /** Converts the supplied input into the JIT transform builder representation. */
 export interface TransformBuilder<TSource, TOutput> {
+  /** Keeps only the selected output fields. */
   select<const TKeys extends readonly TransformKeys<TOutput>[]>(
     ...keys: TKeys
   ): TransformBuilder<TSource, Pick<TOutput, TKeys[number]>>;
+  /** Replaces one output field with an inline or callback transform. */
   map<TKey extends TransformKeys<TOutput>, TResult>(
     key: TKey,
     mapper: (field: TransformFieldOps<TOutput[TKey]>) => TransformMapperResult<TOutput[TKey], TSource, TResult>
   ): TransformBuilder<TSource, TransformMapped<TOutput, TKey, TResult>>;
+  /** Compiles the accumulated transform into one callable function. */
   compile(): (value: TSource) => TOutput;
 }
 

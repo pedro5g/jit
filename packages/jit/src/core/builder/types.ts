@@ -456,50 +456,73 @@ type RequiredKeysShape<TShape extends SchemaShape, TKeys extends keyof TShape> =
 export interface BuilderCore<TSchema extends AnyTypeSchema> {
   readonly schema: TSchema;
   readonly "~standard": StandardSchemaProps<unknown, TypeofSchema<TSchema>>;
+  /** Tests a value without allocating diagnostics. */
   is(value: unknown): value is TypeofSchema<TSchema>;
+  /** Validates a value and returns a discriminated success/failure result. */
   safeParse(value: unknown): SafeParseResult<TypeofSchema<TSchema>>;
+  /** Validates a value or throws the library's validation error. */
   parse(value: unknown): TypeofSchema<TSchema>;
+  /** Asynchronously validates a value and returns diagnostics instead of throwing. */
   safeParseAsync(value: unknown): Promise<SafeParseResult<TypeofSchema<TSchema>>>;
+  /** Asynchronously validates a value or rejects with the validation error. */
   parseAsync(value: unknown): Promise<TypeofSchema<TSchema>>;
+  /** Allows `undefined` at the input boundary. */
   optional(): Builder<OptionalSchema<TSchema>>;
+  /** Removes optionality and optionally supplies the issue message for missing input. */
   required(message?: string): Builder<RequiredField<TSchema>>;
+  /** Allows `null` at the input boundary. */
   nullable(): Builder<NullableSchema<TSchema>>;
+  /** Allows both `null` and `undefined` at the input boundary. */
   nullish(): Builder<NullishSchema<TSchema>>;
+  /** Marks the output as readonly for static consumers. */
   readonly(): Builder<ReadonlySchema<TSchema>>;
+  /** Accepts a promise of the schema value and validates its resolved value. */
   promise(): Builder<PromiseSchema<TSchema>>;
+  /** Supplies a fallback for `undefined`; the default is checked against this schema. */
   default<const TDefault extends TypeofSchema<TSchema> | (() => TypeofSchema<TSchema>)>(
     defaultValue: TDefault & ValidDefault<TSchema, TDefault>
   ): Builder<DefaultSchema<TSchema>>;
+  /** Adds a compile-time brand without changing runtime validation. */
   brand<const TBrand extends string>(brandName: TBrand): Builder<BrandSchema<TSchema, TBrand>>;
   /**
    * Applies a transformation after validation. A `JIT.ops` chain is compiled
    * into the generated validator as source; a callback is kept as a call.
    */
   pipe<TOutput>(transform: (value: TypeofSchema<TSchema>) => TOutput): Builder<PipeSchema<TSchema, TOutput>>;
+  /** Applies a serializable `JIT.ops` chain after validation. */
   pipe<TChain extends OpChain>(
     transform: TChain
   ): Builder<PipeSchema<TSchema, TChain extends OpChain<never, infer TOut> ? TOut : unknown>>;
+  /** Accepts a value matching either this schema or the right-hand schema. */
   or<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<UnionSchema<[TSchema, TRight]>>;
+  /** Requires a value to satisfy both schemas. */
   and<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<IntersectionSchema<[TSchema, TRight]>>;
+  /** Requires exactly one of the two schemas to accept the value. */
   xor<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<XorSchema<[TSchema, TRight]>>;
+  /** Inverts the acceptance result of this schema. */
   not(): Builder<NotSchema<TSchema>>;
+  /** Selects a schema branch from a field matcher and optional fallback. */
   when<
     const TKey extends string,
     TContextValue = unknown,
     TThen extends AnyTypeSchema = RequiredField<TSchema>,
     TOtherwise extends AnyTypeSchema = TSchema,
   >(key: TKey, options: WhenOptions<TSchema, TContextValue, TThen, TOtherwise>): Builder<WhenSchema<TThen, TOtherwise>>;
+  /** Alias of `when()` for conditional object-schema branches. */
   where<
     const TKey extends string,
     TContextValue = unknown,
     TThen extends AnyTypeSchema = RequiredField<TSchema>,
     TOtherwise extends AnyTypeSchema = TSchema,
   >(key: TKey, options: WhenOptions<TSchema, TContextValue, TThen, TOtherwise>): Builder<WhenSchema<TThen, TOtherwise>>;
+  /** Adds a custom predicate after schema validation. */
   refine(
     predicate: (value: TypeofSchema<TSchema>) => boolean,
     options?: string | RefineOptions<TypeofSchema<TSchema>>
   ): Builder<RefineSchema<TSchema>>;
+  /** Converts an unknown boundary value before the schema validates it. */
   coerce(coercer: (value: unknown) => TypeofSchema<TSchema>): Builder<CoerceSchema<TSchema>>;
+  /** Applies a builder callback and returns the callback's result. */
   apply<TNext>(fn: (builder: Builder<TSchema>) => TNext): TNext;
   /**
    * Attaches documentation metadata (title, description, examples). It never
@@ -507,19 +530,27 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
    * outputs.
    */
   meta(metadata: Metadata): Builder<TSchema>;
+  /** Marks the schema's element as an entity for collection planning. */
   entity(options: EntityHint<HintTarget<TypeofSchema<TSchema>>>): Builder<TSchema>;
+  /** Declares one unique identity field and enables keyed collection planning. */
   keyed(key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>): Builder<TSchema>;
+  /** Declares the field used to group collection elements. */
   groupBy(key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>): Builder<TSchema>;
+  /** Declares the default ordering field and direction for collection plans. */
   sortBy(
     key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>,
     direction?: OrderDirection
   ): Builder<TSchema>;
+  /** Declares a uniqueness hint for a collection field. */
   uniqueBy(key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>): Builder<TSchema>;
+  /** Declares an index hint for a collection field. */
   indexBy(key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>): Builder<TSchema>;
+  /** Declares an ordering hint without changing the schema output. */
   ordered(
     key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>,
     direction?: OrderDirection
   ): Builder<TSchema>;
+  /** Declares the hash representation used by canonical and keyed operations. */
   hash(strategy?: HashStrategy): Builder<TSchema>;
   /**
    * Marks this field as personally identifiable information. `JIT.security.mask`
@@ -537,44 +568,61 @@ export interface ObjectOperators<
   TUnknownKeys extends ObjectUnknownKeys = undefined,
   TCatchall extends AnyTypeSchema | undefined = undefined,
 > {
+  /** Makes every field optional, or only the named fields. */
   partial(): ObjectBuilder<PartialShape<TShape>, TUnknownKeys, TCatchall>;
+  /** Makes the listed fields optional. */
   partial<const TKeys extends readonly (keyof TShape)[]>(
     keys: TKeys
   ): ObjectBuilder<PartialKeysShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  /** Makes the listed fields optional using variadic field names. */
   partial<const TKeys extends readonly (keyof TShape)[]>(
     ...keys: TKeys
   ): ObjectBuilder<PartialKeysShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  /** Makes every field required, or only the named fields. */
   required(): ObjectBuilder<RequiredShape<TShape>, TUnknownKeys, TCatchall>;
+  /** Makes the listed fields required. */
   required<const TKeys extends readonly (keyof TShape)[]>(
     keys: TKeys
   ): ObjectBuilder<RequiredKeysShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  /** Makes the listed fields required using variadic field names. */
   required<const TKeys extends readonly (keyof TShape)[]>(
     ...keys: TKeys
   ): ObjectBuilder<RequiredKeysShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  /** Rejects unknown object keys. */
   strict(): ObjectBuilder<TShape, "strict", TCatchall>;
+  /** Preserves unknown object keys during parsing. */
   loose(): ObjectBuilder<TShape, "passthrough", TCatchall>;
+  /** Validates unknown keys with the supplied catchall schema. */
   catchall<TCatchallNext extends AnyTypeSchema>(
     schema: SchemaInput<TCatchallNext>
   ): ObjectBuilder<TShape, "passthrough", TCatchallNext>;
+  /** Builds a string enum schema from the object's keys. */
   keyof(): Builder<EnumSchema<KeyOfValues<TShape>>>;
+  /** Applies field transforms while retaining the object's shape. */
   transform<const TSpec extends TransformSpec<TypeofSchema<ObjectSchema<TShape, TUnknownKeys, TCatchall>>>>(
     transforms: TSpec
   ): Builder<TransformSchema<ObjectSchema<TShape, TUnknownKeys, TCatchall>, TSpec>>;
+  /** Keeps only the named fields. */
   pick<const TKeys extends readonly (keyof TShape)[]>(
     keys: TKeys
   ): ObjectBuilder<PickShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  /** Keeps the named fields using variadic field names. */
   pick<const TKeys extends readonly (keyof TShape)[]>(
     ...keys: TKeys
   ): ObjectBuilder<PickShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  /** Removes the named fields. */
   omit<const TKeys extends readonly (keyof TShape)[]>(
     keys: TKeys
   ): ObjectBuilder<OmitShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  /** Removes the named fields using variadic field names. */
   omit<const TKeys extends readonly (keyof TShape)[]>(
     ...keys: TKeys
   ): ObjectBuilder<OmitShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  /** Adds or replaces fields in the object shape. */
   extend<const TExtension extends Record<string, SchemaInput>>(
     extension: TExtension
   ): ObjectBuilder<MergeShape<TShape, UnwrapBuilderShape<TExtension>>, TUnknownKeys, TCatchall>;
+  /** Merges another object schema, including its shape and runtime checks. */
   merge<TRight extends SchemaShape>(
     right: ObjectBuilder<TRight, ObjectUnknownKeys, AnyTypeSchema | undefined> | ObjectSchema<TRight>
   ): ObjectBuilder<MergeShape<TShape, TRight>, TUnknownKeys, TCatchall>;
@@ -598,9 +646,11 @@ export interface FunctionOperators<
   TInput extends readonly AnyTypeSchema[],
   TOutput extends AnyTypeSchema | undefined = AnyTypeSchema | undefined,
 > {
+  /** Attaches a synchronous implementation and returns a typed callable function. */
   implement<TImplementation extends (...args: FunctionArgs<TInput>) => FunctionReturn<TOutput>>(
     implementation: TImplementation
   ): (...args: FunctionArgs<TInput>) => ReturnType<TImplementation>;
+  /** Attaches an asynchronous implementation and returns a typed promise-producing function. */
   implementAsync<TImplementation extends (...args: FunctionArgs<TInput>) => PromiseLike<FunctionReturn<TOutput>>>(
     implementation: TImplementation
   ): (...args: FunctionArgs<TInput>) => Promise<Awaited<ReturnType<TImplementation>>>;
@@ -608,87 +658,153 @@ export interface FunctionOperators<
 
 /** Describes the JIT codec operators contract used by the public API. */
 export interface CodecOperators<TInput extends AnyTypeSchema, TOutput extends AnyTypeSchema> {
+  /** Decodes an input-side value into the output-side representation. */
   decode(value: TypeofSchema<TInput>): TypeofSchema<TOutput>;
+  /** Encodes an output-side value into the input-side representation. */
   encode(value: TypeofSchema<TOutput>): TypeofSchema<TInput>;
 }
 
-/** String constraint methods; every call returns the same builder type. */
+/**
+ * String constraints and normalizations available after `JIT.string()`.
+ *
+ * Check methods append a declarative constraint to the schema. Normalizations
+ * such as `trim()` change the parsed output, while format methods only reject
+ * values that do not match their format. The returned builder retains the
+ * accumulated check information for `JIT.Typeof` and AOT generation.
+ */
 export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
+  /**
+   * Requires at least `length` UTF-16 code units; `message` customizes the issue
+   * message without changing its machine-readable code.
+   *
+   * @example
+   * ```ts
+   * const parseUsername = JIT.validate.parse(JIT.string().min(3));
+   * parseUsername("ada"); // "ada"
+   * ```
+   */
   min<const TLength extends number>(
     length: TLength,
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"min", TLength>>>;
+  /** Requires at most `length` UTF-16 code units. */
   max<const TLength extends number>(
     length: TLength,
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"max", TLength>>>;
+  /** Requires exactly `length` UTF-16 code units. */
   length<const TLength extends number>(
     length: TLength,
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"length", TLength>>>;
+  /** Accepts only one of the supplied literal strings. */
   oneOf<const TValues extends readonly [string, ...string[]]>(
     values: TValues,
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"oneOf", TValues>>>;
+  /** Requires the string to begin with `prefix`. */
   startsWith<const TPrefix extends string>(
     prefix: TPrefix,
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"startsWith", TPrefix>>>;
+  /** Requires the string to end with `suffix`. */
   endsWith<const TSuffix extends string>(
     suffix: TSuffix,
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"endsWith", TSuffix>>>;
+  /** Requires the string to contain `needle`. */
   includes<const TNeedle extends string>(
     needle: TNeedle,
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"includes", TNeedle>>>;
+  /** Requires a match for `pattern`; the regular expression remains a runtime binding. */
   regex(pattern: RegExp, message?: string): Builder<TSchema>;
-  /** Email format; pass a RegExp to override the default pattern (e.g. `JIT.regexes.rfc5322Email`). */
+  /**
+   * Requires an email-shaped string. Pass a `RegExp` to override the default
+   * pattern, or a string as the custom issue message.
+   *
+   * @example `JIT.string().email("Use a work email")`
+   */
   email(
     this: HasStringCheck<TSchema, "email"> extends true ? never : StringCheckMethods<TSchema>,
     patternOrMessageOrOptions?: RegExp | string | { readonly pattern?: RegExp; readonly message?: string },
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"email", RegExp>>>;
-  /** RFC 9562/4122 UUID; pass a version (1-8) to pin it. */
+  /** RFC 9562/4122 UUID; pass a version (1-8) to pin the accepted variant. */
   uuid(message?: string): Builder<TSchema>;
+  /** Requires a UUID of the selected version. */
   uuid(version: number, message?: string): Builder<TSchema>;
+  /** Requires a UUID using the supplied version and message options. */
   uuid(options: { readonly version?: number; readonly message?: string }): Builder<TSchema>;
+  /** Requires a URL with any supported protocol. */
   url(message?: string): Builder<TSchema>;
+  /** Requires an HTTP or HTTPS URL. */
   httpUrl(message?: string): Builder<TSchema>;
+  /** Requires a compact JSON Web Token. */
   jwt(message?: string): Builder<TSchema>;
+  /** Registers a named regular-expression format for diagnostics and JSON Schema output. */
   stringFormat(name: string, pattern: RegExp, message?: string): Builder<TSchema>;
+  /** Rejects the empty string. */
   noEmpty(): Builder<AppendStringCheck<TSchema, SchemaCheck<"noEmpty">>>;
+  /** Trims leading and trailing whitespace from parsed output. */
   trim(): Builder<TSchema>;
+  /** Normalizes parsed output using the selected Unicode normalization form. */
   normalize(form?: StringNormalizationForm): Builder<TSchema>;
+  /** Requires lowercase input without changing it. */
   lowercase(): Builder<TSchema>;
+  /** Alias for `lowercase()`. */
   toLowerCase(): Builder<TSchema>;
+  /** Requires uppercase input without changing it. */
   uppercase(): Builder<TSchema>;
+  /** Alias for `uppercase()`. */
   toUpperCase(): Builder<TSchema>;
   /** Cleans strings through a source-emitted policy in parse and `JIT.security.sanitize`. */
   sanitize(options?: StringSanitizePreset | StringSanitizeSpec): Builder<TSchema>;
+  /** Requires a GUID/UUID-shaped identifier. */
   guid(message?: string): Builder<TSchema>;
+  /** Requires a CUID v1 identifier. */
   cuid(message?: string): Builder<TSchema>;
+  /** Requires a CUID2 identifier. */
   cuid2(message?: string): Builder<TSchema>;
+  /** Requires a ULID identifier. */
   ulid(message?: string): Builder<TSchema>;
+  /** Requires a lowercase hexadecimal XID identifier. */
   xid(message?: string): Builder<TSchema>;
+  /** Requires a KSUID identifier. */
   ksuid(message?: string): Builder<TSchema>;
+  /** Requires a Nano ID identifier. */
   nanoid(message?: string): Builder<TSchema>;
+  /** Requires an ISO 8601 duration. */
   duration(message?: string): Builder<TSchema>;
+  /** Requires an emoji sequence. */
   emoji(message?: string): Builder<TSchema>;
+  /** Requires an IPv4 address. */
   ipv4(message?: string): Builder<TSchema>;
+  /** Requires an IPv6 address. */
   ipv6(message?: string): Builder<TSchema>;
+  /** Requires an IPv4 CIDR range. */
   cidrv4(message?: string): Builder<TSchema>;
+  /** Requires an IPv6 CIDR range. */
   cidrv6(message?: string): Builder<TSchema>;
+  /** Requires standard Base64 text. */
   base64(message?: string): Builder<TSchema>;
+  /** Requires URL-safe Base64 text. */
   base64url(message?: string): Builder<TSchema>;
+  /** Requires a DNS hostname. */
   hostname(message?: string): Builder<TSchema>;
+  /** Requires a DNS domain name. */
   domain(message?: string): Builder<TSchema>;
+  /** Requires an E.164 phone number. */
   e164(message?: string): Builder<TSchema>;
+  /** Requires hexadecimal text. */
   hex(message?: string): Builder<TSchema>;
+  /** Requires an ISO calendar date string. */
   date(message?: string): Builder<TSchema>;
   /** The delimiter takes the first position, so a message goes second. */
   mac(delimiter?: string, message?: string): Builder<TSchema>;
+  /** Requires an ISO time string; options can control seconds, offset and precision. */
   time(optionsOrMessage?: Regexes.TimeOptions | string, message?: string): Builder<TSchema>;
+  /** Requires an ISO date-time string; options can control offset and precision. */
   datetime(optionsOrMessage?: Regexes.DatetimeOptions | string, message?: string): Builder<TSchema>;
   /** Hash digest format, e.g. `.digest("sha256", "base64url")`. */
   digest(
@@ -710,68 +826,96 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
       | string,
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"format", StringMaskSpec>>>;
+  /** Requires a valid Brazilian CPF. */
   cpf(message?: string): Builder<TSchema>;
+  /** Requires a valid Brazilian CNPJ. */
   cnpj(message?: string): Builder<TSchema>;
+  /** Requires a Brazilian phone number. */
   phoneBR(message?: string): Builder<TSchema>;
 }
 
 /** Numeric constraint methods; every call returns the same builder type. */
 export interface NumberCheckMethods<TSchema extends AnyTypeSchema> {
+  /** Requires a value greater than or equal to `value`. */
   min<const TValue extends number>(
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"min", TValue>>>;
+  /** Requires a value less than or equal to `value`. */
   max<const TValue extends number>(
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"max", TValue>>>;
+  /** Alias for the inclusive lower bound `min()`. */
   gte<const TValue extends number>(
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"min", TValue>>>;
+  /** Alias for the inclusive upper bound `max()`. */
   lte<const TValue extends number>(
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"max", TValue>>>;
+  /** Requires a value strictly greater than `value`. */
   moreThan<const TValue extends number>(
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"moreThan", TValue>>>;
+  /** Requires a value strictly less than `value`. */
   lessThan<const TValue extends number>(
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"lessThan", TValue>>>;
+  /** Alias for the exclusive lower bound `moreThan()`. */
   gt<const TValue extends number>(
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"moreThan", TValue>>>;
+  /** Alias for the exclusive upper bound `lessThan()`. */
   lt<const TValue extends number>(
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"lessThan", TValue>>>;
+  /** Accepts only one of the supplied numeric literals. */
   oneOf<const TValues extends readonly [number, ...number[]]>(
     values: TValues,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"oneOf", TValues>>>;
+  /** Requires a value greater than zero. */
   positive(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"positive">>>;
+  /** Requires a value less than zero. */
   negative(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"negative">>>;
+  /** Requires a value greater than or equal to zero. */
   nonnegative(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"min", 0>>>;
+  /** Requires a value less than or equal to zero. */
   nonpositive(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"max", 0>>>;
+  /** Requires an exact multiple of `value`. */
   multipleOf(value: number, message?: string): Builder<TSchema>;
+  /** Alias for `multipleOf()` for numeric step constraints. */
   step(value: number, message?: string): Builder<TSchema>;
+  /** Rejects `NaN`, positive infinity and negative infinity. */
   finite(message?: string): Builder<TSchema>;
+  /** Requires a JavaScript safe integer range value. */
   safe(message?: string): Builder<TSchema>;
+  /** Requires an integer. */
   int(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"integer">>>;
+  /** Requires a signed 32-bit integer. */
   int32(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"int32">>>;
+  /** Requires a 32-bit floating-point-compatible value. */
   float32(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"float32">>>;
+  /** Requires a finite IEEE-754 double-compatible value. */
   float64(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"float64">>>;
 }
 
 /** Array length constraint methods; every call returns the same builder type. */
 export interface ArrayCheckMethods<TSchema extends AnyTypeSchema> {
+  /** Requires at least `length` elements. */
   min(length: number, message?: string): Builder<TSchema>;
+  /** Requires at most `length` elements. */
   max(length: number, message?: string): Builder<TSchema>;
+  /** Requires exactly `length` elements. */
   length(length: number, message?: string): Builder<TSchema>;
+  /** Rejects an empty array. */
   nonEmpty(message?: string): Builder<TSchema>;
   /**
    * Compiles this array of objects into an in-memory binary rowset loader.
@@ -787,8 +931,11 @@ export interface ArrayCheckMethods<TSchema extends AnyTypeSchema> {
 
 /** Describes the JIT date like check methods contract used by the public API. */
 export interface DateLikeCheckMethods<TSchema extends AnyTypeSchema> {
+  /** Requires a date-like value at or after `value`. */
   min(value: Date | string, message?: string): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"min", Date | string>>>;
+  /** Requires a date-like value at or before `value`. */
   max(value: Date | string, message?: string): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"max", Date | string>>>;
+  /** Requires a date-like value inside the inclusive `[min, max]` range. */
   between(
     min: Date | string,
     max: Date | string,
@@ -796,14 +943,17 @@ export interface DateLikeCheckMethods<TSchema extends AnyTypeSchema> {
   ): Builder<
     AppendDateLikeCheck<TSchema, SchemaCheck<"between", { readonly min: Date | string; readonly max: Date | string }>>
   >;
+  /** Requires a date-like value whose weekday is in `days` (`0` is Sunday). */
   daysOfWeek(
     days: readonly number[],
     message?: string
   ): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"daysOfWeek", readonly number[]>>>;
+  /** Requires a date-like value whose month is in `months` (`1` is January). */
   monthsOfYear(
     months: readonly number[],
     message?: string
   ): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"monthsOfYear", readonly number[]>>>;
+  /** Requires the value to equal its truncation to `unit`. */
   truncateTo(
     unit: TemporalUnit,
     message?: string

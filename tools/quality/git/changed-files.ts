@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import type { ChangedRange } from "../core/context.js";
 
 function git(root: string, args: readonly string[]): string {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8" });
+  return execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 }
 
 export function changedFiles(root: string, mode: "staged" | "changed" | "full"): string[] {

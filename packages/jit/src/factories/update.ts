@@ -98,7 +98,9 @@ export type RuntimeUpdate<T> = ((value: T, input: UpdateInput<T>) => T) & {
  * planner could specialize it, without compiling anything.
  */
 export interface CompiledPatch<T, TPatch> {
+  /** Compiles the patch into an immutable update function. */
   compile(): (value: T, params: UpdatePatchParams<TPatch>) => T;
+  /** Describes reads, writes and specialization without executing the patch. */
   explain(): MutationExplanation;
   /**
    * Asks the mutation for more than the new value.
@@ -113,10 +115,12 @@ export interface CompiledPatch<T, TPatch> {
 
 /** Describes the JIT compiled mutation contract used by the public API. */
 export interface CompiledMutation<T, TPatch, TChannels extends MutationChannels> {
+  /** Compiles a mutation that returns the requested result channels. */
   compile(): ((value: T, params: UpdatePatchParams<TPatch>) => MutationResult<T, TChannels>) & {
     /** The path-to-bit agreement the mask was produced against. */
     layout(): ChangeLayout | undefined;
   };
+  /** Describes the mutation plan without executing it. */
   explain(): MutationExplanation;
 }
 

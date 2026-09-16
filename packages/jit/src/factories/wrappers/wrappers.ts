@@ -190,6 +190,7 @@ function coerceWith<TSchema extends AnyTypeSchema>(
  *   (`Number(v)`, `new Date(v)`, ...) and therefore AOT-safe.
  */
 export interface CoerceFactory extends NativeCoercions {
+  /** Converts a value with `coercer` before validating the supplied schema. */
   <TSchema extends AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     coercer: (value: unknown) => TypeofSchema<TSchema>

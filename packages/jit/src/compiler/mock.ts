@@ -177,8 +177,7 @@ function emitValue(schema: ATS.AnyTypeSchema, depth: number): string {
     case TypeName.refine:
     case TypeName.pipe:
     case TypeName.transform:
-      // The predicate/transform is developer code the generator cannot invert;
-      // the inner shape is still the best sample available.
+      // CODEGEN: developer predicates/transforms cannot be inverted; use the inner shape.
       return emitValue(current.def.innerType as ATS.AnyTypeSchema, depth + 1);
     case TypeName.lazy:
       return emitValue((current.def.getter as () => ATS.AnyTypeSchema)(), depth + 1);

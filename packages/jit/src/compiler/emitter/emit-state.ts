@@ -1,4 +1,5 @@
 export interface EmitState {
+  /** Allocates the next deterministic local variable name for `prefix`. */
   nextVar(prefix: string): string;
 }
 

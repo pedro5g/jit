@@ -11,7 +11,7 @@ import {
   uniqueIdentifier,
   valueObject,
   versioned,
-} from "./class.js";
+} from "./class-ddd.js";
 import { watchedList } from "./watch.js";
 
 /**

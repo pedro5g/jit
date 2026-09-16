@@ -51,10 +51,12 @@ export type RuntimeCompiledFunction<TFunction extends (...args: never[]) => unkn
 
 /** Async validation, for schemas that contain promises or async refinements. */
 export interface AsyncValidateNamespace {
+  /** Compiles asynchronous validation that resolves with the parsed value. */
   parse<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     options?: ValidationDiagnosticOptions
   ): ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
+  /** Compiles asynchronous validation that resolves with success or issues. */
   safeParse<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     options?: ValidationDiagnosticOptions
@@ -70,25 +72,31 @@ export interface AsyncValidateNamespace {
  * handed directly to any consumer in the ecosystem.
  */
 export interface ValidateNamespace {
+  /** Compiles a boolean type guard for the schema. */
   is<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): StandardArtifact<(value: unknown) => value is ATS.TypeofSchema<TSchema>, ATS.TypeofSchema<TSchema>>;
+  /** Compiles parsing for a schema or Runtime Class. */
   parse<TSchema extends ATS.AnyTypeSchema, TInstance>(
     schema: RuntimeClass<TSchema, TInstance>,
     options?: ValidationDiagnosticOptions
   ): ExecutionArtifact<unknown, TInstance>;
+  /** Parses a schema input and returns its validated value. */
   parse<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     options?: ValidationDiagnosticOptions
   ): SchemaArtifact<unknown, TSchema>;
+  /** Compiles diagnostic validation for a schema or Runtime Class. */
   safeParse<TSchema extends ATS.AnyTypeSchema, TInstance>(
     schema: RuntimeClass<TSchema, TInstance>,
     options?: ValidationDiagnosticOptions
   ): StandardArtifact<(value: unknown) => SafeParseResult<TInstance>, TInstance>;
+  /** Validates a schema input and returns issues without throwing. */
   safeParse<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     options?: ValidationDiagnosticOptions
   ): StandardArtifact<(value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>, ATS.TypeofSchema<TSchema>>;
+  /** Compiles an iterator that yields every validation issue for a value. */
   issues<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): ExecutionArtifact<unknown, IterableIterator<ValidationIssue>>;
@@ -148,11 +156,15 @@ export const validate: ValidateNamespace = Object.freeze({
 
 /** Describes the JIT json namespace contract used by the public API. */
 export interface JsonNamespace {
+  /** Returns the recursive schema for JSON-compatible values. */
   value(message?: ValidationMessage): Builder<ATS.JsonSchema>;
+  /** Parses JSON text and validates the decoded value against `schema`. */
   parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): SchemaArtifact<string, TSchema>;
+  /** Serializes a validated value to JSON text. */
   stringify<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): ExecutionArtifact<ATS.TypeofSchema<TSchema>, string>;
+  /** Serializes a value as deterministic chunks of JSON text. */
   stringifyChunks<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     options?: JsonChunksOptions
@@ -186,9 +198,11 @@ export const json: JsonNamespace = Object.freeze({
 
 /** Describes the JIT binary namespace contract used by the public API. */
 export interface BinaryNamespace {
+  /** Encodes a value into the schema's binary wire representation. */
   encode<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): ExecutionArtifact<ATS.TypeofSchema<TSchema>, Uint8Array>;
+  /** Decodes binary input and validates the resulting value against `schema`. */
   decode<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): SchemaArtifact<Uint8Array | ArrayBuffer, TSchema>;
@@ -269,7 +283,9 @@ function equal<TSchema extends ATS.AnyTypeSchema>(
  * object per comparison to answer it.
  */
 export interface ChangedMask<TValue, TPath extends string, TMask> {
+  /** Compares two values and returns the watched-field bitmask. */
   (left: TValue, right: TValue): TMask;
+  /** Tests whether the bit for `path` is set in a previously computed mask. */
   has(mask: TMask, path: TPath): boolean;
   /** The watched fields in bit order, so a caller can report what moved. */
   readonly fields: readonly TPath[];
@@ -382,6 +398,7 @@ export const security = Object.freeze({ mask, sanitize });
  * different thing entirely and live on `JIT.mapSchema(key, value)`.
  */
 export interface MapNamespace {
+  /** Maps one source value into the target schema. */
   <TSourceSchema extends ATS.AnyTypeSchema, TTargetSchema extends ATS.AnyTypeSchema>(
     source: SchemaInput<TSourceSchema>,
     target: SchemaInput<TTargetSchema>,

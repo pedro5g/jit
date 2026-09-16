@@ -51,6 +51,7 @@ export interface AnalyzedExecutionStage {
 /** Describes the JIT execution optimization pass contract used by the public API. */
 export interface ExecutionOptimizationPass {
   readonly name: string;
+  /** Rewrites an execution plan while preserving its observable contract. */
   run(plan: ExecutionPlan): ExecutionPlan;
 }
 

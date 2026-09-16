@@ -2965,9 +2965,8 @@ function buildSchemaNode(schema, buildNode) {
         }))
       };
     }
-    default:
-      return void 0;
   }
+  return void 0;
 }
 function buildStructuralIR(schema, recursive, operation) {
   return buildRecursiveProgram(
@@ -23528,6 +23527,316 @@ function validateObjectKeys3(schema, keys, compilerName) {
   }
 }
 
+// ../../packages/jit/src/factories/class-extensions.ts
+var CLASS_MIXIN = /* @__PURE__ */ Symbol("jit.class.mixin");
+var CLASS_FIELD_BUILDER = /* @__PURE__ */ Symbol("jit.class.fieldBuilder");
+var SCALAR_MEMBERS = /* @__PURE__ */ new Set(["value", "equals", "hashCode", "toJSON"]);
+var RESERVED_EXTENSION_NAMES = /* @__PURE__ */ new Set([
+  "constructor",
+  "schema",
+  "create",
+  "hydrate",
+  "extends",
+  "factories",
+  "construction",
+  "accessors",
+  "validate",
+  "assert"
+]);
+function isClassMixin(value) {
+  return typeof value === "function" && value[CLASS_MIXIN] === true;
+}
+function isClassCapability(value) {
+  return (typeof value === "object" || typeof value === "function") && value !== null && typeof value.install === "function" && typeof value.kind === "string";
+}
+function isClassExtensionFactory(value) {
+  return typeof value === "function" && !isClassCapability(value) && !isClassMixin(value);
+}
+function createClassExtensionFieldBuilder(name, schema, visibility = "public", customGetter, customSetter) {
+  const builder2 = {
+    [CLASS_FIELD_BUILDER]: true,
+    name,
+    schema,
+    visibility,
+    ...customGetter === void 0 ? {} : { customGetter },
+    ...customSetter === void 0 ? {} : { customSetter },
+    public: () => createClassExtensionFieldBuilder(name, schema, "public", customGetter, customSetter),
+    protected: () => createClassExtensionFieldBuilder(name, schema, "protected", customGetter, customSetter),
+    private: () => createClassExtensionFieldBuilder(name, schema, "private", customGetter, customSetter),
+    getter: (implementation) => createClassExtensionFieldBuilder(name, schema, visibility, implementation, customSetter),
+    setter: (implementation) => createClassExtensionFieldBuilder(name, schema, visibility, customGetter, implementation),
+    toDescriptor: (propertyName) => {
+      if (name !== void 0 && propertyName !== name) {
+        throw new JITError(
+          "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+          `Class extension field ${JSON.stringify(name)} was assigned to ${JSON.stringify(propertyName)}`
+        );
+      }
+      const accessors = [
+        ...customGetter === void 0 ? [] : [classGetter(customGetter)],
+        ...customSetter === void 0 ? [] : [classSetter(customSetter)]
+      ];
+      if (visibility === "protected") return classProtected(schema, ...accessors);
+      if (visibility === "private") return classPrivate(schema, ...accessors);
+      return classPublic(schema, ...accessors);
+    }
+  };
+  return Object.freeze(builder2);
+}
+function isClassExtensionFieldBuilder(value) {
+  return typeof value === "object" && value !== null && value[CLASS_FIELD_BUILDER] === true;
+}
+function createClassExtensionBuilder() {
+  return Object.freeze({
+    field(nameOrSchema, schema) {
+      return schema === void 0 ? createClassExtensionFieldBuilder(void 0, nameOrSchema) : createClassExtensionFieldBuilder(nameOrSchema, schema);
+    }
+  });
+}
+
+// ../../packages/jit/src/factories/class-layout.ts
+var INTERNAL_CONSTRUCT = /* @__PURE__ */ Symbol("jit.class.construct");
+var DOMAIN_STATE = /* @__PURE__ */ Symbol("jit.class.domainState");
+var EVENT_BUFFER = /* @__PURE__ */ Symbol("jit.class.events");
+var TRUSTED_MATERIALIZER = "__jitMaterialize";
+function createClassLayoutPlan(properties, accessors, managedStorage, fieldPolicies, encapsulateFields, initializers) {
+  return Object.freeze({
+    properties: Object.freeze([...properties]),
+    accessors,
+    managedStorage,
+    domainState: encapsulateFields ? { name: "__domainState", value: DOMAIN_STATE } : void 0,
+    fieldPolicies,
+    encapsulateFields,
+    initializers
+  });
+}
+function installTrustedMaterializer(classTarget, layout, freezeInstances, aggregate, materializerKey) {
+  const accessorByKey = new Map(layout.accessors?.map((accessor) => [accessor.key, accessor]));
+  const domainState = layout.domainState;
+  const hasNativePrivateSlot = layout.properties.some(
+    (property) => accessorByKey.get(property)?.field === "private" && !layout.managedStorage.has(property)
+  );
+  const materialize = function materialize2(state3) {
+    if (hasNativePrivateSlot) {
+      return new this(
+        state3,
+        INTERNAL_CONSTRUCT,
+        true
+      );
+    }
+    const instance = Object.create(this.prototype);
+    const input = state3;
+    if (domainState !== void 0) {
+      for (const property of layout.properties) {
+        const initializer = layout.initializers.get(property);
+        if (input[property] === void 0 && initializer !== void 0) input[property] = initializer();
+      }
+      instance[domainState.value] = input;
+      if (aggregate) {
+        Object.defineProperty(instance, EVENT_BUFFER, {
+          configurable: false,
+          enumerable: false,
+          value: [],
+          writable: true
+        });
+      }
+      return freezeInstances ? Object.freeze(instance) : instance;
+    }
+    for (const property of layout.properties) {
+      const initializer = layout.initializers.get(property);
+      const value = input[property] === void 0 && initializer !== void 0 ? initializer() : input[property];
+      const managed = layout.managedStorage.get(property);
+      if (managed === void 0) instance[property] = value;
+      else instance[managed.value] = value;
+    }
+    if (aggregate)
+      Object.defineProperty(instance, EVENT_BUFFER, {
+        configurable: false,
+        enumerable: false,
+        value: [],
+        writable: true
+      });
+    return freezeInstances ? Object.freeze(instance) : instance;
+  };
+  Object.defineProperty(classTarget, materializerKey, {
+    configurable: false,
+    enumerable: false,
+    value: materialize
+  });
+}
+function emitConstructor(layout, freezeInstances, aggregate, parse3, construction) {
+  const { properties, accessors, managedStorage, domainState, fieldPolicies, initializers } = layout;
+  const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
+  const initializerEntries = [...initializers.entries()];
+  const initializerBindings = new Map(initializerEntries.map(([field], index2) => [field, `__init${index2}`]));
+  const parts = domainState === void 0 ? emitFieldAssignments(
+    properties,
+    accessorByKey,
+    managedStorage,
+    fieldPolicies,
+    initializers,
+    initializerBindings
+  ) : emitDomainAssignments(properties, fieldPolicies, initializerBindings);
+  const state3 = domainState === void 0 ? "" : " this[__state] = state;";
+  const events = aggregate ? " Object.defineProperty(this, __events, { configurable: false, enumerable: false, value: [], writable: true });" : "";
+  const storageEntries = [...managedStorage.values()];
+  const storageNames = storageEntries.map((entry) => entry.name);
+  const storageValues = storageEntries.map((entry) => entry.value);
+  const initializerNames = initializerEntries.map(([field]) => initializerBindings.get(field));
+  const initializerValues = initializerEntries.map(([, initializer]) => initializer);
+  const source = `return class JITRuntimeClass { ${parts.slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${parts.assignments.join(" ")}${state3}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${parts.definitions.join(" ")} };`;
+  return globalThis.Function(
+    ...storageNames,
+    ...initializerNames,
+    "__parse",
+    "__construct",
+    "__construction",
+    ...domainState === void 0 ? [] : ["__state"],
+    ...aggregate ? ["__events"] : [],
+    source
+  )(
+    ...storageValues,
+    ...initializerValues,
+    parse3,
+    INTERNAL_CONSTRUCT,
+    construction,
+    ...domainState === void 0 ? [] : [domainState.value],
+    ...aggregate ? [EVENT_BUFFER] : []
+  );
+}
+function emitDomainAssignments(properties, fieldPolicies, initializerBindings) {
+  const definitions = [`get _props() { return this[__state]; }`];
+  for (const property of properties) {
+    const policy = fieldPolicies.get(property);
+    if (policy === void 0 || policy.getter === true) {
+      definitions.push(`get [${JSON.stringify(property)}]() { return this[__state][${JSON.stringify(property)}]; }`);
+    }
+    if (policy?.setter === true) {
+      definitions.push(
+        `set [${JSON.stringify(property)}](value) { this[__state][${JSON.stringify(property)}] = value; }`
+      );
+    }
+  }
+  const assignments = properties.map((property) => {
+    const initializer = initializerBindings.get(property);
+    if (initializer === void 0) return "";
+    const access2 = emitPropertyAccess("", property);
+    const value = `(state${access2} === undefined ? ${initializer}() : state${access2})`;
+    return `state${access2} = ${value};`;
+  });
+  return { slots: [], definitions, assignments };
+}
+function emitFieldAssignments(properties, accessorByKey, managedStorage, fieldPolicies, initializers, initializerBindings) {
+  const slots = [];
+  const definitions = [];
+  let slotIndex = 0;
+  const assignments = properties.map((property) => {
+    const accessor = accessorByKey.get(property);
+    const managed = managedStorage.get(property);
+    if (managed !== void 0) {
+      const policy = fieldPolicies.get(property);
+      const getter = policy?.getter === true || policy === void 0 && accessor?.field !== "private";
+      const setter = policy?.setter === true;
+      if (getter) definitions.push(`get [${JSON.stringify(property)}]() { return this[${managed.name}]; }`);
+      if (setter) definitions.push(`set [${JSON.stringify(property)}](value) { this[${managed.name}] = value; }`);
+      const initializer2 = initializerBindings.get(property);
+      const access3 = emitPropertyAccess("", property);
+      const value = initializer2 === void 0 ? `state${access3}` : `(state${access3} === undefined ? ${initializer2}() : state${access3})`;
+      return `this[${managed.name}] = ${value};`;
+    }
+    if (accessor?.field !== "private") {
+      const initializer2 = initializers.get(property);
+      const access3 = emitPropertyAccess("", property);
+      return initializer2 === void 0 ? `this${access3} = state${access3};` : `this${access3} = state${access3} === undefined ? ${initializerBindings.get(property)}() : state${access3};`;
+    }
+    const slot = `#p${slotIndex++}`;
+    slots.push(slot);
+    if (accessor.get !== false) definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`);
+    if (accessor.set !== false)
+      definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
+    const initializer = initializers.get(property);
+    const access2 = emitPropertyAccess("", property);
+    return initializer === void 0 ? `this.${slot} = state${access2};` : `this.${slot} = state${access2} === undefined ? ${initializerBindings.get(property)}() : state${access2};`;
+  });
+  return { slots, definitions, assignments };
+}
+function resolveManagedStorage(properties, _accessors, managedFields, encapsulateFields, fieldPolicies) {
+  const storage = /* @__PURE__ */ new Map();
+  if (encapsulateFields) return storage;
+  let index2 = 0;
+  for (const field of properties) {
+    const managed = managedFields.some((item) => item.field === field);
+    const policy = fieldPolicies.get(field);
+    const needsAccessorStorage = policy !== void 0 && (policy.visibility !== "public" || policy.getter !== false || policy.setter !== false || policy.noConstructor);
+    if (!managed && !encapsulateFields && !needsAccessorStorage) continue;
+    storage.set(field, { name: `__managed${index2++}`, value: /* @__PURE__ */ Symbol(`jit.${field}`) });
+  }
+  return storage;
+}
+function removeNoConstructorFields(schema, policies) {
+  const noConstructor = new Set(
+    [...policies.entries()].filter(([, policy]) => policy.noConstructor).map(([field]) => field)
+  );
+  if (noConstructor.size === 0) return schema;
+  const object2 = resolveEffectiveObjectSchema(schema);
+  const props = Object.fromEntries(Object.entries(object2.def.props).filter(([field]) => !noConstructor.has(field)));
+  return createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: object2.def.unknownKeys,
+      catchall: object2.def.catchall,
+      checks: object2.def.checks
+    },
+    object2.annotations
+  );
+}
+function compileNoConstructorInitializers(schema, policies) {
+  const object2 = resolveEffectiveObjectSchema(schema);
+  const initializers = /* @__PURE__ */ new Map();
+  for (const [field, policy] of policies) {
+    if (!policy.noConstructor) continue;
+    const fieldSchema = object2.def.props[field];
+    if (fieldSchema === void 0) continue;
+    const parse3 = compileValidator(fieldSchema).parse;
+    initializers.set(field, () => parse3(void 0));
+  }
+  return initializers;
+}
+function installFieldDescriptorAccessors(classTarget, policies) {
+  for (const [name, policy] of policies) {
+    const previous = Object.getOwnPropertyDescriptor(classTarget.prototype, name) ?? {
+      configurable: true,
+      enumerable: false
+    };
+    const next = { ...previous };
+    if (typeof policy.getter === "function") next.get = policy.getter;
+    if (typeof policy.setter === "function") next.set = policy.setter;
+    if (typeof policy.getter === "function" || typeof policy.setter === "function") {
+      Object.defineProperty(classTarget.prototype, name, next);
+    }
+  }
+}
+function resolveAccessors(properties, options) {
+  return properties.map((key) => {
+    const configured = {
+      ...options.default,
+      ...options.fields?.[key]
+    };
+    const get = resolveAccessorMember(key, configured.get);
+    const set2 = resolveAccessorMember(key, configured.set);
+    if (configured.field === "private" && get === false && set2 === false) {
+      throw new JITError("INVALID_OPERATION", `Private field ${JSON.stringify(key)} must expose a getter or setter`);
+    }
+    return { key, field: configured.field ?? "public", get, set: set2 };
+  });
+}
+function resolveAccessorMember(key, member) {
+  if (member === void 0) return key;
+  if (member === false) return false;
+  return typeof member === "string" ? key : member.name ?? key;
+}
+
 // ../../packages/jit/src/factories/query.ts
 var QUERY_PROGRAMS = /* @__PURE__ */ new WeakMap();
 function param(name) {
@@ -24011,11 +24320,6 @@ function lowerRulePredicate(predicate, inputs, bindingOffset) {
 
 // ../../packages/jit/src/factories/class.ts
 var CLASS_TARGET = /* @__PURE__ */ Symbol("jit.class.target");
-var INTERNAL_CONSTRUCT = /* @__PURE__ */ Symbol("jit.class.construct");
-var DOMAIN_STATE = /* @__PURE__ */ Symbol("jit.class.domainState");
-var EVENT_BUFFER = /* @__PURE__ */ Symbol("jit.class.events");
-var CLASS_FIELD_BUILDER = /* @__PURE__ */ Symbol("jit.class.fieldBuilder");
-var TRUSTED_MATERIALIZER = "__jitMaterialize";
 var FACTORY_FAILURE = /* @__PURE__ */ Symbol.for("jit.factory.failure");
 function createPolicyState() {
   return {
@@ -24285,7 +24589,6 @@ function applyAssertion(policy, schema, predicate, options) {
   policy.configured = true;
   compileAssertions(policy);
 }
-var CLASS_MIXIN = /* @__PURE__ */ Symbol("jit.class.mixin");
 function classMixin(definition) {
   const fieldNames = new Set(Object.getOwnPropertyNames(definition.fields ?? {}));
   const methodNames = Object.getOwnPropertyNames(definition.methods ?? {});
@@ -24302,69 +24605,6 @@ function classMixin(definition) {
     __requires: { enumerable: false, value: definition.requires ?? {} }
   });
   return Object.freeze(mixin);
-}
-function isClassMixin(value) {
-  return typeof value === "function" && value[CLASS_MIXIN] === true;
-}
-var SCALAR_MEMBERS = /* @__PURE__ */ new Set(["value", "equals", "hashCode", "toJSON"]);
-var RESERVED_EXTENSION_NAMES = /* @__PURE__ */ new Set([
-  "constructor",
-  "schema",
-  "create",
-  "hydrate",
-  "extends",
-  "factories",
-  "construction",
-  "accessors",
-  "validate",
-  "assert"
-]);
-function isClassCapability(value) {
-  return (typeof value === "object" || typeof value === "function") && value !== null && typeof value.install === "function" && typeof value.kind === "string";
-}
-function isClassExtensionFactory(value) {
-  return typeof value === "function" && !isClassCapability(value) && !isClassMixin(value);
-}
-function createClassExtensionFieldBuilder(name, schema, visibility = "public", customGetter, customSetter) {
-  const builder2 = {
-    [CLASS_FIELD_BUILDER]: true,
-    name,
-    schema,
-    visibility,
-    ...customGetter === void 0 ? {} : { customGetter },
-    ...customSetter === void 0 ? {} : { customSetter },
-    public: () => createClassExtensionFieldBuilder(name, schema, "public", customGetter, customSetter),
-    protected: () => createClassExtensionFieldBuilder(name, schema, "protected", customGetter, customSetter),
-    private: () => createClassExtensionFieldBuilder(name, schema, "private", customGetter, customSetter),
-    getter: (implementation) => createClassExtensionFieldBuilder(name, schema, visibility, implementation, customSetter),
-    setter: (implementation) => createClassExtensionFieldBuilder(name, schema, visibility, customGetter, implementation),
-    toDescriptor: (propertyName) => {
-      if (name !== void 0 && propertyName !== name) {
-        throw new JITError(
-          "CLASS_FIELD_DESCRIPTOR_CONFLICT",
-          `Class extension field ${JSON.stringify(name)} was assigned to ${JSON.stringify(propertyName)}`
-        );
-      }
-      const accessors = [
-        ...customGetter === void 0 ? [] : [classGetter(customGetter)],
-        ...customSetter === void 0 ? [] : [classSetter(customSetter)]
-      ];
-      if (visibility === "protected") return classProtected(schema, ...accessors);
-      if (visibility === "private") return classPrivate(schema, ...accessors);
-      return classPublic(schema, ...accessors);
-    }
-  };
-  return Object.freeze(builder2);
-}
-function isClassExtensionFieldBuilder(value) {
-  return typeof value === "object" && value !== null && value[CLASS_FIELD_BUILDER] === true;
-}
-function createClassExtensionBuilder() {
-  return Object.freeze({
-    field(nameOrSchema, schema) {
-      return schema === void 0 ? createClassExtensionFieldBuilder(void 0, nameOrSchema) : createClassExtensionFieldBuilder(nameOrSchema, schema);
-    }
-  });
 }
 function classFactory2(schema) {
   return createRuntimeClass(
@@ -24532,7 +24772,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     parse3,
     constructionState
   );
-  installTrustedMaterializer(classTarget, layout, state3.freezeInstances, state3.aggregate);
+  installTrustedMaterializer(classTarget, layout, state3.freezeInstances, state3.aggregate, TRUSTED_MATERIALIZER);
   parseCreation = compileValidator(creationSchema).parse;
   hydrateState = compileHydrator(hydrateSchema);
   for (const capabilityValue of state3.capabilities) {
@@ -25821,231 +26061,6 @@ function createScalarValueObject(schema, identifier2, isAbstract, seed) {
   }
   register();
   return classTarget;
-}
-function createClassLayoutPlan(properties, accessors, managedStorage, fieldPolicies, encapsulateFields, initializers) {
-  return Object.freeze({
-    properties: Object.freeze([...properties]),
-    accessors,
-    managedStorage,
-    domainState: encapsulateFields ? { name: "__domainState", value: DOMAIN_STATE } : void 0,
-    fieldPolicies,
-    encapsulateFields,
-    initializers
-  });
-}
-function installTrustedMaterializer(classTarget, layout, freezeInstances, aggregate) {
-  const accessorByKey = new Map(layout.accessors?.map((accessor) => [accessor.key, accessor]));
-  const domainState = layout.domainState;
-  const hasNativePrivateSlot = layout.properties.some(
-    (property) => accessorByKey.get(property)?.field === "private" && !layout.managedStorage.has(property)
-  );
-  const materialize = function materialize2(state3) {
-    if (hasNativePrivateSlot) {
-      return new this(
-        state3,
-        INTERNAL_CONSTRUCT,
-        true
-      );
-    }
-    const instance = Object.create(this.prototype);
-    const input = state3;
-    if (domainState !== void 0) {
-      for (const property of layout.properties) {
-        const initializer = layout.initializers.get(property);
-        if (input[property] === void 0 && initializer !== void 0) input[property] = initializer();
-      }
-      instance[domainState.value] = input;
-      if (aggregate) {
-        Object.defineProperty(instance, EVENT_BUFFER, {
-          configurable: false,
-          enumerable: false,
-          value: [],
-          writable: true
-        });
-      }
-      return freezeInstances ? Object.freeze(instance) : instance;
-    }
-    for (const property of layout.properties) {
-      const initializer = layout.initializers.get(property);
-      const value = input[property] === void 0 && initializer !== void 0 ? initializer() : input[property];
-      const managed = layout.managedStorage.get(property);
-      if (managed === void 0) instance[property] = value;
-      else instance[managed.value] = value;
-    }
-    if (aggregate)
-      Object.defineProperty(instance, EVENT_BUFFER, {
-        configurable: false,
-        enumerable: false,
-        value: [],
-        writable: true
-      });
-    return freezeInstances ? Object.freeze(instance) : instance;
-  };
-  Object.defineProperty(classTarget, TRUSTED_MATERIALIZER, {
-    configurable: false,
-    enumerable: false,
-    value: materialize
-  });
-}
-function emitConstructor(layout, freezeInstances, aggregate, parse3, construction) {
-  const { properties, accessors, managedStorage, domainState, fieldPolicies, initializers } = layout;
-  const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
-  const slots = [];
-  const definitions = [];
-  const initializerEntries = [...initializers.entries()];
-  const initializerBindings = new Map(initializerEntries.map(([field], index2) => [field, `__init${index2}`]));
-  let slotIndex = 0;
-  let assignments;
-  if (domainState !== void 0) {
-    definitions.push(`get _props() { return this[__state]; }`);
-    for (const property of properties) {
-      const accessor = accessorByKey.get(property);
-      const policy = fieldPolicies.get(property);
-      const defaultDdd = policy === void 0;
-      const getter = policy?.getter === true || defaultDdd || policy === void 0 && accessor?.field !== "private";
-      if (getter)
-        definitions.push(`get [${JSON.stringify(property)}]() { return this[__state][${JSON.stringify(property)}]; }`);
-      if (policy?.setter === true) {
-        definitions.push(
-          `set [${JSON.stringify(property)}](value) { this[__state][${JSON.stringify(property)}] = value; }`
-        );
-      }
-    }
-    assignments = properties.map((property) => {
-      const initializer = initializerBindings.get(property);
-      if (initializer === void 0) return "";
-      const value = `(state${emitPropertyAccess("", property)} === undefined ? ${initializer}() : state${emitPropertyAccess("", property)})`;
-      return `state${emitPropertyAccess("", property)} = ${value};`;
-    });
-  } else {
-    assignments = properties.map((property) => {
-      const accessor = accessorByKey.get(property);
-      const managed = managedStorage.get(property);
-      if (managed !== void 0) {
-        const policy = fieldPolicies.get(property);
-        const getter = policy?.getter === true || policy === void 0 && accessor?.field !== "private";
-        const setter = policy?.setter === true;
-        if (getter) definitions.push(`get [${JSON.stringify(property)}]() { return this[${managed.name}]; }`);
-        if (setter) definitions.push(`set [${JSON.stringify(property)}](value) { this[${managed.name}] = value; }`);
-        const initializer2 = initializerBindings.get(property);
-        const value = initializer2 !== void 0 ? `(state${emitPropertyAccess("", property)} === undefined ? ${initializer2}() : state${emitPropertyAccess("", property)})` : `state${emitPropertyAccess("", property)}`;
-        return `this[${managed.name}] = ${value};`;
-      }
-      if (accessor?.field !== "private") {
-        const initializer2 = initializers.get(property);
-        return initializer2 === void 0 ? `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)};` : `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)} === undefined ? ${initializerBindings.get(property)}() : state${emitPropertyAccess("", property)};`;
-      }
-      const slot = `#p${slotIndex++}`;
-      slots.push(slot);
-      if (accessor.get !== false) definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`);
-      if (accessor.set !== false)
-        definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
-      const initializer = initializers.get(property);
-      return initializer === void 0 ? `this.${slot} = state${emitPropertyAccess("", property)};` : `this.${slot} = state${emitPropertyAccess("", property)} === undefined ? ${initializerBindings.get(property)}() : state${emitPropertyAccess("", property)};`;
-    });
-  }
-  const state3 = domainState === void 0 ? "" : " this[__state] = state;";
-  const events = aggregate ? " Object.defineProperty(this, __events, { configurable: false, enumerable: false, value: [], writable: true });" : "";
-  const storageEntries = [...managedStorage.values()];
-  const storageNames = storageEntries.map((entry) => entry.name);
-  const storageValues = storageEntries.map((entry) => entry.value);
-  const initializerNames = initializerEntries.map(([field]) => initializerBindings.get(field));
-  const initializerValues = initializerEntries.map(([, initializer]) => initializer);
-  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${state3}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
-  return globalThis.Function(
-    ...storageNames,
-    ...initializerNames,
-    "__parse",
-    "__construct",
-    "__construction",
-    ...domainState === void 0 ? [] : ["__state"],
-    ...aggregate ? ["__events"] : [],
-    source
-  )(
-    ...storageValues,
-    ...initializerValues,
-    parse3,
-    INTERNAL_CONSTRUCT,
-    construction,
-    ...domainState === void 0 ? [] : [domainState.value],
-    ...aggregate ? [EVENT_BUFFER] : []
-  );
-}
-function resolveManagedStorage(properties, _accessors, managedFields, encapsulateFields, fieldPolicies) {
-  const storage = /* @__PURE__ */ new Map();
-  if (encapsulateFields) return storage;
-  let index2 = 0;
-  for (const field of properties) {
-    const managed = managedFields.some((item) => item.field === field);
-    const policy = fieldPolicies.get(field);
-    const needsAccessorStorage = policy !== void 0 && (policy.visibility !== "public" || policy.getter !== false || policy.setter !== false || policy.noConstructor);
-    if (!managed && !encapsulateFields && !needsAccessorStorage) continue;
-    storage.set(field, { name: `__managed${index2++}`, value: /* @__PURE__ */ Symbol(`jit.${field}`) });
-  }
-  return storage;
-}
-function removeNoConstructorFields(schema, policies) {
-  const noConstructor = new Set(
-    [...policies.entries()].filter(([, policy]) => policy.noConstructor).map(([field]) => field)
-  );
-  if (noConstructor.size === 0) return schema;
-  const object2 = resolveEffectiveObjectSchema(schema);
-  const props = Object.fromEntries(Object.entries(object2.def.props).filter(([field]) => !noConstructor.has(field)));
-  return createSchema(
-    TypeName.object,
-    {
-      props,
-      unknownKeys: object2.def.unknownKeys,
-      catchall: object2.def.catchall,
-      checks: object2.def.checks
-    },
-    object2.annotations
-  );
-}
-function compileNoConstructorInitializers(schema, policies) {
-  const object2 = resolveEffectiveObjectSchema(schema);
-  const initializers = /* @__PURE__ */ new Map();
-  for (const [field, policy] of policies) {
-    if (!policy.noConstructor) continue;
-    const fieldSchema = object2.def.props[field];
-    if (fieldSchema === void 0) continue;
-    const parse3 = compileValidator(fieldSchema).parse;
-    initializers.set(field, () => parse3(void 0));
-  }
-  return initializers;
-}
-function installFieldDescriptorAccessors(classTarget, policies) {
-  for (const [name, policy] of policies) {
-    const previous = Object.getOwnPropertyDescriptor(classTarget.prototype, name) ?? {
-      configurable: true,
-      enumerable: false
-    };
-    const next = { ...previous };
-    if (typeof policy.getter === "function") next.get = policy.getter;
-    if (typeof policy.setter === "function") next.set = policy.setter;
-    if (typeof policy.getter === "function" || typeof policy.setter === "function") {
-      Object.defineProperty(classTarget.prototype, name, next);
-    }
-  }
-}
-function resolveAccessors(properties, options) {
-  return properties.map((key) => {
-    const configured = {
-      ...options.default,
-      ...options.fields?.[key]
-    };
-    const get = resolveAccessorMember(key, configured.get);
-    const set2 = resolveAccessorMember(key, configured.set);
-    if (configured.field === "private" && get === false && set2 === false) {
-      throw new JITError("INVALID_OPERATION", `Private field ${JSON.stringify(key)} must expose a getter or setter`);
-    }
-    return { key, field: configured.field ?? "public", get, set: set2 };
-  });
-}
-function resolveAccessorMember(key, member) {
-  if (member === void 0) return key;
-  if (member === false) return false;
-  return typeof member === "string" ? key : member.name ?? key;
 }
 var classType = Object.assign(classFactory2, {
   abstract: abstractClass,

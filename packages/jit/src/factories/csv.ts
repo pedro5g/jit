@@ -17,17 +17,22 @@ export type CsvSchemaOptions<TRow> = Omit<CsvOptions, "columns"> & {
 
 /** Provides the JIT csv parse plan operation for the supplied input. */
 export interface CsvParsePlan<TRow> {
+  /** Parses CSV input into rows. */
   (input: CsvInput): TRow[];
   readonly to: {
+    /** Parses CSV input as a lazy row iterator. */
     iterator(): (input: CsvInput) => IterableIterator<TRow>;
+    /** Parses rows into a visitor callback without creating a result array. */
     visitor(): (input: CsvInput, consume: (row: TRow, index: number) => void) => number;
   };
 }
 
 /** Provides the JIT csv stringify plan operation for the supplied input. */
 export interface CsvStringifyPlan<TRow> {
+  /** Serializes rows to CSV text. */
   (value: readonly TRow[]): string;
   readonly to: {
+    /** Serializes rows as lazy CSV chunks. */
     iterator(): (value: readonly TRow[]) => IterableIterator<string>;
   };
 }

@@ -33,10 +33,15 @@ function flagged<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Builder<TS
  * ```
  */
 export interface NativeCoercions {
+  /** Coerces input to a string before validation. */
   string(message?: ValidationMessage): Builder<ATS.StringSchema>;
+  /** Coerces input to a number before validation. */
   number(message?: ValidationMessage): Builder<ATS.NumberSchema>;
+  /** Coerces input to a boolean before validation. */
   boolean(message?: ValidationMessage): Builder<ATS.BooleanSchema>;
+  /** Coerces input to a bigint before validation. */
   bigint(message?: ValidationMessage): Builder<ATS.BigIntSchema>;
+  /** Coerces input to a date before validation. */
   date(message?: ValidationMessage): Builder<ATS.DateSchema>;
 }
 

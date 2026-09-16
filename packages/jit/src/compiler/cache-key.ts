@@ -124,8 +124,7 @@ function textExpression(part: CacheKeyPart, read: string): string {
     case "date":
       return `${read}.getTime()`;
     default:
-      // A structural part is reduced to its schema hash rather than serialized;
-      // the alternative is walking it twice, once to serialize and once to read.
+      // PERF: hashing avoids walking a structural value twice for one cache key.
       return `__cacheKeyHash(${read})`;
   }
 }

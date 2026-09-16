@@ -56,9 +56,13 @@ export type ReconcileEvent<TRow, TChange> =
 
 /** A visitor is handed each result as it is found; nothing is collected. */
 export interface ReconcileVisitor<TRow> {
+  /** Receives a row present only in the current snapshot. */
   added?(value: TRow): void;
+  /** Receives a row present only in the previous snapshot. */
   removed?(value: TRow): void;
+  /** Receives a row unchanged between snapshots. */
   unchanged?(value: TRow): void;
+  /** Receives a row whose identity exists in both snapshots but changed. */
   changed?(before: TRow, after: TRow, diff?: ReconcileDelta): void;
 }
 
@@ -72,6 +76,7 @@ export interface ReconcileSinks<TRow, TChange> {
 
 /** Provides the JIT reconcile plan operation for the supplied input. */
 export interface ReconcilePlan<TSchema extends ATS.AnyTypeSchema, TChannels, TChange> {
+  /** Reconciles two snapshots and returns the enabled result channels. */
   (
     previous: readonly RowOf<TSchema>[],
     current: readonly RowOf<TSchema>[]
@@ -79,7 +84,9 @@ export interface ReconcilePlan<TSchema extends ATS.AnyTypeSchema, TChannels, TCh
   /** Names the identity when the collection declares none, or to override it. */
   by<const TKey extends RowKey<TSchema>>(key: TKey): ReconcilePlan<TSchema, TChannels, TChange>;
   /** `"diff"` attaches a structural diff to each changed pair. It runs only when equality failed. */
+  /** Changes carry the before and after rows only. */
   changes(mode: "value"): ReconcilePlan<TSchema, TChannels, ReconcileChange<RowOf<TSchema>>>;
+  /** Changes also carry the structural diff. */
   changes(mode: "diff"): ReconcilePlan<TSchema, TChannels, ReconcileChangeWithDiff<RowOf<TSchema>>>;
   readonly to: ReconcileSinks<RowOf<TSchema>, TChange>;
 }

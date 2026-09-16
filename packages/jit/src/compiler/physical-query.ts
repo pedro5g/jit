@@ -12,8 +12,8 @@ import type { OptimizedQueryPlan, QueryTarget } from "./query.js";
 import { emitPropertyAccess } from "./source/access.js";
 import { emitLiteral } from "./source/literal.js";
 
-// The access path is shared with lookup, reconcile and collection mutation;
-// re-exported here so existing importers keep their entry point.
+// COMPAT: keep this entry point while lookup, reconcile and collection mutation
+// share the implementation from access-path.
 export {
   emitBinarySearch,
   emitCachedIndexLookup,

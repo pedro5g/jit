@@ -40,11 +40,13 @@ export interface RuleFieldValue<TValue> {
 
 /** Provides the JIT rule input ref operation for the supplied input. */
 export interface RuleInputRef<TInputs> {
+  /** References a declared rule input by field name. */
   field<TKey extends Field<TInputs>>(key: TKey): RuleInputValue<TInputs[TKey]>;
 }
 
 /** Describes the JIT rule subject ref contract used by the public API. */
 export interface RuleSubjectRef<TSubject> {
+  /** References a subject field when constructing an emitted outcome. */
   field<TKey extends Field<TSubject>>(key: TKey): RuleFieldValue<TSubject[TKey]>;
 }
 
@@ -52,20 +54,35 @@ type RuleOperand<TValue> = TValue | RuleInputValue<TValue>;
 
 /** Query-compatible conditions over subject fields and declared typed inputs. */
 export interface RuleConditionBuilder<TSubject> {
+  /** Compares a subject field with a literal or input value. */
   eq<TKey extends Field<TSubject>>(left: TKey, right: RuleOperand<TSubject[TKey]>): QueryCompareNode;
+  /** Compares a rule input with a literal or input value. */
   eq<TValue>(left: RuleInputValue<TValue>, right: RuleOperand<TValue>): QueryCompareNode;
+  /** Requires a subject field not to equal the right operand. */
   neq<TKey extends Field<TSubject>>(left: TKey, right: RuleOperand<TSubject[TKey]>): QueryCompareNode;
+  /** Requires a rule input not to equal the right operand. */
   neq<TValue>(left: RuleInputValue<TValue>, right: RuleOperand<TValue>): QueryCompareNode;
+  /** Requires a subject field to be greater than the right operand. */
   gt<TKey extends Field<TSubject>>(left: TKey, right: RuleOperand<TSubject[TKey]>): QueryCompareNode;
+  /** Requires a rule input to be greater than the right operand. */
   gt<TValue>(left: RuleInputValue<TValue>, right: RuleOperand<TValue>): QueryCompareNode;
+  /** Requires a subject field to be greater than or equal to the right operand. */
   gte<TKey extends Field<TSubject>>(left: TKey, right: RuleOperand<TSubject[TKey]>): QueryCompareNode;
+  /** Requires a rule input to be greater than or equal to the right operand. */
   gte<TValue>(left: RuleInputValue<TValue>, right: RuleOperand<TValue>): QueryCompareNode;
+  /** Requires a subject field to be less than the right operand. */
   lt<TKey extends Field<TSubject>>(left: TKey, right: RuleOperand<TSubject[TKey]>): QueryCompareNode;
+  /** Requires a rule input to be less than the right operand. */
   lt<TValue>(left: RuleInputValue<TValue>, right: RuleOperand<TValue>): QueryCompareNode;
+  /** Requires a subject field to be less than or equal to the right operand. */
   lte<TKey extends Field<TSubject>>(left: TKey, right: RuleOperand<TSubject[TKey]>): QueryCompareNode;
+  /** Requires a rule input to be less than or equal to the right operand. */
   lte<TValue>(left: RuleInputValue<TValue>, right: RuleOperand<TValue>): QueryCompareNode;
+  /** Combines conditions with logical AND. */
   and(left: QueryConditionNode, right: QueryConditionNode, ...rest: readonly QueryConditionNode[]): QueryConditionNode;
+  /** Combines conditions with logical OR. */
   or(left: QueryConditionNode, right: QueryConditionNode, ...rest: readonly QueryConditionNode[]): QueryConditionNode;
+  /** Negates one condition. */
   not(inner: QueryConditionNode): QueryConditionNode;
 }
 
@@ -115,12 +132,15 @@ export type RulesManyVisitor<TRuleId extends string, TOutcome> = (
 
 /** Collection specialization: one generated loop over every record. */
 export interface RulesManyPlan<TInputs, TRuleId extends string, TOutcome, TSubject> {
+  /** Runs matching outcomes over every subject. */
   (subjects: readonly TSubject[], ...args: InputArgs<TInputs>): TOutcome[];
   readonly to: {
+    /** Visits emitted outcomes without allocating a result array. */
     visitor(): (
       subjects: readonly TSubject[],
       ...args: [...InputArgs<TInputs>, consume: RulesManyVisitor<TRuleId, TOutcome>]
     ) => number;
+    /** Iterates emitted outcomes lazily. */
     iterator(): (subjects: readonly TSubject[], ...args: InputArgs<TInputs>) => IterableIterator<TOutcome>;
   };
 }
@@ -138,9 +158,11 @@ export interface RulesPlan<
   TRuleId extends string,
   TOutcome,
 > {
+  /** Declares the schemas for named rule inputs. */
   inputs<const TShape extends InputShape>(
     shape: TShape
   ): RulesPlan<TSubject, TypeofInputShape<TShape>, TRuleId, TOutcome>;
+  /** Adds one prioritized rule and its optional emitted outcome. */
   rule<const TId extends string, TEmit = undefined>(
     id: TId & (TId extends TRuleId ? never : unknown),
     options: RuleOptions<TSubject, TInputs, TEmit>

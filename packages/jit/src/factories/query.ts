@@ -102,30 +102,37 @@ type IterableElement<TValue> = TValue extends Iterable<infer TElement> ? TElemen
  * @template TElement - The collection element type being filtered.
  */
 export interface QueryConditionBuilder<TElement> {
+  /** Compares a field with a literal, parameter or query constant. */
   eq<TKey extends QueryKeysForOperator<TElement, "eq">>(
     key: TKey,
     value: QueryComparable<TElement[TKey]>
   ): QueryCompareNode;
+  /** Requires a field not to equal the comparison value. */
   neq<TKey extends QueryKeysForOperator<TElement, "neq">>(
     key: TKey,
     value: QueryComparable<TElement[TKey]>
   ): QueryCompareNode;
+  /** Requires a field to be greater than the comparison value. */
   gt<TKey extends QueryKeysForOperator<TElement, "gt">>(
     key: TKey,
     value: QueryComparable<TElement[TKey]>
   ): QueryCompareNode;
+  /** Requires a field to be greater than or equal to the comparison value. */
   gte<TKey extends QueryKeysForOperator<TElement, "gte">>(
     key: TKey,
     value: QueryComparable<TElement[TKey]>
   ): QueryCompareNode;
+  /** Requires a field to be less than the comparison value. */
   lt<TKey extends QueryKeysForOperator<TElement, "lt">>(
     key: TKey,
     value: QueryComparable<TElement[TKey]>
   ): QueryCompareNode;
+  /** Requires a field to be less than or equal to the comparison value. */
   lte<TKey extends QueryKeysForOperator<TElement, "lte">>(
     key: TKey,
     value: QueryComparable<TElement[TKey]>
   ): QueryCompareNode;
+  /** Captures a literal as a reusable query value node. */
   constant<const TValue extends string | number | bigint | boolean | null | undefined>(
     value: TValue
   ): QueryConstRef<TValue>;
@@ -133,6 +140,7 @@ export interface QueryConditionBuilder<TElement> {
   and(left: QueryConditionNode, right: QueryConditionNode, ...rest: readonly QueryConditionNode[]): QueryConditionNode;
   /** Folds two or more conditions into one nested `or` chain. */
   or(left: QueryConditionNode, right: QueryConditionNode, ...rest: readonly QueryConditionNode[]): QueryConditionNode;
+  /** Negates one condition. */
   not(inner: QueryConditionNode): QueryConditionNode;
 }
 
@@ -157,6 +165,7 @@ export interface QueryBuilderOps<
   TResult = TOutput[],
   TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 > {
+  /** Fuses an authorization decision into this query. */
   authorize<TAction extends string, TActor>(
     ability:
       | Ability<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TAction>
@@ -164,9 +173,11 @@ export interface QueryBuilderOps<
     action: TAction,
     actor?: TActor
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  /** Declares and type-checks named query parameters. */
   params<const TShape extends ParamSchemaShape>(
     shape: TShape
   ): QueryBuilder<TSchema, TOutput, TResult, TParams & TypeofParamShape<TShape>>;
+  /** Filters rows with the shared query condition AST. */
   filter(
     predicate: (
       query: QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
@@ -182,6 +193,7 @@ export interface QueryBuilderOps<
     predicate: RulePredicate<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TInputs>,
     ...inputs: keyof TInputs extends never ? readonly [] : readonly [inputs: TInputs]
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  /** Projects the selected fields without retaining the others. */
   select<const TKeys extends readonly QueryOutputKey<TOutput>[]>(
     ...fields: TKeys
   ): QueryBuilder<
@@ -190,6 +202,7 @@ export interface QueryBuilderOps<
     QuerySelectResult<TResult, QueryPick<TOutput, TKeys[number]>>,
     TParams
   >;
+  /** Keeps the first row for each key. */
   unique<TKey extends QueryCollectionKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
@@ -197,44 +210,59 @@ export interface QueryBuilderOps<
   distinct<const TKeys extends readonly QueryCollectionKey<ATS.TypeofSchema<TSchema>>[]>(
     ...fields: TKeys
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  /** Indexes results by a unique collection key. */
   keyed<TKey extends QueryCollectionKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, Map<QueryKeyValue<ATS.TypeofSchema<TSchema>, TKey>, TOutput>, TParams>;
+  /** Groups results by a collection key. */
   groupBy<TKey extends QueryCollectionKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, Record<QueryGroupKey<ATS.TypeofSchema<TSchema>, TKey>, TOutput[]>, TParams>;
+  /** Orders results by a collection key. */
   orderBy<TKey extends QueryCollectionKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey,
     direction?: "asc" | "desc"
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  /** Expands an array-like field into individual output rows. */
   flatMap<TKey extends Extract<keyof TOutput, string>>(
     key: TKey
   ): QueryBuilder<TSchema, IterableElement<TOutput[TKey]>, IterableElement<TOutput[TKey]>[], TParams>;
+  /** Limits the number of emitted rows. */
   take(count: number): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  /** Skips the first `count` rows. */
   drop(count: number): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  /** Emits rows while the condition remains true. */
   takeWhile(
     predicate: (
       query: QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
       params: QueryRuntimeParams<TParams>
     ) => QueryConditionNode
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  /** Skips rows while the condition remains true, then emits the rest. */
   dropWhile(
     predicate: (
       query: QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
       params: QueryRuntimeParams<TParams>
     ) => QueryConditionNode
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  /** Emits fixed-size groups, including a final partial group. */
   chunk(size: number): QueryBuilder<TSchema, TOutput[], TOutput[][], TParams>;
+  /** Emits sliding fixed-size windows. */
   window(size: number): QueryBuilder<TSchema, TOutput[], TOutput[][], TParams>;
+  /** Emits adjacent pairs and stops before an incomplete pair. */
   pairwise(): QueryBuilder<TSchema, readonly [TOutput, TOutput], (readonly [TOutput, TOutput])[], TParams>;
+  /** Carries an accumulator through the rows. */
   scan<TAccumulator>(options: {
     readonly initial: TAccumulator;
     readonly update: (accumulator: TAccumulator, value: TOutput) => TAccumulator | Promise<TAccumulator>;
   }): QueryBuilder<TSchema, TAccumulator, TAccumulator[], TParams>;
+  /** Groups consecutive rows sharing the same key. */
   groupAdjacentBy<TKey extends Extract<keyof TOutput, string>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput[], TOutput[][], TParams>;
+  /** Deletes matching rows and returns the changed collection. */
   delete(): QueryBuilder<TSchema, TOutput, ATS.TypeofSchema<TSchema>, TParams>;
+  /** Applies a shallow patch to matching rows. */
   update(
     patch: QueryUpdatePatch<ATS.TypeofSchema<TSchema>>
   ): QueryBuilder<TSchema, TOutput, ATS.TypeofSchema<TSchema>, TParams>;
@@ -276,7 +304,9 @@ export interface QueryBuilderOps<
   every(): QueryBuilder<TSchema, TOutput, boolean, TParams>;
   /** Alternative result shapes for the same query program. */
   readonly to: QuerySinks<TSchema, TOutput, TParams>;
+  /** Returns a lazy iterator over the query results. */
   lazy(): LazyQueryBuilder<TSchema, TOutput, TParams>;
+  /** Describes the selected execution strategy without running the query. */
   explain(outputMode?: "eager-array" | "generator" | "async-generator" | "visitor"): QueryExecutionPlan;
 }
 
@@ -288,6 +318,7 @@ export interface QuerySinks<
 > {
   /** Streams results, materializing nothing. */
   iterator(): QueryIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+  /** Streams results asynchronously. */
   asyncIterator(): QueryAsyncIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
   /** Pushes each result into a callback; no array and no generator frames. */
   visitor(): QueryVisitorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
@@ -323,9 +354,11 @@ export interface BinaryQueryBuilderOps<
   TResult = TOutput[],
   TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 > {
+  /** Declares and type-checks named binary-query parameters. */
   params<const TShape extends ParamSchemaShape>(
     shape: TShape
   ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams & TypeofParamShape<TShape>>;
+  /** Filters binary rows with a compiled query condition. */
   filter(
     predicate: (query: QueryConditionBuilder<TElement>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
   ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams>;
@@ -334,6 +367,7 @@ export interface BinaryQueryBuilderOps<
     predicate: RulePredicate<TElement, TInputs>,
     ...inputs: keyof TInputs extends never ? readonly [] : readonly [inputs: TInputs]
   ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams>;
+  /** Projects selected fields from each binary row. */
   select<const TKeys extends readonly Extract<keyof TOutput, string>[]>(
     ...fields: TKeys
   ): BinaryQueryBuilder<TElement, QueryPick<TOutput, TKeys[number]>, QueryPick<TOutput, TKeys[number]>[], TParams>;

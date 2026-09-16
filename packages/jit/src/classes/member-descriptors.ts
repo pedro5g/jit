@@ -145,6 +145,7 @@ export interface ClassMethodBuilder<
   TInput extends readonly ClassMethodInput[],
   TOutput extends ClassMethodInput | undefined = undefined,
 > {
+  /** Supplies the synchronous implementation for the declared method. */
   implement<
     TImplementation extends (
       ...args: ATS.FunctionArgs<UnwrapInput<TInput>>
@@ -158,6 +159,7 @@ export interface ClassMethodBuilder<
       readonly async: false;
     }
   >;
+  /** Supplies the asynchronous implementation for the declared method. */
   implementAsync<
     TImplementation extends (
       ...args: ATS.FunctionArgs<UnwrapInput<TInput>>

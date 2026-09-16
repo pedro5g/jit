@@ -24,30 +24,45 @@ export interface OpChain<TInput = unknown, TOutput = unknown> {
 
 /** Provides the JIT string ops operation for the supplied input. */
 export interface StringOps extends OpChain<string, string> {
+  /** Removes leading and trailing whitespace. */
   trim(): StringOps;
+  /** Converts the string to lower case. */
   lowercase(): StringOps;
+  /** Converts the string to upper case. */
   uppercase(): StringOps;
   /** Unicode normalization; `NFC` unless another form is given. */
   normalize(form?: "NFC" | "NFD" | "NFKC" | "NFKD"): StringOps;
+  /** Returns the substring between `start` and the optional `end` index. */
   slice(start: number, end?: number): StringOps;
+  /** Replaces matching text or a bound regular expression with `replacement`. */
   replace(pattern: string | RegExp, replacement: string): StringOps;
+  /** Pads on the left until the string reaches `length`. */
   padStart(length: number, pad?: string): StringOps;
+  /** Pads on the right until the string reaches `length`. */
   padEnd(length: number, pad?: string): StringOps;
   /** Collapses runs of whitespace into single spaces. */
   collapseWhitespace(): StringOps;
+  /** Converts the string with JavaScript's `Number()` conversion. */
   toNumber(): NumberOps;
+  /** Converts the string to a JavaScript `Date`. */
   toDate(): DateOps;
 }
 
 /** Provides the JIT number ops operation for the supplied input. */
 export interface NumberOps extends OpChain<number, number> {
+  /** Rounds to the nearest integer. */
   round(): NumberOps;
+  /** Rounds down to the next lower integer. */
   floor(): NumberOps;
+  /** Rounds up to the next higher integer. */
   ceil(): NumberOps;
+  /** Returns the absolute value. */
   abs(): NumberOps;
+  /** Clamps the number to the inclusive `[min, max]` range. */
   clamp(min: number, max: number): NumberOps;
   /** Rounds to a fixed number of decimal places, staying a number. */
   toFixed(digits: number): NumberOps;
+  /** Converts the number to text. */
   toText(): StringOps;
 }
 
@@ -55,7 +70,9 @@ export interface NumberOps extends OpChain<number, number> {
 export interface DateOps extends OpChain<Date, Date> {
   /** Drops the time part, in UTC. */
   startOfDay(): DateOps;
+  /** Converts the date to an ISO 8601 string. */
   toISO(): StringOps;
+  /** Returns the Unix epoch time in milliseconds. */
   toEpoch(): NumberOps;
 }
 

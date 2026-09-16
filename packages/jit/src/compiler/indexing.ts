@@ -44,7 +44,9 @@ export interface IndexDescriptor {
 
 /** Describes the JIT compiled index contract used by the public API. */
 export interface CompiledIndex<TRow, TIndex> {
+  /** Builds an index for one collection snapshot. */
   (value: readonly TRow[]): TIndex;
+  /** Reuses a cached index for the same collection identity when available. */
   readonly cached: (value: readonly TRow[]) => TIndex;
 }
 

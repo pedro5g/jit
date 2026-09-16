@@ -27,6 +27,7 @@ type ProcessExecute<TElement, TResult, TParams extends Readonly<Record<string, u
 
 /** Executes the JIT process builder operation for the supplied input. */
 export interface ProcessBuilder<TElement> {
+  /** Opens the binary process pipeline for this element schema. */
   binary(options?: BinaryRowSetOptions): BinaryProcessBuilder<TElement, TElement, TElement[]>;
 }
 
@@ -50,12 +51,15 @@ export interface BinaryProcessBuilder<
   TResult = TOutput[],
   TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 > {
+  /** Declares and type-checks process parameters. */
   params<const TShape extends ParamSchemaShape>(
     shape: TShape
   ): BinaryProcessBuilder<TElement, TOutput, TResult, TypeofParamShape<TShape>>;
+  /** Filters rows with a compiled query condition. */
   filter(
     predicate: (query: QueryConditionBuilder<TElement>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
   ): BinaryProcessBuilder<TElement, TOutput, TResult, TParams>;
+  /** Projects selected fields before the terminal operation. */
   select<const TKeys extends readonly Extract<keyof TOutput, string>[]>(
     ...fields: TKeys
   ): BinaryProcessBuilder<
@@ -64,19 +68,25 @@ export interface BinaryProcessBuilder<
     ProcessPick<TOutput, TKeys[number]>[],
     TParams
   >;
+  /** Sums a numeric source field. */
   sum<TKey extends Extract<keyof TElement, string>>(
     key: TKey
   ): BinaryProcessBuilder<TElement, TOutput, number, TParams>;
+  /** Counts rows. */
   count(): BinaryProcessBuilder<TElement, TOutput, number, TParams>;
+  /** Averages a numeric source field. */
   avg<TKey extends Extract<keyof TElement, string>>(
     key: TKey
   ): BinaryProcessBuilder<TElement, TOutput, number | undefined, TParams>;
+  /** Returns the minimum numeric source value, or `undefined` when empty. */
   min<TKey extends Extract<keyof TElement, string>>(
     key: TKey
   ): BinaryProcessBuilder<TElement, TOutput, number | undefined, TParams>;
+  /** Returns the maximum numeric source value, or `undefined` when empty. */
   max<TKey extends Extract<keyof TElement, string>>(
     key: TKey
   ): BinaryProcessBuilder<TElement, TOutput, number | undefined, TParams>;
+  /** Materializes the binary query and execution handles. */
   compile(): BinaryProcessCompiled<TElement, TResult, TParams>;
 }
 

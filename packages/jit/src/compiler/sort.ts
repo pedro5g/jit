@@ -6,8 +6,11 @@ import { emitOrderingComparatorBody, type OrderingDescriptor, resolveOrderingDes
 
 /** Describes the JIT compiled sort contract used by the public API. */
 export interface CompiledSort<T> {
+  /** Returns a sorted copy of the input. */
   (value: readonly T[]): T[];
+  /** Compares two rows using the compiled criteria. */
   readonly compare: (left: T, right: T) => number;
+  /** Sorts the supplied mutable array in place. */
   readonly inPlace: (value: T[]) => T[];
 }
 

@@ -27,7 +27,9 @@ const OPERATION_ARTIFACTS = new WeakMap<ATS.AnyTypeSchema, Map<string, CallableA
 /** A callable, lazily-lowered execution plan. */
 export type CallableArtifact<TFunction extends FunctionLike> = TFunction & {
   readonly plan: ExecutionPlan;
+  /** Lowers and caches the artifact's callable implementation. */
   compile(): CallableArtifact<TFunction>;
+  /** Returns the immutable execution plan without running it. */
   explain(): ExecutionPlan;
 };
 
@@ -47,17 +49,23 @@ export type ValueArtifact<TInput, TOutput, TSchema extends ATS.AnyTypeSchema> = 
   readonly schema: TSchema;
   /** Standard Schema interop; `validate` runs the compiled validator. */
   readonly "~standard": StandardSchemaProps<unknown, ATS.TypeofSchema<TSchema>>;
+  /** Adds validation as the next execution stage. */
   validate(): SchemaArtifact<TInput, TSchema>;
+  /** Maps this value to a target schema. */
   map<TTarget extends ATS.AnyTypeSchema>(
     target: SchemaInput<TTarget>,
     mapping?: MapperOverridesInput
   ): SchemaArtifact<TInput, TTarget>;
+  /** Transforms this value to a target schema. */
   transform<TTarget extends ATS.AnyTypeSchema>(
     target: SchemaInput<TTarget>,
     transforms: ATS.TransformSpec<TOutput>
   ): SchemaArtifact<TInput, TTarget>;
+  /** Applies an immutable update patch. */
   update(patch: UpdatePatch<TOutput>): SchemaArtifact<TInput, TSchema>;
+  /** Masks marked sensitive fields. */
   mask(): SchemaArtifact<TInput, TSchema>;
+  /** Sanitizes marked fields according to their schema metadata. */
   sanitize(): SchemaArtifact<TInput, TSchema>;
   readonly to: ValueSinks<TInput, TOutput>;
 };
@@ -69,28 +77,41 @@ export type CollectionArtifact<
   TSchema extends ATS.ArraySchema<ATS.AnyTypeSchema>,
 > = ExecutionArtifact<TInput, TElement[]> & {
   readonly schema: TSchema;
+  /** Adds validation to each collection element. */
   validate(): CollectionArtifact<TInput, TElement, TSchema>;
+  /** Filters elements with the shared query condition AST. */
   filter(
     predicate: (query: QueryConditionBuilder<TElement>) => QueryConditionNode
   ): CollectionArtifact<TInput, TElement, TSchema>;
+  /** Projects selected fields from each element. */
   select<const TKeys extends readonly Extract<keyof TElement, string>[]>(
     ...fields: TKeys
   ): CollectionArtifact<TInput, Pick<TElement, TKeys[number]>, ATS.ArraySchema<ATS.AnyTypeSchema>>;
+  /** Maps each element to a target schema. */
   map<TTarget extends ATS.AnyTypeSchema>(
     target: SchemaInput<TTarget>,
     mapping?: MapperOverridesInput
   ): CollectionArtifact<TInput, ATS.TypeofSchema<TTarget>, ATS.ArraySchema<TTarget>>;
+  /** Transforms each element to a target schema. */
   transform<TTarget extends ATS.AnyTypeSchema>(
     target: SchemaInput<TTarget>,
     transforms: ATS.TransformSpec<TElement>
   ): CollectionArtifact<TInput, ATS.TypeofSchema<TTarget>, ATS.ArraySchema<TTarget>>;
+  /** Applies an immutable patch to each element. */
   update(patch: UpdatePatch<TElement>): CollectionArtifact<TInput, TElement, TSchema>;
+  /** Masks marked fields on each element. */
   mask(): CollectionArtifact<TInput, TElement, TSchema>;
+  /** Sanitizes marked fields on each element. */
   sanitize(): CollectionArtifact<TInput, TElement, TSchema>;
+  /** Counts elements. */
   count(): ExecutionArtifact<TInput, number>;
+  /** Sums a numeric element field. */
   sum<TKey extends NumericElementKey<TElement>>(field: TKey): ExecutionArtifact<TInput, number>;
+  /** Averages a numeric element field. */
   avg<TKey extends NumericElementKey<TElement>>(field: TKey): ExecutionArtifact<TInput, number | undefined>;
+  /** Returns the minimum numeric element field. */
   min<TKey extends NumericElementKey<TElement>>(field: TKey): ExecutionArtifact<TInput, number | undefined>;
+  /** Returns the maximum numeric element field. */
   max<TKey extends NumericElementKey<TElement>>(field: TKey): ExecutionArtifact<TInput, number | undefined>;
   readonly to: CollectionSinks<TInput, TElement>;
 };
@@ -104,15 +125,21 @@ export type SchemaArtifact<TInput, TSchema extends ATS.AnyTypeSchema> = [TSchema
 
 /** Describes the JIT value sinks contract used by the public API. */
 export interface ValueSinks<TInput, TOutput> {
+  /** Selects an array result sink. */
   array(): ExecutionArtifact<TInput, TOutput>;
+  /** Selects a JSON text result sink. */
   json(): ExecutionArtifact<TInput, string>;
+  /** Selects a binary result sink. */
   binary(): ExecutionArtifact<TInput, Uint8Array>;
 }
 
 /** Describes the JIT collection sinks contract used by the public API. */
 export interface CollectionSinks<TInput, TElement> {
+  /** Selects an array result sink. */
   array(): ExecutionArtifact<TInput, TElement[]>;
+  /** Selects a JSON text result sink. */
   json(): ExecutionArtifact<TInput, string>;
+  /** Selects a binary result sink. */
   binary(): ExecutionArtifact<TInput, Uint8Array>;
 }
 

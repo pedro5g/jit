@@ -35,25 +35,38 @@ export type CollectionMutation<TRow, TParams> = ((value: readonly TRow[], params
  * decide how that row is reached: a cached index, a binary search, or a scan.
  */
 export interface CollectionState<TSchema extends AnyTypeSchema, TRow> {
+  /** Updates the row identified by the supplied key. */
   updateByKey<const TPatch extends UpdatePatchTemplate<TRow>>(options: {
     readonly key?: string;
     readonly patch: TPatch;
   }): CollectionMutation<TRow, UpdatePatchParams<TPatch> & { readonly key: unknown }>;
+  /** Removes the row identified by the supplied key. */
   removeByKey(options?: { readonly key?: string }): CollectionMutation<TRow, { readonly key: unknown }>;
+  /** Replaces the row identified by the supplied key. */
   replaceByKey(options?: {
     readonly key?: string;
   }): CollectionMutation<TRow, { readonly key: unknown; readonly row: TRow }>;
+  /** Replaces the row for a key or appends it when the key is absent. */
   upsert(options?: { readonly key?: string }): CollectionMutation<TRow, { readonly key: unknown; readonly row: TRow }>;
+  /** Appends one row without searching the collection. */
   append(): CollectionMutation<TRow, { readonly row: TRow }>;
+  /** Prepends one row without searching the collection. */
   prepend(): CollectionMutation<TRow, { readonly row: TRow }>;
+  /** Inserts one row at an index. */
   insertAt(): CollectionMutation<TRow, { readonly index: number; readonly row: TRow }>;
+  /** Removes the row at an index. */
   removeAt(): CollectionMutation<TRow, { readonly index: number }>;
+  /** Replaces the row at an index. */
   replaceAt(): CollectionMutation<TRow, { readonly index: number; readonly row: TRow }>;
+  /** Updates the row at an index. */
   updateAt<const TPatch extends UpdatePatchTemplate<TRow>>(options: {
     readonly patch: TPatch;
   }): CollectionMutation<TRow, UpdatePatchParams<TPatch> & { readonly index: number }>;
+  /** Swaps two row positions. */
   swap(): CollectionMutation<TRow, { readonly a: number; readonly b: number }>;
+  /** Moves one row from `from` to `to`. */
   move(): CollectionMutation<TRow, { readonly from: number; readonly to: number }>;
+  /** Keeps only the first `length` rows. */
   truncate(): CollectionMutation<TRow, { readonly length: number }>;
   /**
    * Updates every row the predicate selects. The predicate is the shared query

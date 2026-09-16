@@ -118,6 +118,7 @@ export interface CompiledArtifact {
 
 /** Creates the JIT compiler host artifact from the supplied input. */
 export interface CompilerHost {
+  /** Compiles a typed request using this host's backend. */
   compile<TFunction extends AnyCompiledFunction>(request: CompilationRequest<TFunction>): TFunction;
 }
 

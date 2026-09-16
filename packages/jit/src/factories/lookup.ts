@@ -17,6 +17,7 @@ export interface LookupPlan<TRow, TKey> extends CompiledLookup<TRow, TKey> {}
 /** Returns the JIT lookup builder result for the supplied input. */
 export interface LookupBuilder<TSchema extends ATS.AnyTypeSchema>
   extends LookupPlan<RowOf<TSchema>, RowOf<TSchema>[RowKey<TSchema>]> {
+  /** Selects the row field used for lookup. */
   by<const TKey extends RowKey<TSchema>>(key: TKey): LookupPlan<RowOf<TSchema>, LookupKeyValue<RowOf<TSchema>, TKey>>;
 }
 

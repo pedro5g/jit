@@ -24,6 +24,7 @@ export interface LookupDescriptor {
 
 /** Describes the JIT compiled lookup contract used by the public API. */
 export interface CompiledLookup<TRow, TKey> {
+  /** Returns the row matching `key`, or `undefined` when absent. */
   (rows: readonly TRow[], key: TKey): TRow | undefined;
   /** The access path this lookup resolved to, for review. */
   explain(): Omit<KeyedAccessChoice, "direction">;

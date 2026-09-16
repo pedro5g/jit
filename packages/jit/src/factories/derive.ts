@@ -48,6 +48,7 @@ export interface DerivedExplanation {
  * @template TResult - The value it derives.
  */
 export interface DerivedComputation<TState, TResult> {
+  /** Computes the derived value for one state. */
   (state: TState): TResult;
   /**
    * A selector that recomputes only when a field it reads changed.
@@ -58,10 +59,14 @@ export interface DerivedComputation<TState, TResult> {
    * different artifact.
    */
   memo(): ((state: TState, mask?: number | bigint) => TResult) & {
+    /** Returns the change layout expected by this selector. */
     layout(): ChangeLayout;
+    /** Reports whether a mask from `layout` can be consumed safely. */
     accepts(layout: ChangeLayout): boolean;
   };
+  /** Describes dependencies and mask bits without evaluating the computation. */
   explain(): DerivedExplanation;
+  /** Returns the change layout used by this computation. */
   layout(): ChangeLayout;
 }
 

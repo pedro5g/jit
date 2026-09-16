@@ -10,12 +10,15 @@ type RowKey<TSchema extends ATS.AnyTypeSchema> = Extract<keyof RowOf<TSchema>, s
 
 /** Provides the JIT sort plan operation for the supplied input. */
 export interface SortPlan<TSchema extends ATS.AnyTypeSchema> extends CompiledSort<RowOf<TSchema>> {
+  /** Replaces the ordering criteria with one key. */
   by<TKey extends RowKey<TSchema>>(key: TKey, direction?: OrderDirection): SortPlan<TSchema>;
+  /** Appends a stable tie-breaker after the existing criteria. */
   thenBy<TKey extends RowKey<TSchema>>(key: TKey, direction?: OrderDirection): SortPlan<TSchema>;
 }
 
 /** Provides the JIT sort builder operation for the supplied input. */
 export interface SortBuilder<TSchema extends ATS.AnyTypeSchema> {
+  /** Starts ordering by one row field. */
   by<TKey extends RowKey<TSchema>>(key: TKey, direction?: OrderDirection): SortPlan<TSchema>;
 }
 

@@ -17,13 +17,16 @@ type MigrationArgs<TSource, TTarget> =
 
 /** Provides the JIT migration plan operation for the supplied input. */
 export interface MigrationPlan<TInput, TCurrentSchema extends ATS.AnyTypeSchema> {
+  /** Migrates one value through the declared version chain. */
   (value: TInput | ATS.TypeofSchema<TCurrentSchema>): ATS.TypeofSchema<TCurrentSchema>;
+  /** Appends a migration edge to a new current schema. */
   to<TNextSchema extends ATS.AnyTypeSchema>(
     target: SchemaInput<TNextSchema>,
     ...args: MigrationArgs<ATS.TypeofSchema<TCurrentSchema>, ATS.TypeofSchema<TNextSchema>>
   ): MigrationPlan<TInput | ATS.TypeofSchema<TCurrentSchema>, TNextSchema>;
   readonly versions: readonly (string | number)[];
   readonly current: SchemaInput<TCurrentSchema>;
+  /** Explains the version-switch strategy and number of edges. */
   explain(): {
     readonly strategy: "VersionSwitch";
     readonly versions: readonly (string | number)[];

@@ -173,13 +173,21 @@ function temporalSchema<TKind extends TemporalKind>(kind: TKind): Builder<Tempor
 
 /** Provides the JIT temporal factories operation for the supplied input. */
 export interface TemporalFactories {
+  /** Builds an instant schema. */
   instant(): Builder<TemporalSchema<"instant", []>>;
+  /** Builds a calendar date schema without a time zone. */
   plainDate(): Builder<TemporalSchema<"plainDate", []>>;
+  /** Builds a wall-clock time schema without a date. */
   plainTime(): Builder<TemporalSchema<"plainTime", []>>;
+  /** Builds a local date-time schema without a time zone. */
   plainDateTime(): Builder<TemporalSchema<"plainDateTime", []>>;
+  /** Builds a date-time schema with a time zone. */
   zonedDateTime(): Builder<TemporalSchema<"zonedDateTime", []>>;
+  /** Builds a year-and-month schema. */
   plainYearMonth(): Builder<TemporalSchema<"plainYearMonth", []>>;
+  /** Builds a month-and-day schema. */
   plainMonthDay(): Builder<TemporalSchema<"plainMonthDay", []>>;
+  /** Builds a duration schema. */
   duration(): Builder<TemporalSchema<"duration", []>>;
 }
 

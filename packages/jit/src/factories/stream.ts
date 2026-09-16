@@ -10,18 +10,22 @@ type JsonStreamOptions<TItem> = Omit<StreamOptions<TItem>, "format"> & CompileCa
 
 /** Describes the JIT stream namespace contract used by the public API. */
 export interface StreamNamespace {
+  /** Creates an NDJSON stream when `format` is explicitly selected. */
   <TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     options: StreamOptions<ATS.TypeofSchema<TSchema>> & CompileCacheOptions & { readonly format: "ndjson" }
   ): CompiledStream<ATS.TypeofSchema<TSchema>[], ATS.TypeofSchema<TSchema>>;
+  /** Creates a JSON stream, or infers the JSON element stream from the schema. */
   <TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     options?: StreamOptions<ArrayItem<ATS.TypeofSchema<TSchema>>> & CompileCacheOptions & { readonly format?: "json" }
   ): CompiledStream<ATS.TypeofSchema<TSchema>, ArrayItem<ATS.TypeofSchema<TSchema>>>;
+  /** Creates a JSON stream for elements of an array schema. */
   json<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     options?: JsonStreamOptions<ArrayItem<ATS.TypeofSchema<TSchema>>>
   ): CompiledStream<ATS.TypeofSchema<TSchema>, ArrayItem<ATS.TypeofSchema<TSchema>>>;
+  /** Creates an NDJSON stream for complete schema values. */
   ndjson<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     options?: JsonStreamOptions<ATS.TypeofSchema<TSchema>>

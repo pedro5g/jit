@@ -111,9 +111,13 @@ export interface ReactiveUpdateOptions {
 export interface ReactiveUpdateController<TValue, TInput> {
   readonly value: TValue;
   readonly version: number;
+  /** Applies a compiled input update and publishes the resulting value. */
   update(input: TInput): TValue;
+  /** Replaces the current value and publishes the change. */
   set(value: TValue): TValue;
+  /** Subscribes to root changes and returns an unsubscribe function. */
   subscribe(listener: (event: ReactiveUpdateEvent<TValue>) => void, options?: ReactiveSubscribeOptions): () => void;
+  /** Watches a type-safe property path and returns an unsubscribe function. */
   watch<const TPath extends ReactivePath<TValue> | string>(
     path: TPath,
     listener: (
@@ -121,13 +125,17 @@ export interface ReactiveUpdateController<TValue, TInput> {
     ) => void,
     options?: ReactiveWatchOptions<TPath extends readonly PathKey[] ? ReactivePathValue<TValue, TPath> : unknown>
   ): () => void;
+  /** Watches a selector result and suppresses equal values when configured. */
   select<TSelected>(
     selector: (value: TValue) => TSelected,
     listener: (event: ReactiveSelectionEvent<TValue, TSelected>) => void,
     options?: ReactiveWatchOptions<TSelected>
   ): () => void;
+  /** Coalesces nested writes into one publication. */
   batch(run: (store: ReactiveUpdateController<TValue, TInput>) => void): TValue;
+  /** Delivers pending microtask-scheduled notifications. */
   flush(): void;
+  /** Removes listeners and releases the controller's resources. */
   dispose(): void;
 }
 

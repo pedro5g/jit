@@ -19,8 +19,11 @@ type NdjsonPick<TValue, TKeys extends keyof TValue> = { readonly [TKey in TKeys]
 
 /** Provides the JIT ndjson parse plan operation for the supplied input. */
 export interface NdjsonParsePlan<TRow, TOutput = TRow> {
+  /** Parses newline-delimited JSON into an array of rows. */
   (input: NdjsonInput): TOutput[];
+  /** Enables validation of each decoded row before it is emitted. */
   validate(): NdjsonParsePlan<TRow, TOutput>;
+  /** Filters parsed rows with the shared query condition AST. */
   where(predicate: (query: QueryConditionBuilder<TRow>) => QueryConditionNode): NdjsonParsePlan<TRow, TOutput>;
   /**
    * Filters by a compiled rule predicate, fused into the same parse loop. The
@@ -31,20 +34,26 @@ export interface NdjsonParsePlan<TRow, TOutput = TRow> {
     predicate: RulePredicate<TRow, TInputs>,
     ...inputs: keyof TInputs extends never ? readonly [] : readonly [inputs: TInputs]
   ): NdjsonParsePlan<TRow, TOutput>;
+  /** Projects selected fields from each parsed row. */
   select<const TKeys extends readonly Extract<keyof TRow, string>[]>(
     ...fields: TKeys
   ): NdjsonParsePlan<TRow, NdjsonPick<TRow, TKeys[number]>>;
   readonly to: {
+    /** Parses lazily as an iterator of rows. */
     iterator(): (input: NdjsonInput) => IterableIterator<TOutput>;
+    /** Visits rows without materializing an output array. */
     visitor(): (input: NdjsonInput, consume: (row: TOutput, index: number) => void) => number;
+    /** Serializes the parsed output as newline-delimited JSON. */
     ndjson(): (input: NdjsonInput) => string;
   };
 }
 
 /** Provides the JIT ndjson stringify plan operation for the supplied input. */
 export interface NdjsonStringifyPlan<TRow> {
+  /** Serializes rows as newline-delimited JSON. */
   (value: readonly TRow[]): string;
   readonly to: {
+    /** Serializes rows lazily as line chunks. */
     iterator(): (value: readonly TRow[]) => IterableIterator<string>;
   };
 }

@@ -15,6 +15,7 @@ type Field<TValue> = Extract<keyof TValue, string>;
 
 /** A reference to one of the actor's fields, resolved when the ability is built. */
 export interface ActorRef<TActor> {
+  /** References an actor field for use in a subject condition. */
   field<TKey extends Field<TActor>>(key: TKey): { readonly kind: "param"; readonly name: TKey };
 }
 
@@ -26,14 +27,23 @@ export interface ActorRef<TActor> {
  * language — and reusing it is what lets a rule be pushed into a query later.
  */
 export interface AccessConditionBuilder<TSubject, TActor> {
+  /** Requires a subject field to equal a literal or actor field. */
   eq<TKey extends Field<TSubject>>(key: TKey, value: AccessOperand<TSubject[TKey], TActor>): QueryCompareNode;
+  /** Requires a subject field not to equal a literal or actor field. */
   neq<TKey extends Field<TSubject>>(key: TKey, value: AccessOperand<TSubject[TKey], TActor>): QueryCompareNode;
+  /** Requires a subject field to be greater than a literal or actor field. */
   gt<TKey extends Field<TSubject>>(key: TKey, value: AccessOperand<TSubject[TKey], TActor>): QueryCompareNode;
+  /** Requires a subject field to be greater than or equal to a literal or actor field. */
   gte<TKey extends Field<TSubject>>(key: TKey, value: AccessOperand<TSubject[TKey], TActor>): QueryCompareNode;
+  /** Requires a subject field to be less than a literal or actor field. */
   lt<TKey extends Field<TSubject>>(key: TKey, value: AccessOperand<TSubject[TKey], TActor>): QueryCompareNode;
+  /** Requires a subject field to be less than or equal to a literal or actor field. */
   lte<TKey extends Field<TSubject>>(key: TKey, value: AccessOperand<TSubject[TKey], TActor>): QueryCompareNode;
+  /** Combines conditions with logical AND. */
   and(left: QueryConditionNode, right: QueryConditionNode, ...rest: readonly QueryConditionNode[]): QueryConditionNode;
+  /** Combines conditions with logical OR. */
   or(left: QueryConditionNode, right: QueryConditionNode, ...rest: readonly QueryConditionNode[]): QueryConditionNode;
+  /** Negates one condition. */
   not(inner: QueryConditionNode): QueryConditionNode;
 }
 
@@ -64,20 +74,28 @@ export interface AccessExplanation<TSubject> {
 
 /** The compiled answer for one actor. */
 export interface Ability<TSubject, TAction extends string> {
+  /** Returns whether the actor may perform `action`. */
   can(action: TAction, subject?: TSubject, field?: Field<TSubject>): boolean;
+  /** Returns whether the actor is denied `action`. */
   cannot(action: TAction, subject?: TSubject, field?: Field<TSubject>): boolean;
+  /** Returns the subject when authorization succeeds; otherwise throws. */
   assert(action: TAction, subject: TSubject, field?: Field<TSubject>): TSubject;
+  /** Explains the matching authorization decision. */
   explain(action: TAction, subject?: TSubject, field?: Field<TSubject>): AccessExplanation<TSubject>;
+  /** Lists fields unconditionally allowed for an action. */
   fields(action: TAction, subject?: TSubject): readonly Field<TSubject>[];
 }
 
 /** Provides the JIT access plan operation for the supplied input. */
 export interface AccessPlan<TSubject, TActor, TAction extends string> {
+  /** Builds an actor-bound ability. */
   (actor: TActor): Ability<TSubject, TAction>;
+  /** Adds an allow rule for `action`. */
   can<const TNext extends string>(
     action: TNext,
     rule?: AccessPredicate<TSubject, TActor> | AccessRuleOptions<TSubject, TActor>
   ): AccessPlan<TSubject, TActor, TAction | TNext>;
+  /** Adds a deny rule for `action`; deny wins when both rules match. */
   cannot<const TNext extends string>(
     action: TNext,
     rule?: AccessPredicate<TSubject, TActor> | AccessRuleOptions<TSubject, TActor>

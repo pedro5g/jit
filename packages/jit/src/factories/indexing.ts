@@ -45,12 +45,14 @@ export interface IndexPlan<TRow, TIndex> extends CompiledIndex<TRow, TIndex> {}
 
 /** An index whose keys are settled, so the grouped shape is derivable. */
 export interface KeyedIndexPlan<TRow, TIndex> extends IndexPlan<TRow, TIndex> {
+  /** Builds a grouped index whose terminal values are row arrays. */
   grouped(): IndexPlan<TRow, Grouped<TIndex>>;
 }
 
 /** Provides the JIT index builder operation for the supplied input. */
 export interface IndexBuilder<TSchema extends ATS.AnyTypeSchema>
   extends KeyedIndexPlan<RowOf<TSchema>, Map<unknown, RowOf<TSchema>>> {
+  /** Selects one or more row fields as the index key. */
   by<const TKeys extends readonly [RowKey<TSchema>, ...RowKey<TSchema>[]]>(
     ...keys: TKeys
   ): KeyedIndexPlan<RowOf<TSchema>, NestedIndex<RowOf<TSchema>, TKeys, RowOf<TSchema>>>;
