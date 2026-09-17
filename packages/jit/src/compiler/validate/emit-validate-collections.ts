@@ -4,6 +4,7 @@ import { emitPropertyAccess } from "../source/access.js";
 import { emitSchemaGuard } from "../source/guard.js";
 import { emitLiteral } from "../source/literal.js";
 import type { AnySchema, PathRef, SchemaCheckRecord, ValidatorEmitter } from "./emit-validate.js";
+import { emitArrayCheck } from "./emit-validate-array-checks.js";
 import {
   dynamicChild,
   dynamicKeyChild,
@@ -29,48 +30,7 @@ export function emitArray(emitter: ValidatorEmitter, schema: AnySchema, value: s
     emitter.requiredMessage(schema, "expected array"),
     () => {
       for (const check of checks) {
-        switch (check.kind) {
-          case "min":
-            emitter.failIf(
-              `${value}.length < ${emitLiteral(check.value as number)}`,
-              path,
-              "too_small",
-              `length >= ${check.value}`,
-              check.message ?? `expected at least ${check.value} items`,
-              { minimum: check.value as number, inclusive: true }
-            );
-            break;
-          case "max":
-            emitter.failIf(
-              `${value}.length > ${emitLiteral(check.value as number)}`,
-              path,
-              "too_big",
-              `length <= ${check.value}`,
-              check.message ?? `expected at most ${check.value} items`,
-              { maximum: check.value as number, inclusive: true }
-            );
-            break;
-          case "length":
-            emitter.failIf(
-              `${value}.length !== ${emitLiteral(check.value as number)}`,
-              path,
-              "invalid_length",
-              `length === ${check.value}`,
-              check.message ?? `expected exactly ${check.value} items`
-            );
-            break;
-          case "nonEmpty":
-            emitter.failIf(
-              `${value}.length === 0`,
-              path,
-              "too_small",
-              "length >= 1",
-              check.message ?? "expected a non-empty array"
-            );
-            break;
-          default:
-            break;
-        }
+        emitArrayCheck(emitter, check, value, path);
       }
 
       const index = emitter.nextVar("i");
@@ -277,77 +237,124 @@ export function emitObject(
     "expected_object",
     "object",
     emitter.requiredMessage(schema, "expected object"),
-    () => {
-      const outputs: { key: string; expr: string }[] = [];
-
-      for (const key of keys) {
-        const propOut = emitter.emitNode(props[key], emitPropertyAccess(value, key), staticChild(path, key), value);
-        const transform = fieldTransforms?.[key];
-
-        outputs.push({
-          key,
-          expr: transform ? `${transform}(${propOut}, ${value})` : propOut,
-        });
-      }
-
-      if (build && preserveUnknownKeys) {
-        emitter.writer.line(`${out} = Object.assign({}, ${value});`);
-      }
-
-      if (unknownKeys === "strict" || catchall !== undefined) {
-        const known = emitter.nextVar("k");
-        const index = emitter.nextVar("i");
-        const keyTest = keys.map((key) => `${known}[${index}] !== ${emitLiteral(key)}`).join(" && ");
-        const unknownTest = keys.length === 0 ? "true" : keyTest;
-
-        emitter.writer.dynamicLine(`const ${known} = Object.keys(${value});`);
-        emitter.writer.line(`for (let ${index} = 0; ${index} < ${known}.length; ${index}++) {`);
-        emitter.writer.indent(() => {
-          if (unknownKeys === "strict") {
-            emitter.failIf(
-              unknownTest,
-              dynamicKeyChild(path, `${known}[${index}]`),
-              "unknown_key",
-              "known keys only",
-              "object contains unknown keys"
-            );
-            return;
-          }
-
-          if (catchall !== undefined) {
-            emitter.writer.line(`if (${unknownTest}) {`);
-            emitter.writer.indent(() => {
-              const catchallOut = emitter.emitNode(
-                catchall,
-                `${value}[${known}[${index}]]`,
-                dynamicKeyChild(path, `${known}[${index}]`)
-              );
-
-              if (build && catchallBuild) emitter.writer.line(`${out}[${known}[${index}]] = ${catchallOut};`);
-            });
-            emitter.writer.line("}");
-          }
-        });
-        emitter.writer.line("}");
-      }
-
-      if (build) {
-        if (!preserveUnknownKeys) {
-          const entries = outputs.map((entry) => `${emitLiteral(entry.key)}: ${entry.expr}`).join(", ");
-
-          emitter.writer.line(`${out} = { ${entries} };`);
-        } else {
-          for (const entry of outputs) {
-            emitter.writer.line(`${emitPropertyAccess(out, entry.key)} = ${entry.expr};`);
-          }
-        }
-      }
-    },
+    () =>
+      emitObjectBody(
+        emitter,
+        props,
+        value,
+        path,
+        fieldTransforms,
+        keys,
+        unknownKeys,
+        catchall,
+        catchallBuild,
+        build,
+        preserveUnknownKeys,
+        out
+      ),
     `typeof ${value}`
   );
 
   if (build) emitter.writer.line(`if (${out} === undefined) { ${out} = ${value}; }`);
   return out;
+}
+
+function emitObjectBody(
+  emitter: ValidatorEmitter,
+  props: Readonly<Record<string, ATS.AnyTypeSchema>>,
+  value: string,
+  path: PathRef,
+  fieldTransforms: Readonly<Record<string, string>> | undefined,
+  keys: readonly string[],
+  unknownKeys: "strip" | "passthrough" | "strict" | undefined,
+  catchall: ATS.AnyTypeSchema | undefined,
+  catchallBuild: boolean,
+  build: boolean,
+  preserveUnknownKeys: boolean,
+  out: string
+): void {
+  const outputs = keys.map((key) => {
+    const propOut = emitter.emitNode(props[key], emitPropertyAccess(value, key), staticChild(path, key), value);
+    const transform = fieldTransforms?.[key];
+    return { key, expr: transform ? `${transform}(${propOut}, ${value})` : propOut };
+  });
+
+  if (build && preserveUnknownKeys) emitter.writer.line(`${out} = Object.assign({}, ${value});`);
+  if (unknownKeys === "strict" || catchall !== undefined)
+    emitUnknownObjectKeys(emitter, value, path, keys, unknownKeys, catchall, catchallBuild, build, out);
+  if (build) emitObjectOutput(emitter, outputs, preserveUnknownKeys, out);
+}
+
+function emitUnknownObjectKeys(
+  emitter: ValidatorEmitter,
+  value: string,
+  path: PathRef,
+  keys: readonly string[],
+  unknownKeys: "strip" | "passthrough" | "strict" | undefined,
+  catchall: ATS.AnyTypeSchema | undefined,
+  catchallBuild: boolean,
+  build: boolean,
+  out: string
+): void {
+  const known = emitter.nextVar("k");
+  const index = emitter.nextVar("i");
+  const keyTest = keys.map((key) => `${known}[${index}] !== ${emitLiteral(key)}`).join(" && ");
+  const unknownTest = keys.length === 0 ? "true" : keyTest;
+  emitter.writer.dynamicLine(`const ${known} = Object.keys(${value});`);
+  emitter.writer.line(`for (let ${index} = 0; ${index} < ${known}.length; ${index}++) {`);
+  emitter.writer.indent(() => {
+    if (unknownKeys === "strict") {
+      emitter.failIf(
+        unknownTest,
+        dynamicKeyChild(path, `${known}[${index}]`),
+        "unknown_key",
+        "known keys only",
+        "object contains unknown keys"
+      );
+      return;
+    }
+    if (catchall !== undefined)
+      emitCatchallObjectKey(emitter, catchall, value, path, known, index, catchallBuild, build, out, unknownTest);
+  });
+  emitter.writer.line("}");
+}
+
+function emitCatchallObjectKey(
+  emitter: ValidatorEmitter,
+  catchall: ATS.AnyTypeSchema,
+  value: string,
+  path: PathRef,
+  known: string,
+  index: string,
+  catchallBuild: boolean,
+  build: boolean,
+  out: string,
+  unknownTest: string
+): void {
+  emitter.writer.line(`if (${unknownTest}) {`);
+  emitter.writer.indent(() => {
+    const catchallOut = emitter.emitNode(
+      catchall,
+      `${value}[${known}[${index}]]`,
+      dynamicKeyChild(path, `${known}[${index}]`)
+    );
+    if (build && catchallBuild) emitter.writer.line(`${out}[${known}[${index}]] = ${catchallOut};`);
+  });
+  emitter.writer.line("}");
+}
+
+function emitObjectOutput(
+  emitter: ValidatorEmitter,
+  outputs: readonly { readonly key: string; readonly expr: string }[],
+  preserveUnknownKeys: boolean,
+  out: string
+): void {
+  if (!preserveUnknownKeys) {
+    const entries = outputs.map((entry) => `${emitLiteral(entry.key)}: ${entry.expr}`).join(", ");
+    emitter.writer.line(`${out} = { ${entries} };`);
+    return;
+  }
+  for (const entry of outputs) emitter.writer.line(`${emitPropertyAccess(out, entry.key)} = ${entry.expr};`);
 }
 
 /**

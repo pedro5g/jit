@@ -39,60 +39,116 @@ function emitFreezeOutput(writer: CodeWriter, output: string): void {
  * only when defaults/coercions/transforms require it.
  */
 export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorOptions = {}): EmittedValidator {
-  const emitIs = options.is ?? true;
-  const emitSafeParse = options.safeParse ?? true;
-  const emitSafeParseAsync = options.safeParseAsync ?? true;
-  const emitFastParse = options.fastParse ?? false;
-  const resolveDefaults = options.resolveDefaults ?? true;
-  const materializeRuntimeTypes = options.materializeRuntimeTypes ?? true;
-  const validateChecks = options.validateChecks ?? true;
-  const maxIssues = options.maxIssues;
-  const freezesOutput = rootHasReadonly(schema);
+  const settings = resolveValidatorSettings(options);
   const recursive = findRecursiveSchemas(schema);
-  let parseEmitter: ValidatorEmitter | undefined;
+  const parseEmitter = createParseEmitter(schema, recursive, settings);
+  const asyncEmitter = createAsyncEmitter(schema, recursive, settings, parseEmitter);
+  const isEmitter = createIsEmitter(schema, recursive, settings, asyncEmitter ?? parseEmitter);
+  return assembleValidator(isEmitter, parseEmitter, asyncEmitter, settings.emitFastParse, settings.maxIssues);
+}
 
-  if (emitFastParse)
-    parseEmitter = emitParseEmitter(schema, recursive, resolveDefaults, materializeRuntimeTypes, validateChecks);
-  if (emitSafeParse && !emitFastParse) {
-    parseEmitter = emitDiagnosticEmitter(
+interface ValidatorSettings {
+  readonly emitIs: boolean;
+  readonly emitSafeParse: boolean;
+  readonly emitSafeParseAsync: boolean;
+  readonly emitFastParse: boolean;
+  readonly resolveDefaults: boolean;
+  readonly materializeRuntimeTypes: boolean;
+  readonly validateChecks: boolean;
+  readonly maxIssues: number | undefined;
+}
+
+function resolveValidatorSettings(options: EmitValidatorOptions): ValidatorSettings {
+  return {
+    emitIs: options.is ?? true,
+    emitSafeParse: options.safeParse ?? true,
+    emitSafeParseAsync: options.safeParseAsync ?? true,
+    emitFastParse: options.fastParse ?? false,
+    resolveDefaults: options.resolveDefaults ?? true,
+    materializeRuntimeTypes: options.materializeRuntimeTypes ?? true,
+    validateChecks: options.validateChecks ?? true,
+    maxIssues: options.maxIssues,
+  };
+}
+
+function createParseEmitter(
+  schema: ATS.AnyTypeSchema,
+  recursive: ReadonlySet<ATS.AnyTypeSchema>,
+  settings: ValidatorSettings
+): ValidatorEmitter | undefined {
+  if (settings.emitFastParse)
+    return emitParseEmitter(
       schema,
       recursive,
-      resolveDefaults,
-      materializeRuntimeTypes,
-      validateChecks,
-      maxIssues,
-      freezesOutput
+      settings.resolveDefaults,
+      settings.materializeRuntimeTypes,
+      settings.validateChecks
     );
-  }
+  if (!settings.emitSafeParse) return undefined;
+  return emitDiagnosticEmitter(
+    schema,
+    recursive,
+    settings.resolveDefaults,
+    settings.materializeRuntimeTypes,
+    settings.validateChecks,
+    settings.maxIssues,
+    rootHasReadonly(schema)
+  );
+}
 
-  let asyncEmitter: ValidatorEmitter | undefined;
-  if (emitSafeParseAsync && !emitFastParse && containsPromise(schema)) {
-    asyncEmitter = emitDiagnosticEmitter(
-      schema,
-      recursive,
-      resolveDefaults,
-      materializeRuntimeTypes,
-      validateChecks,
-      maxIssues,
-      freezesOutput,
-      parseEmitter,
-      true
-    );
-  }
+function createAsyncEmitter(
+  schema: ATS.AnyTypeSchema,
+  recursive: ReadonlySet<ATS.AnyTypeSchema>,
+  settings: ValidatorSettings,
+  parseEmitter: ValidatorEmitter | undefined
+): ValidatorEmitter | undefined {
+  if (!settings.emitSafeParseAsync || settings.emitFastParse || !containsPromise(schema)) return undefined;
+  return emitDiagnosticEmitter(
+    schema,
+    recursive,
+    settings.resolveDefaults,
+    settings.materializeRuntimeTypes,
+    settings.validateChecks,
+    settings.maxIssues,
+    rootHasReadonly(schema),
+    parseEmitter,
+    true
+  );
+}
 
-  let isEmitter: ValidatorEmitter | undefined;
-  if (emitIs && !emitFastParse) {
-    isEmitter = new ValidatorEmitter("is", false, resolveDefaults, materializeRuntimeTypes, undefined, validateChecks);
-    isEmitter.markRecursive(recursive);
-    for (const value of (asyncEmitter ?? parseEmitter)?.bindings().values ?? []) isEmitter.bind(value);
-    isEmitter.writer.line("function is(value) {");
-    isEmitter.writer.indent(() => {
-      isEmitter?.emitNode(schema, "value", rootPath());
-      isEmitter?.writer.line("return true;");
-    });
-    isEmitter.writer.line("}");
-  }
+function createIsEmitter(
+  schema: ATS.AnyTypeSchema,
+  recursive: ReadonlySet<ATS.AnyTypeSchema>,
+  settings: ValidatorSettings,
+  sourceEmitter: ValidatorEmitter | undefined
+): ValidatorEmitter | undefined {
+  if (!settings.emitIs || settings.emitFastParse) return undefined;
+  const emitter = new ValidatorEmitter(
+    "is",
+    false,
+    settings.resolveDefaults,
+    settings.materializeRuntimeTypes,
+    undefined,
+    settings.validateChecks
+  );
+  emitter.markRecursive(recursive);
+  for (const value of sourceEmitter?.bindings().values ?? []) emitter.bind(value);
+  emitter.writer.line("function is(value) {");
+  emitter.writer.indent(() => {
+    emitter.emitNode(schema, "value", rootPath());
+    emitter.writer.line("return true;");
+  });
+  emitter.writer.line("}");
+  return emitter;
+}
 
+function assembleValidator(
+  isEmitter: ValidatorEmitter | undefined,
+  parseEmitter: ValidatorEmitter | undefined,
+  asyncEmitter: ValidatorEmitter | undefined,
+  emitFastParse: boolean,
+  maxIssues: number | undefined
+): EmittedValidator {
   const emitters = [isEmitter, parseEmitter, asyncEmitter].filter((emitter): emitter is ValidatorEmitter =>
     Boolean(emitter)
   );
@@ -107,9 +163,10 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   ];
   const returned = `return { ${returnedEntries.join(", ")} };`;
   const limitSource = maxIssues === undefined ? "" : "const __issueLimit = {};\n";
-  const source = `${limitSource}${helperSource}${functionSource}${functionSource.length > 0 ? "\n" : ""}${returned}`;
-
-  return { source, bindings };
+  return {
+    source: `${limitSource}${helperSource}${functionSource}${functionSource.length > 0 ? "\n" : ""}${returned}`,
+    bindings,
+  };
 }
 
 function emitParseEmitter(

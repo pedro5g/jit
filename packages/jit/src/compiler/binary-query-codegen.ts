@@ -1,6 +1,6 @@
 import { JITError } from "../errors/index.js";
 import { getAccessNeeds } from "./binary-layout.js";
-import type { BinaryFieldLayout, BinaryRowLayout } from "./binary-rowset.js";
+import type { BinaryFieldKind, BinaryFieldLayout, BinaryRowLayout } from "./binary-rowset.js";
 import type { CodeWriter } from "./emitter/code-writer.js";
 import { emitLiteral } from "./source/literal.js";
 
@@ -125,41 +125,50 @@ function emitFieldValue(field: BinaryFieldLayout): string {
   return `(${state} === 1 ? null : ${state} === 2 ? ${read} : undefined)`;
 }
 
+type ScalarReader = (field: BinaryFieldLayout, offset: string) => string;
+
+const SCALAR_READERS: Readonly<Record<BinaryFieldKind, ScalarReader>> = {
+  float64: (field, offset) => emitNumericRead(field, offset, "Float64", "float64"),
+  float32: (field, offset) => emitNumericRead(field, offset, "Float32", "float32"),
+  int32: (field, offset) => emitNumericRead(field, offset, "Int32", "int32"),
+  boolean: (_field, offset) => `u8[${offset}] !== 0`,
+  bigint: (field, offset) => emitNumericRead(field, offset, "BigInt64", "bigint64"),
+  date: (field, offset) =>
+    field.access === "dataView"
+      ? `new Date(dv.getFloat64(${offset}, true))`
+      : `new Date(float64[${emitTypedIndex(field)}])`,
+  string: emitDictionaryRead,
+  enum: emitDictionaryRead,
+  literalUnion: emitDictionaryRead,
+  literal: (field) => emitLiteral(field.literal as never),
+  null: () => "null",
+  undefined: () => "undefined",
+};
+
 function emitScalarRead(field: BinaryFieldLayout): string {
   const offset = emitByteIndex(field);
+  return SCALAR_READERS[field.kind](field, offset);
+}
 
-  switch (field.kind) {
-    case "float64":
-      return field.access === "dataView" ? `dv.getFloat64(${offset}, true)` : `float64[${emitTypedIndex(field)}]`;
-    case "float32":
-      return field.access === "dataView" ? `dv.getFloat32(${offset}, true)` : `float32[${emitTypedIndex(field)}]`;
-    case "int32":
-      return field.access === "dataView" ? `dv.getInt32(${offset}, true)` : `int32[${emitTypedIndex(field)}]`;
-    case "boolean":
-      return `u8[${offset}] !== 0`;
-    case "bigint":
-      return field.access === "dataView" ? `dv.getBigInt64(${offset}, true)` : `bigint64[${emitTypedIndex(field)}]`;
-    case "date":
-      return field.access === "dataView"
-        ? `new Date(dv.getFloat64(${offset}, true))`
-        : `new Date(float64[${emitTypedIndex(field)}])`;
-    case "string":
-    case "enum":
-    case "literalUnion":
-      return `d${field.dictionaryIndex}.values[${
-        field.size === 1
-          ? `u8[${offset}]`
-          : field.access === "dataView"
-            ? `dv.getUint32(${offset}, true)`
-            : `uint32[${emitTypedIndex(field)}]`
-      }]`;
-    case "literal":
-      return emitLiteral(field.literal as never);
-    case "null":
-      return "null";
-    case "undefined":
-      return "undefined";
-  }
+function emitNumericRead(
+  field: BinaryFieldLayout,
+  offset: string,
+  dataViewMethod: "Float64" | "Float32" | "Int32" | "BigInt64",
+  typedArray: "float64" | "float32" | "int32" | "bigint64"
+): string {
+  return field.access === "dataView"
+    ? `dv.get${dataViewMethod}(${offset}, true)`
+    : `${typedArray}[${emitTypedIndex(field)}]`;
+}
+
+function emitDictionaryRead(field: BinaryFieldLayout, offset: string): string {
+  const index =
+    field.size === 1
+      ? `u8[${offset}]`
+      : field.access === "dataView"
+        ? `dv.getUint32(${offset}, true)`
+        : `uint32[${emitTypedIndex(field)}]`;
+  return `d${field.dictionaryIndex}.values[${index}]`;
 }
 
 /** @internal Emits the scalar expression used for binary comparisons and aggregates. */

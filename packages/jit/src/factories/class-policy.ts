@@ -9,15 +9,15 @@ import {
   resolveAssertionDescriptor,
 } from "../compiler/assertion.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
-import { schemaChildren } from "../compiler/schema-recursion.js";
 import type { QueryConditionNode } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import { type FactoryReturnMode, normalizeFactoryReturnMode } from "../core/factory-policy.js";
-import { DomainAssertionError, JITError, JITValidationError, type ValidationIssue } from "../errors/index.js";
-import { type CompiledArtifact, getArtifact } from "../runtime/artifact-registry.js";
+import { JITError, JITValidationError, type ValidationIssue } from "../errors/index.js";
+import type { CompiledArtifact } from "../runtime/artifact-registry.js";
 import { Object_hasOwn } from "../shared/utils.js";
 import type { AssertionOptions, FactoryFailure, FactoryValidationOptions } from "./class.js";
+import type { NestedErrorCandidate } from "./class-policy-nested-errors.js";
 import { createConditionBuilder, type QueryConditionBuilder } from "./query.js";
 
 export const FACTORY_FAILURE: unique symbol = Symbol.for("jit.factory.failure") as never;
@@ -27,21 +27,8 @@ export interface AssertionOutcome {
   readonly issues?: readonly AssertionIssue[];
 }
 
-export interface NestedErrorCandidate {
-  readonly priority: number;
-  readonly depth: number;
-  readonly order: number;
-  readonly path: readonly (string | number)[];
-  readonly factory: (issues: readonly ValidationIssue[]) => unknown;
-  /** True when the candidate closes over an application callback. */
-  readonly runtimeBinding: boolean;
-  /** Reconstructive metadata for the built-in assertion error. */
-  readonly assertion?: {
-    readonly rule: string | undefined;
-    readonly field: string | undefined;
-    readonly message: string;
-  };
-}
+export type { NestedErrorCandidate } from "./class-policy-nested-errors.js";
+export { collectNestedErrorCandidates } from "./class-policy-nested-errors.js";
 
 export interface FactoryPolicyState {
   mode: FactoryReturnMode;
@@ -227,83 +214,6 @@ export function policyError(policy: FactoryPolicyState, issues: readonly Validat
 
 function hasIssueAtPath(issues: readonly ValidationIssue[], prefix: readonly (string | number)[]): boolean {
   return issues.some((issue) => prefix.every((part, index) => issue.path[index] === part));
-}
-
-export function collectNestedErrorCandidates(schema: ATS.AnyTypeSchema): readonly NestedErrorCandidate[] {
-  const candidates: NestedErrorCandidate[] = [];
-  const active = new Set<ATS.AnyTypeSchema>();
-  let order = 0;
-
-  const walk = (current: ATS.AnyTypeSchema, path: readonly (string | number)[], depth: number): void => {
-    if (active.has(current)) return;
-    active.add(current);
-
-    if (current.type === TypeName.runtimeType) {
-      const nested = getArtifact((current as ATS.RuntimeTypeSchema).def.materialize);
-      if (nested?.kind === "class" && typeof nested.policy?.error === "function") {
-        candidates.push({
-          priority: nested.policy.errorPriorityExplicit ? (nested.policy.errorPriority ?? 800) : 800,
-          depth,
-          order: order++,
-          path,
-          factory: nested.policy.error as (issues: readonly ValidationIssue[]) => unknown,
-          runtimeBinding: true,
-        });
-      }
-      if (nested?.kind === "class") {
-        for (const failure of nested.policy?.assertions?.failures ?? []) {
-          const assertionPath = failure.field === undefined ? path : [...path, failure.field];
-          candidates.push({
-            priority: failure.priority,
-            depth: depth + 1,
-            order: order++,
-            path: assertionPath,
-            runtimeBinding: typeof failure.error === "function",
-            ...(typeof failure.error === "function"
-              ? {}
-              : {
-                  assertion: {
-                    rule: failure.rule,
-                    field: failure.field,
-                    message: failure.message,
-                  },
-                }),
-            factory:
-              typeof failure.error === "function"
-                ? () =>
-                    (failure.error as (value: unknown, descriptor: unknown) => unknown)(undefined, failure.descriptor)
-                : (issues) =>
-                    new DomainAssertionError(failure.message, {
-                      ...(failure.rule === undefined ? {} : { rule: failure.rule }),
-                      ...(failure.field === undefined ? {} : { field: failure.field }),
-                      issues,
-                    }),
-          });
-        }
-      }
-    }
-
-    if (current.type === TypeName.object) {
-      for (const [key, child] of Object.entries((current as ATS.ObjectSchema).def.props))
-        walk(child, [...path, key], depth + 1);
-      active.delete(current);
-      return;
-    }
-    if (current.type === TypeName.array || current.type === TypeName.set) {
-      walk(
-        (current as ATS.ArraySchema<ATS.AnyTypeSchema> | ATS.SetSchema<ATS.AnyTypeSchema>).def.element,
-        path,
-        depth + 1
-      );
-      active.delete(current);
-      return;
-    }
-    for (const child of schemaChildren(current)) walk(child, path, depth + 1);
-    active.delete(current);
-  };
-
-  walk(schema, [], 0);
-  return candidates;
 }
 
 /**

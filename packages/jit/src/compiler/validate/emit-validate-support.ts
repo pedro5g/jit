@@ -15,71 +15,99 @@ export function canUseFastParse(
   if (needsBuild(schema) || rootHasReadonly(schema)) return false;
   seen.add(schema);
   const current = schema as AnySchema;
+  return FAST_PARSE_DECISIONS[current.type]?.(current, seen) ?? true;
+}
 
-  switch (current.type) {
-    case TypeName.refine:
-    case TypeName.coerce:
-    case TypeName.pipe:
-    case TypeName.transform:
-    case TypeName.custom:
-    case TypeName.codec:
-    case TypeName.instanceof:
-      return false;
-    case TypeName.lazy:
-      return canUseFastParse((current.def.getter as () => import("../../core/ats/index.js").AnyTypeSchema)(), seen);
-    case TypeName.when:
-      return (
-        typeof current.def.is !== "function" &&
-        canUseFastParse(current.def.thenType as import("../../core/ats/index.js").AnyTypeSchema, seen) &&
-        canUseFastParse(current.def.otherwiseType as import("../../core/ats/index.js").AnyTypeSchema, seen)
-      );
-    case TypeName.optional:
-    case TypeName.nullable:
-    case TypeName.nullish:
-    case TypeName.brand:
-    case TypeName.readonly:
-    case TypeName.not:
-      return canUseFastParse(current.def.innerType as import("../../core/ats/index.js").AnyTypeSchema, seen);
-    case TypeName.string: {
-      const checks = (current.def.checks as readonly SchemaCheckRecord[] | undefined) ?? [];
+type SchemaDecision = (schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>) => boolean;
 
-      return !checks.some((check) => check.value instanceof RegExp && (check.value.global || check.value.sticky));
-    }
-    case TypeName.array:
-    case TypeName.set:
-      return canUseFastParse(current.def.element as import("../../core/ats/index.js").AnyTypeSchema, seen);
-    case TypeName.map:
-      return (
-        canUseFastParse(current.def.key as import("../../core/ats/index.js").AnyTypeSchema, seen) &&
-        canUseFastParse(current.def.value as import("../../core/ats/index.js").AnyTypeSchema, seen)
-      );
-    case TypeName.record:
-      return canUseFastParse(current.def.value as import("../../core/ats/index.js").AnyTypeSchema, seen);
-    case TypeName.tuple: {
-      const items = (current.def.items as readonly import("../../core/ats/index.js").AnyTypeSchema[] | undefined) ?? [];
-      const rest = current.def.rest as import("../../core/ats/index.js").AnyTypeSchema | undefined;
+const FAST_PARSE_DECISIONS: Readonly<Record<string, SchemaDecision>> = {
+  [TypeName.refine]: alwaysFalse,
+  [TypeName.coerce]: alwaysFalse,
+  [TypeName.pipe]: alwaysFalse,
+  [TypeName.transform]: alwaysFalse,
+  [TypeName.custom]: alwaysFalse,
+  [TypeName.codec]: alwaysFalse,
+  [TypeName.instanceof]: alwaysFalse,
+  [TypeName.lazy]: fastParseLazy,
+  [TypeName.when]: fastParseWhen,
+  [TypeName.optional]: fastParseInner,
+  [TypeName.nullable]: fastParseInner,
+  [TypeName.nullish]: fastParseInner,
+  [TypeName.brand]: fastParseInner,
+  [TypeName.readonly]: fastParseInner,
+  [TypeName.not]: fastParseInner,
+  [TypeName.string]: fastParseString,
+  [TypeName.array]: fastParseElement,
+  [TypeName.set]: fastParseElement,
+  [TypeName.map]: fastParseMap,
+  [TypeName.record]: fastParseValue,
+  [TypeName.tuple]: fastParseTuple,
+  [TypeName.union]: fastParseOptions,
+  [TypeName.xor]: fastParseOptions,
+  [TypeName.discriminatedUnion]: fastParseOptions,
+  [TypeName.intersection]: fastParseOptions,
+  [TypeName.object]: fastParseObject,
+};
 
-      return items.every((item) => canUseFastParse(item, seen)) && (rest === undefined || canUseFastParse(rest, seen));
-    }
-    case TypeName.union:
-    case TypeName.xor:
-    case TypeName.discriminatedUnion:
-    case TypeName.intersection:
-      return (current.def.options as readonly import("../../core/ats/index.js").AnyTypeSchema[]).every((option) =>
-        canUseFastParse(option, seen)
-      );
-    case TypeName.object: {
-      const props = current.def.props as Readonly<Record<string, import("../../core/ats/index.js").AnyTypeSchema>>;
-      const catchall = current.def.catchall as import("../../core/ats/index.js").AnyTypeSchema | undefined;
+function alwaysFalse(_schema: AnySchema, _seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  return false;
+}
 
-      return (
-        Object.keys(props).every((key) => canUseFastParse(props[key], seen)) &&
-        (catchall === undefined || canUseFastParse(catchall, seen))
-      );
-    }
-    default:
-      return true;
-  }
+function fastParseLazy(schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  return canUseFastParse((schema.def.getter as () => import("../../core/ats/index.js").AnyTypeSchema)(), seen);
+}
+
+function fastParseWhen(schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  return (
+    typeof schema.def.is !== "function" &&
+    canUseFastParse(schema.def.thenType as import("../../core/ats/index.js").AnyTypeSchema, seen) &&
+    canUseFastParse(schema.def.otherwiseType as import("../../core/ats/index.js").AnyTypeSchema, seen)
+  );
+}
+
+function fastParseInner(schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  return canUseFastParse(schema.def.innerType as import("../../core/ats/index.js").AnyTypeSchema, seen);
+}
+
+function fastParseString(schema: AnySchema, _seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  const checks = (schema.def.checks as readonly SchemaCheckRecord[] | undefined) ?? [];
+  return !checks.some((check) => check.value instanceof RegExp && (check.value.global || check.value.sticky));
+}
+
+function fastParseElement(schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  return canUseFastParse(schema.def.element as import("../../core/ats/index.js").AnyTypeSchema, seen);
+}
+
+function fastParseMap(schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  return (
+    canUseFastParse(schema.def.key as import("../../core/ats/index.js").AnyTypeSchema, seen) &&
+    canUseFastParse(schema.def.value as import("../../core/ats/index.js").AnyTypeSchema, seen)
+  );
+}
+
+function fastParseValue(schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  return canUseFastParse(schema.def.value as import("../../core/ats/index.js").AnyTypeSchema, seen);
+}
+
+function fastParseTuple(schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  const items = (schema.def.items as readonly import("../../core/ats/index.js").AnyTypeSchema[] | undefined) ?? [];
+  const rest = schema.def.rest as import("../../core/ats/index.js").AnyTypeSchema | undefined;
+  return items.every((item) => canUseFastParse(item, seen)) && (rest === undefined || canUseFastParse(rest, seen));
+}
+
+function fastParseOptions(schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  return (schema.def.options as readonly import("../../core/ats/index.js").AnyTypeSchema[]).every((option) =>
+    canUseFastParse(option, seen)
+  );
+}
+
+function fastParseObject(schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  const props = schema.def.props as Readonly<Record<string, import("../../core/ats/index.js").AnyTypeSchema>>;
+  const catchall = schema.def.catchall as import("../../core/ats/index.js").AnyTypeSchema | undefined;
+  return (
+    Object.keys(props).every((key) => canUseFastParse(props[key], seen)) &&
+    (catchall === undefined || canUseFastParse(catchall, seen))
+  );
 }
 
 /** True when the subtree contains a promise wrapper. */
@@ -97,7 +125,12 @@ export function containsPromise(
   }
 
   if (current.type === TypeName.promise) return true;
+  return containedSchemas(current).some((child) => containsPromise(child, seen));
+}
 
+function containedSchemas(
+  current: AnySchema & { readonly schema?: import("../../core/ats/index.js").AnyTypeSchema }
+): readonly import("../../core/ats/index.js").AnyTypeSchema[] {
   const def = current.def as {
     innerType?: import("../../core/ats/index.js").AnyTypeSchema;
     element?: import("../../core/ats/index.js").AnyTypeSchema;
@@ -112,26 +145,21 @@ export function containsPromise(
     options?: readonly import("../../core/ats/index.js").AnyTypeSchema[];
     props?: Readonly<Record<string, import("../../core/ats/index.js").AnyTypeSchema>>;
   };
-
-  if (def.innerType && containsPromise(def.innerType, seen)) return true;
-  if (def.element && containsPromise(def.element, seen)) return true;
-  if (def.key && containsPromise(def.key, seen)) return true;
-  if (def.value && containsPromise(def.value, seen)) return true;
-  if (def.input && containsPromise(def.input, seen)) return true;
-  if (def.output && containsPromise(def.output, seen)) return true;
-  if (def.thenType && containsPromise(def.thenType, seen)) return true;
-  if (def.otherwiseType && containsPromise(def.otherwiseType, seen)) return true;
-  if (def.rest && containsPromise(def.rest, seen)) return true;
-  if (def.items?.some((item) => containsPromise(item, seen))) return true;
-  if (def.options?.some((option) => containsPromise(option, seen))) return true;
-  if (
-    def.props &&
-    Object.keys(def.props).some((key) =>
-      containsPromise(def.props?.[key] as import("../../core/ats/index.js").AnyTypeSchema, seen)
-    )
-  )
-    return true;
-  return false;
+  const children = [
+    def.innerType,
+    def.element,
+    def.key,
+    def.value,
+    def.input,
+    def.output,
+    def.thenType,
+    def.otherwiseType,
+    def.rest,
+    ...(def.items ?? []),
+    ...(def.options ?? []),
+    ...Object.values(def.props ?? {}),
+  ];
+  return children.filter((child): child is import("../../core/ats/index.js").AnyTypeSchema => child !== undefined);
 }
 
 /** True when a root wrapper requires the diagnostic result to be frozen. */
@@ -145,28 +173,27 @@ export function rootHasReadonly(
   const current = schema as AnySchema;
 
   if (current.type === TypeName.readonly) return true;
-  if (current.type === TypeName.lazy)
-    return rootHasReadonly((current.def.getter as () => import("../../core/ats/index.js").AnyTypeSchema)(), seen);
+  return READONLY_DECISIONS[current.type]?.(current, seen) ?? false;
+}
 
-  switch (current.type) {
-    case TypeName.optional:
-    case TypeName.nullable:
-    case TypeName.nullish:
-    case TypeName.default:
-    case TypeName.brand:
-    case TypeName.refine:
-    case TypeName.coerce:
-    case TypeName.pipe:
-    case TypeName.transform:
-      return rootHasReadonly(current.def.innerType as import("../../core/ats/index.js").AnyTypeSchema, seen);
-    case TypeName.when:
-      return (
-        rootHasReadonly(current.def.thenType as import("../../core/ats/index.js").AnyTypeSchema, seen) ||
-        rootHasReadonly(current.def.otherwiseType as import("../../core/ats/index.js").AnyTypeSchema, seen)
-      );
-    case TypeName.not:
-      return rootHasReadonly(current.def.innerType as import("../../core/ats/index.js").AnyTypeSchema, seen);
-    default:
-      return false;
-  }
+const READONLY_DECISIONS: Readonly<Record<string, SchemaDecision>> = {
+  [TypeName.lazy]: (schema, seen) =>
+    rootHasReadonly((schema.def.getter as () => import("../../core/ats/index.js").AnyTypeSchema)(), seen),
+  [TypeName.optional]: rootHasReadonlyInner,
+  [TypeName.nullable]: rootHasReadonlyInner,
+  [TypeName.nullish]: rootHasReadonlyInner,
+  [TypeName.default]: rootHasReadonlyInner,
+  [TypeName.brand]: rootHasReadonlyInner,
+  [TypeName.refine]: rootHasReadonlyInner,
+  [TypeName.coerce]: rootHasReadonlyInner,
+  [TypeName.pipe]: rootHasReadonlyInner,
+  [TypeName.transform]: rootHasReadonlyInner,
+  [TypeName.when]: (schema, seen) =>
+    rootHasReadonly(schema.def.thenType as import("../../core/ats/index.js").AnyTypeSchema, seen) ||
+    rootHasReadonly(schema.def.otherwiseType as import("../../core/ats/index.js").AnyTypeSchema, seen),
+  [TypeName.not]: rootHasReadonlyInner,
+};
+
+function rootHasReadonlyInner(schema: AnySchema, seen: Set<import("../../core/ats/index.js").AnyTypeSchema>): boolean {
+  return rootHasReadonly(schema.def.innerType as import("../../core/ats/index.js").AnyTypeSchema, seen);
 }

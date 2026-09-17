@@ -144,20 +144,54 @@ function validateLimits<TSchema extends ATS.AnyTypeSchema>(
   options: CqrsInputOptions<TSchema>,
   maxFilters: number
 ): number {
+  validateMaxFilters(maxFilters);
+  validateStructuralLimits(options.limits);
+  const maxDepth = options.limits?.maxDepth ?? 3;
+  validateMaxDepth(maxDepth);
+  validatePaginationLimits(options.pagination);
+  return maxDepth;
+}
+
+function validateMaxFilters(maxFilters: number): void {
   if (!Number.isSafeInteger(maxFilters) || maxFilters < 0) {
     throw new JITError("INVALID_QUERY", "API query maxFilters must be a non-negative safe integer");
   }
-  for (const value of [options.limits?.maxConditions, options.limits?.maxSortFields, options.limits?.maxSelectFields]) {
+}
+
+function validateStructuralLimits(limits: CqrsInputOptions<ATS.AnyTypeSchema>["limits"]): void {
+  for (const value of [limits?.maxConditions, limits?.maxSortFields, limits?.maxSelectFields]) {
     if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
       throw new JITError("INVALID_QUERY", "API query structural limits must be non-negative safe integers");
     }
   }
-  const maxDepth = options.limits?.maxDepth ?? 3;
+}
+
+function validateMaxDepth(maxDepth: number): void {
   if (!Number.isSafeInteger(maxDepth) || maxDepth < 1) {
     throw new JITError("INVALID_QUERY", "API query maxDepth must be a positive safe integer");
   }
-  if (!options.pagination) return maxDepth;
-  const { defaultLimit, maxLimit } = options.pagination;
+}
+
+type CqrsPagination =
+  | { readonly type: "offset"; readonly defaultLimit: number; readonly maxLimit: number; readonly maxOffset?: number }
+  | {
+      readonly type: "cursor";
+      readonly by: readonly string[];
+      readonly defaultLimit: number;
+      readonly maxLimit: number;
+    };
+
+function validatePaginationLimits(pagination: CqrsPagination | undefined): void {
+  if (pagination === undefined) return;
+  validatePaginationBounds(pagination);
+  if (pagination.type === "offset") validateMaxOffset(pagination.maxOffset);
+  if (pagination.type === "cursor" && pagination.by.length === 0) {
+    throw new JITError("INVALID_QUERY", "API query cursor pagination requires at least one stable ordering field");
+  }
+}
+
+function validatePaginationBounds(pagination: CqrsPagination): void {
+  const { defaultLimit, maxLimit } = pagination;
   if (
     !Number.isSafeInteger(defaultLimit) ||
     !Number.isSafeInteger(maxLimit) ||
@@ -166,16 +200,13 @@ function validateLimits<TSchema extends ATS.AnyTypeSchema>(
   ) {
     throw new JITError("INVALID_QUERY", "API query pagination requires positive bounded limits");
   }
-  if (options.pagination.type === "offset") {
-    const maxOffset = options.pagination.maxOffset ?? DEFAULT_MAX_OFFSET;
-    if (!Number.isSafeInteger(maxOffset) || maxOffset < 0) {
-      throw new JITError("INVALID_QUERY", "API query maxOffset must be a non-negative safe integer");
-    }
+}
+
+function validateMaxOffset(maxOffset: number | undefined): void {
+  const resolved = maxOffset ?? DEFAULT_MAX_OFFSET;
+  if (!Number.isSafeInteger(resolved) || resolved < 0) {
+    throw new JITError("INVALID_QUERY", "API query maxOffset must be a non-negative safe integer");
   }
-  if (options.pagination.type === "cursor" && options.pagination.by.length === 0) {
-    throw new JITError("INVALID_QUERY", "API query cursor pagination requires at least one stable ordering field");
-  }
-  return maxDepth;
 }
 
 function validateCursorFields<TSchema extends ATS.AnyTypeSchema>(

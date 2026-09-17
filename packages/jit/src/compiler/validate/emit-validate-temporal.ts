@@ -48,97 +48,134 @@ export function emitDateLikeChecks(
   path: PathRef,
   target: "date" | ATS.TemporalKind
 ): void {
-  for (const check of checks) {
-    switch (check.kind) {
-      case "min": {
-        const bound = emitter.dateLikeBound(check.value, target);
+  for (const check of checks) DATE_CHECK_EMITTERS[check.kind]?.(emitter, check, value, path, target);
+}
 
-        emitter.failIf(
-          emitter.dateLikeCompare(value, bound, target, "<"),
-          path,
-          "too_small",
-          `>= ${String(check.value)}`,
-          check.message ?? `expected a value >= ${String(check.value)}`,
-          { minimum: String(check.value), inclusive: true }
-        );
-        break;
-      }
-      case "max": {
-        const bound = emitter.dateLikeBound(check.value, target);
+type DateCheckEmitter = (
+  emitter: ValidatorEmitter,
+  check: SchemaCheckRecord,
+  value: string,
+  path: PathRef,
+  target: "date" | ATS.TemporalKind
+) => void;
 
-        emitter.failIf(
-          emitter.dateLikeCompare(value, bound, target, ">"),
-          path,
-          "too_big",
-          `<= ${String(check.value)}`,
-          check.message ?? `expected a value <= ${String(check.value)}`,
-          { maximum: String(check.value), inclusive: true }
-        );
-        break;
-      }
-      case "between": {
-        const range = check.value as {
-          readonly min: Date | string;
-          readonly max: Date | string;
-        };
-        const min = emitter.dateLikeBound(range.min, target);
-        const max = emitter.dateLikeBound(range.max, target);
+const DATE_CHECK_EMITTERS: Readonly<Record<string, DateCheckEmitter>> = {
+  min: emitMinCheck,
+  max: emitMaxCheck,
+  between: emitBetweenCheck,
+  daysOfWeek: emitDaysOfWeekCheck,
+  monthsOfYear: emitMonthsOfYearCheck,
+  truncateTo: emitTruncateCheck,
+};
 
-        emitter.failIf(
-          `${emitter.dateLikeCompare(value, min, target, "<")} || ${emitter.dateLikeCompare(value, max, target, ">")}`,
-          path,
-          "out_of_range",
-          `${String(range.min)}..${String(range.max)}`,
-          check.message ?? `expected a value between ${String(range.min)} and ${String(range.max)}`,
-          {
-            minimum: String(range.min),
-            maximum: String(range.max),
-            inclusive: true,
-          }
-        );
-        break;
-      }
-      case "daysOfWeek": {
-        const days = (check.value as readonly number[] | undefined) ?? [];
-        const dayExpr = target === "date" ? `(((${value}.getDay() + 6) % 7) + 1)` : `${value}.dayOfWeek`;
-        const test = days.map((day) => `${dayExpr} !== ${emitLiteral(day)}`).join(" && ");
+function emitMinCheck(
+  emitter: ValidatorEmitter,
+  check: SchemaCheckRecord,
+  value: string,
+  path: PathRef,
+  target: "date" | ATS.TemporalKind
+): void {
+  const bound = emitter.dateLikeBound(check.value, target);
+  emitter.failIf(
+    emitter.dateLikeCompare(value, bound, target, "<"),
+    path,
+    "too_small",
+    `>= ${String(check.value)}`,
+    check.message ?? `expected a value >= ${String(check.value)}`,
+    { minimum: String(check.value), inclusive: true }
+  );
+}
 
-        emitter.failIf(
-          days.length === 0 ? "true" : `typeof ${dayExpr} !== "number" || (${test})`,
-          path,
-          "invalid_day_of_week",
-          days.join(" | "),
-          check.message ?? "expected an allowed day of week"
-        );
-        break;
-      }
-      case "monthsOfYear": {
-        const months = (check.value as readonly number[] | undefined) ?? [];
-        const monthExpr = target === "date" ? `(${value}.getMonth() + 1)` : `${value}.month`;
-        const test = months.map((month) => `${monthExpr} !== ${emitLiteral(month)}`).join(" && ");
+function emitMaxCheck(
+  emitter: ValidatorEmitter,
+  check: SchemaCheckRecord,
+  value: string,
+  path: PathRef,
+  target: "date" | ATS.TemporalKind
+): void {
+  const bound = emitter.dateLikeBound(check.value, target);
+  emitter.failIf(
+    emitter.dateLikeCompare(value, bound, target, ">"),
+    path,
+    "too_big",
+    `<= ${String(check.value)}`,
+    check.message ?? `expected a value <= ${String(check.value)}`,
+    { maximum: String(check.value), inclusive: true }
+  );
+}
 
-        emitter.failIf(
-          months.length === 0 ? "true" : `typeof ${monthExpr} !== "number" || (${test})`,
-          path,
-          "invalid_month_of_year",
-          months.join(" | "),
-          check.message ?? "expected an allowed month"
-        );
-        break;
-      }
-      case "truncateTo":
-        emitter.failIf(
-          emitter.truncateFailure(value, check.value as ATS.TemporalUnit, target),
-          path,
-          "invalid_precision",
-          String(check.value),
-          check.message ?? `expected value truncated to ${String(check.value)}`
-        );
-        break;
-      default:
-        break;
-    }
-  }
+function emitBetweenCheck(
+  emitter: ValidatorEmitter,
+  check: SchemaCheckRecord,
+  value: string,
+  path: PathRef,
+  target: "date" | ATS.TemporalKind
+): void {
+  const range = check.value as { readonly min: Date | string; readonly max: Date | string };
+  const min = emitter.dateLikeBound(range.min, target);
+  const max = emitter.dateLikeBound(range.max, target);
+  emitter.failIf(
+    `${emitter.dateLikeCompare(value, min, target, "<")} || ${emitter.dateLikeCompare(value, max, target, ">")}`,
+    path,
+    "out_of_range",
+    `${String(range.min)}..${String(range.max)}`,
+    check.message ?? `expected a value between ${String(range.min)} and ${String(range.max)}`,
+    { minimum: String(range.min), maximum: String(range.max), inclusive: true }
+  );
+}
+
+function emitDaysOfWeekCheck(
+  emitter: ValidatorEmitter,
+  check: SchemaCheckRecord,
+  value: string,
+  path: PathRef,
+  target: "date" | ATS.TemporalKind
+): void {
+  const days = (check.value as readonly number[] | undefined) ?? [];
+  const dayExpr = target === "date" ? `(((${value}.getDay() + 6) % 7) + 1)` : `${value}.dayOfWeek`;
+  const test = days.map((day) => `${dayExpr} !== ${emitLiteral(day)}`).join(" && ");
+  emitter.failIf(
+    days.length === 0 ? "true" : `typeof ${dayExpr} !== "number" || (${test})`,
+    path,
+    "invalid_day_of_week",
+    days.join(" | "),
+    check.message ?? "expected an allowed day of week"
+  );
+}
+
+function emitMonthsOfYearCheck(
+  emitter: ValidatorEmitter,
+  check: SchemaCheckRecord,
+  value: string,
+  path: PathRef,
+  target: "date" | ATS.TemporalKind
+): void {
+  const months = (check.value as readonly number[] | undefined) ?? [];
+  const monthExpr = target === "date" ? `(${value}.getMonth() + 1)` : `${value}.month`;
+  const test = months.map((month) => `${monthExpr} !== ${emitLiteral(month)}`).join(" && ");
+  emitter.failIf(
+    months.length === 0 ? "true" : `typeof ${monthExpr} !== "number" || (${test})`,
+    path,
+    "invalid_month_of_year",
+    months.join(" | "),
+    check.message ?? "expected an allowed month"
+  );
+}
+
+function emitTruncateCheck(
+  emitter: ValidatorEmitter,
+  check: SchemaCheckRecord,
+  value: string,
+  path: PathRef,
+  target: "date" | ATS.TemporalKind
+): void {
+  emitter.failIf(
+    emitter.truncateFailure(value, check.value as ATS.TemporalUnit, target),
+    path,
+    "invalid_precision",
+    String(check.value),
+    check.message ?? `expected value truncated to ${String(check.value)}`
+  );
 }
 
 export function dateLikeBound(_emitter: ValidatorEmitter, value: unknown, target: "date" | ATS.TemporalKind): string {

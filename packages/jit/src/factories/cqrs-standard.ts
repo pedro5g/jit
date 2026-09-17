@@ -8,6 +8,37 @@ export function toStandardQuery(
   program: import("../compiler/query.js").QueryProgram | undefined
 ): StandardQueryDefinition {
   const nodes = (program?.nodes ?? []) as readonly QueryPipelineNode[];
+  const metadata = collectStandardQueryMetadata(nodes, program?.bindings ?? []);
+  return Object.freeze({
+    source: Object.freeze({
+      kind: "object" as const,
+      fields: Object.freeze(objectFields(schema)),
+    }),
+    pipeline: Object.freeze(nodes.map((node) => toStandardStep(node, program?.bindings ?? []))),
+    ...(metadata.filter ? { filter: metadata.filter } : {}),
+    ...(metadata.projection ? { projection: metadata.projection } : {}),
+    ...(metadata.order ? { order: metadata.order } : {}),
+    ...(metadata.limit === undefined ? {} : { limit: metadata.limit }),
+    params: Object.freeze([...(program?.params ?? [])]),
+  });
+}
+
+interface StandardQueryMetadata {
+  readonly filter: StandardQueryCondition | undefined;
+  readonly projection: readonly string[] | undefined;
+  readonly order:
+    | readonly {
+        readonly path: readonly string[];
+        readonly direction: "asc" | "desc";
+      }[]
+    | undefined;
+  readonly limit: number | undefined;
+}
+
+function collectStandardQueryMetadata(
+  nodes: readonly QueryPipelineNode[],
+  bindings: readonly unknown[]
+): StandardQueryMetadata {
   let filter: StandardQueryCondition | undefined;
   let projection: readonly string[] | undefined;
   let order:
@@ -18,80 +49,82 @@ export function toStandardQuery(
     | undefined;
   let limit: number | undefined;
   for (const node of nodes) {
-    if (node.kind === "filter") {
-      const condition = toStandardCondition(node.condition, program?.bindings ?? []);
-      filter = filter
-        ? Object.freeze({
-            kind: "logical" as const,
-            operator: "and" as const,
-            left: filter,
-            right: condition,
-          })
-        : condition;
-    } else if (node.kind === "select:fields") projection = Object.freeze([...node.fields]);
-    else if (node.kind === "orderBy") {
-      order = Object.freeze([
-        Object.freeze({
-          path: Object.freeze([node.key]),
-          direction: node.direction,
-        }),
-      ]);
-    } else if (node.kind === "take") limit = limit === undefined ? node.count : Math.min(limit, node.count);
+    switch (node.kind) {
+      case "filter":
+        filter = appendStandardFilter(filter, toStandardCondition(node.condition, bindings));
+        break;
+      case "select:fields":
+        projection = Object.freeze([...node.fields]);
+        break;
+      case "orderBy":
+        order = Object.freeze([
+          Object.freeze({
+            path: Object.freeze([node.key]),
+            direction: node.direction,
+          }),
+        ]);
+        break;
+      case "take":
+        limit = standardTakeLimit(limit, node.count);
+        break;
+    }
   }
-  return Object.freeze({
-    source: Object.freeze({
-      kind: "object" as const,
-      fields: Object.freeze(objectFields(schema)),
-    }),
-    pipeline: Object.freeze(nodes.map((node) => toStandardStep(node, program?.bindings ?? []))),
-    ...(filter ? { filter } : {}),
-    ...(projection ? { projection } : {}),
-    ...(order ? { order } : {}),
-    ...(limit === undefined ? {} : { limit }),
-    params: Object.freeze([...(program?.params ?? [])]),
-  });
+  return { filter, projection, order, limit };
+}
+
+function standardTakeLimit(previous: number | undefined, count: number): number {
+  return previous === undefined ? count : Math.min(previous, count);
+}
+
+function appendStandardFilter(
+  previous: StandardQueryCondition | undefined,
+  next: StandardQueryCondition
+): StandardQueryCondition {
+  return previous === undefined
+    ? next
+    : Object.freeze({
+        kind: "logical" as const,
+        operator: "and" as const,
+        left: previous,
+        right: next,
+      });
 }
 
 function toStandardStep(node: QueryPipelineNode, bindings: readonly unknown[]): StandardQueryStep {
-  switch (node.kind) {
-    case "filter":
-      return standardWhereStep(node, bindings);
-    case "select:fields":
-      return standardSelectStep(node);
-    case "distinct":
-      return standardDistinctStep(node);
-    case "orderBy":
-      return standardOrderStep(node);
-    case "unique":
-    case "keyed":
-    case "groupBy":
-    case "flatMap":
-    case "groupAdjacentBy":
-      return standardKeyStep(node);
-    case "take":
-    case "drop":
-      return standardCountStep(node);
-    case "takeWhile":
-    case "dropWhile":
-      return standardConditionStep(node, bindings);
-    case "chunk":
-    case "window":
-      return standardSizeStep(node);
-    case "pairwise":
-    case "delete":
-      return Object.freeze({ kind: node.kind });
-    case "scan":
-      return standardScanStep(node, bindings);
-    case "update":
-      return standardUpdateStep(node, bindings);
-    case "aggregate":
-      return standardAggregateStep(node);
-    case "terminal":
-      return Object.freeze({ kind: "terminal", operation: node.op });
-    case "aggregate:composite":
-      return standardCompositeAggregateStep(node);
-  }
+  return STANDARD_STEP_HANDLERS[node.kind](node as never, bindings);
 }
+
+type StandardStepHandler<TKind extends QueryPipelineNode["kind"]> = (
+  node: Extract<QueryPipelineNode, { readonly kind: TKind }>,
+  bindings: readonly unknown[]
+) => StandardQueryStep;
+
+const STANDARD_STEP_HANDLERS: {
+  readonly [TKind in QueryPipelineNode["kind"]]: StandardStepHandler<TKind>;
+} = {
+  filter: standardWhereStep,
+  "select:fields": (node) => standardSelectStep(node),
+  distinct: standardDistinctStep,
+  orderBy: standardOrderStep,
+  unique: standardKeyStep,
+  keyed: standardKeyStep,
+  groupBy: standardKeyStep,
+  flatMap: standardKeyStep,
+  groupAdjacentBy: standardKeyStep,
+  take: standardCountStep,
+  drop: standardCountStep,
+  takeWhile: standardConditionStep,
+  dropWhile: standardConditionStep,
+  chunk: standardSizeStep,
+  window: standardSizeStep,
+  pairwise: standardSimpleStep,
+  delete: standardSimpleStep,
+  scan: standardScanStep,
+  update: standardUpdateStep,
+  aggregate: standardAggregateStep,
+  terminal: standardTerminalStep,
+  "aggregate:composite": standardCompositeAggregateStep,
+};
 
 type KeyStepNode = Extract<
   QueryPipelineNode,
@@ -134,6 +167,16 @@ function standardConditionStep(
 
 function standardSizeStep(node: Extract<QueryPipelineNode, { readonly kind: "chunk" | "window" }>): StandardQueryStep {
   return Object.freeze({ kind: node.kind, size: node.size });
+}
+
+function standardSimpleStep(
+  node: Extract<QueryPipelineNode, { readonly kind: "pairwise" | "delete" }>
+): StandardQueryStep {
+  return Object.freeze({ kind: node.kind });
+}
+
+function standardTerminalStep(node: Extract<QueryPipelineNode, { readonly kind: "terminal" }>): StandardQueryStep {
+  return Object.freeze({ kind: "terminal", operation: node.op });
 }
 
 function standardScanStep(

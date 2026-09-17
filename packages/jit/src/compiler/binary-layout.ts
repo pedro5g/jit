@@ -343,45 +343,72 @@ function resolveLayoutOffsets(
   alignment: 1 | 4 | 8,
   requestedLayout: BinaryMemoryLayout
 ): LayoutOffsets {
-  const packedOffsets = new Map<string, number>();
-  let packedRowSize = maskBytes;
+  const packed = createPackedOffsets(entries, maskBytes);
+  const memoryLayout = chooseMemoryLayout(entries, packed, alignment, requestedLayout);
+  const offsets = memoryLayout === "packed" ? packed.offsets : new Map<string, number>();
+  const nextOffset =
+    memoryLayout === "aligned"
+      ? fillAlignedOffsets(entries, offsets, maskBytes)
+      : memoryLayout === "packed"
+        ? packed.rowSize
+        : maskBytes;
+  const columnIndexes = memoryLayout === "columnar" ? createColumnIndexes(entries) : new Map<string, number>();
+  return { memoryLayout, offsets, columnIndexes, nextOffset };
+}
+
+function createPackedOffsets(
+  entries: readonly LayoutEntry[],
+  maskBytes: number
+): { readonly offsets: Map<string, number>; readonly rowSize: number } {
+  const offsets = new Map<string, number>();
+  let rowSize = maskBytes;
   for (const entry of entries) {
-    packedOffsets.set(entry.key, packedRowSize);
-    packedRowSize += entry.descriptor.size;
+    offsets.set(entry.key, rowSize);
+    rowSize += entry.descriptor.size;
   }
+  return { offsets, rowSize };
+}
+
+function chooseMemoryLayout(
+  entries: readonly LayoutEntry[],
+  packed: { readonly offsets: ReadonlyMap<string, number>; readonly rowSize: number },
+  alignment: 1 | 4 | 8,
+  requestedLayout: BinaryMemoryLayout
+): Exclude<BinaryMemoryLayout, "auto"> {
+  if (requestedLayout !== "auto") return requestedLayout;
   const naturallyAligned =
-    packedRowSize % alignment === 0 &&
+    packed.rowSize % alignment === 0 &&
     entries.every((entry) => {
       const fieldAlignment = alignmentForSize(entry.descriptor.size);
-      return (packedOffsets.get(entry.key) ?? 0) % fieldAlignment === 0;
+      return (packed.offsets.get(entry.key) ?? 0) % fieldAlignment === 0;
     });
-  const memoryLayout: Exclude<BinaryMemoryLayout, "auto"> =
-    requestedLayout === "auto" ? (naturallyAligned ? "aligned" : "packed") : requestedLayout;
-  const offsets = memoryLayout === "packed" ? packedOffsets : new Map<string, number>();
-  const columnIndexes = new Map<string, number>();
-  let nextOffset = memoryLayout === "packed" ? packedRowSize : maskBytes;
+  return naturallyAligned ? "aligned" : "packed";
+}
 
-  if (memoryLayout === "aligned") {
-    for (const size of [1, 4, 8] as const) {
-      if (!entries.some((entry) => entry.descriptor.size === size)) continue;
-      nextOffset = alignTo(nextOffset, alignmentForSize(size));
-      for (const entry of entries) {
-        if (entry.descriptor.size !== size) continue;
-        offsets.set(entry.key, nextOffset);
-        nextOffset += size;
-      }
+function fillAlignedOffsets(entries: readonly LayoutEntry[], offsets: Map<string, number>, maskBytes: number): number {
+  let nextOffset = maskBytes;
+  for (const size of [1, 4, 8] as const) {
+    const sizedEntries = entries.filter((entry) => entry.descriptor.size === size);
+    if (sizedEntries.length === 0) continue;
+    nextOffset = alignTo(nextOffset, alignmentForSize(size));
+    for (const entry of sizedEntries) {
+      offsets.set(entry.key, nextOffset);
+      nextOffset += size;
     }
   }
-  if (memoryLayout === "columnar") {
-    let columnIndex = 0;
-    for (const size of [1, 4, 8] as const) {
-      for (const entry of entries) {
-        if (entry.descriptor.size !== size) continue;
-        columnIndexes.set(entry.key, columnIndex++);
-      }
+  return nextOffset;
+}
+
+function createColumnIndexes(entries: readonly LayoutEntry[]): Map<string, number> {
+  const columnIndexes = new Map<string, number>();
+  let columnIndex = 0;
+  for (const size of [1, 4, 8] as const) {
+    for (const entry of entries) {
+      if (entry.descriptor.size !== size) continue;
+      columnIndexes.set(entry.key, columnIndex++);
     }
   }
-  return { memoryLayout, offsets, columnIndexes, nextOffset };
+  return columnIndexes;
 }
 
 function createLayoutFields(

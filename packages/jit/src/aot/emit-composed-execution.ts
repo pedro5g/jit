@@ -33,6 +33,7 @@ export interface AotComposedExecutionHost {
 }
 
 type EmittedBinding = { readonly binding: string; readonly type: string };
+type StageHandler = (stage: ExecutionStage, index: number) => number | undefined;
 
 /** Emits one fused AOT closure for a composed execution plan. */
 export function emitComposedExecutionArtifact(
@@ -335,40 +336,39 @@ class ComposedExecutionEmitter {
     return true;
   };
 
-  #emitStage = (stage: ExecutionStage, index: number): number | undefined => {
-    switch (stage.kind) {
-      case "value":
-      case "to.array":
-        return index;
-      case "json.decode":
-        this.#body.push("value = JSON.parse(value);");
-        return index;
-      case "binary.decode":
-        return this.#emitBinaryDecode(stage, index);
-      case "validate":
-        return this.#emitValidation(stage, index) ? index : undefined;
-      case "construct":
-        return this.#emitConstruct(stage) ? index : undefined;
-      case "query":
-        return this.#emitQueryStage(stage, index);
-      case "aggregate":
-        return this.#emitAggregateStage(stage, index);
-      case "map":
-        return this.#emitMapStage(stage, index);
-      case "transform":
-        return this.#emitTransformStage(stage) ? index : undefined;
-      case "update":
-        return this.#emitUpdateStage(stage) ? index : undefined;
-      case "security":
-        return this.#emitSecurityStage(stage) ? index : undefined;
-      case "json.encode":
-        return this.#emitJsonEncode(stage) ? index : undefined;
-      case "binary.encode":
-        return this.#emitBinaryEncode(stage, index);
-      case "operation":
-        return this.#emitUnsupportedOperation(stage);
-    }
+  #stageHandlers: { readonly [TKind in ExecutionStage["kind"]]: StageHandler } = {
+    value: (_stage, index) => index,
+    "to.array": (_stage, index) => index,
+    "json.decode": (_stage, index) => {
+      this.#body.push("value = JSON.parse(value);");
+      return index;
+    },
+    "binary.decode": (stage, index) =>
+      this.#emitBinaryDecode(stage as Extract<ExecutionStage, { readonly kind: "binary.decode" }>, index),
+    validate: (stage, index) =>
+      this.#emitValidation(stage as Extract<ExecutionStage, { readonly kind: "validate" }>, index) ? index : undefined,
+    construct: (stage, index) =>
+      this.#emitConstruct(stage as Extract<ExecutionStage, { readonly kind: "construct" }>) ? index : undefined,
+    query: (stage, index) => this.#emitQueryStage(stage as Extract<ExecutionStage, { readonly kind: "query" }>, index),
+    aggregate: (stage, index) =>
+      this.#emitAggregateStage(stage as Extract<ExecutionStage, { readonly kind: "aggregate" }>, index),
+    map: (stage, index) => this.#emitMapStage(stage as Extract<ExecutionStage, { readonly kind: "map" }>, index),
+    transform: (stage, index) =>
+      this.#emitTransformStage(stage as Extract<ExecutionStage, { readonly kind: "transform" }>) ? index : undefined,
+    update: (stage, index) =>
+      this.#emitUpdateStage(stage as Extract<ExecutionStage, { readonly kind: "update" }>) ? index : undefined,
+    security: (stage, index) =>
+      this.#emitSecurityStage(stage as Extract<ExecutionStage, { readonly kind: "security" }>) ? index : undefined,
+    "json.encode": (stage, index) =>
+      this.#emitJsonEncode(stage as Extract<ExecutionStage, { readonly kind: "json.encode" }>) ? index : undefined,
+    "binary.encode": (stage, index) =>
+      this.#emitBinaryEncode(stage as Extract<ExecutionStage, { readonly kind: "binary.encode" }>, index),
+    operation: (stage) =>
+      this.#emitUnsupportedOperation(stage as Extract<ExecutionStage, { readonly kind: "operation" }>),
   };
+
+  #emitStage = (stage: ExecutionStage, index: number): number | undefined =>
+    this.#stageHandlers[stage.kind](stage, index);
 
   #emitBinaryDecode = (
     stage: Extract<ExecutionStage, { readonly kind: "binary.decode" }>,

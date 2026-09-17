@@ -89,113 +89,10 @@ export function executionStub<TSchema extends ATS.AnyTypeSchema, TFunction exten
   const append = (nextSchema: ATS.AnyTypeSchema, nextStage: ExecutionStage, nextQuery?: RuntimeCollectionDescriptor) =>
     executionStub(nextSchema, [...plan.stages, nextStage], nextQuery);
 
-  Object.defineProperties(artifact, {
-    schema: { enumerable: true, value: unwrapped },
-    validate: {
-      enumerable: false,
-      value: () =>
-        append(unwrapped, {
-          ...stage("validate", "value", "value"),
-          schema: unwrapped,
-          operation: "parse",
-          provides: ["schema-validated"],
-        } as ExecutionStage),
-    },
-    map: {
-      enumerable: false,
-      value: (target: SchemaInput<ATS.AnyTypeSchema>, mapping: Readonly<Record<string, unknown>> = {}) => {
-        const targetSchema = unwrapSchema(target);
-        const many = unwrapped.type === "array";
-        const source = many ? (unwrapped as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : unwrapped;
-        const output = many
-          ? (unwrapSchema(RuntimeJIT.array(targetSchema)) as ATS.ArraySchema<ATS.AnyTypeSchema>)
-          : targetSchema;
-
-        return append(output, mapStage(source, targetSchema, many, mapping));
-      },
-    },
-    transform: {
-      enumerable: false,
-      value: (target: SchemaInput<ATS.AnyTypeSchema>, transforms: ATS.TransformSpec<unknown>) => {
-        const targetSchema = unwrapSchema(target);
-        const many = unwrapped.type === "array";
-        const source = many ? (unwrapped as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : unwrapped;
-        const output = many
-          ? (unwrapSchema(RuntimeJIT.array(targetSchema)) as ATS.ArraySchema<ATS.AnyTypeSchema>)
-          : targetSchema;
-
-        return append(output, transformStage(source, targetSchema, many, transforms));
-      },
-    },
-    update: {
-      enumerable: false,
-      value: (patch: UpdatePatch<unknown>) => {
-        const many = unwrapped.type === "array";
-        const schema = many ? (unwrapped as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : unwrapped;
-
-        return append(unwrapped, updateStage(schema, many, patch));
-      },
-    },
-    mask: {
-      enumerable: false,
-      value: () => {
-        const many = unwrapped.type === "array";
-        const schema = many ? (unwrapped as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : unwrapped;
-
-        return append(unwrapped, securityStage(schema, "mask", many));
-      },
-    },
-    sanitize: {
-      enumerable: false,
-      value: () => {
-        const many = unwrapped.type === "array";
-        const schema = many ? (unwrapped as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : unwrapped;
-
-        return append(unwrapped, securityStage(schema, "sanitize", many));
-      },
-    },
-    to: {
-      enumerable: true,
-      value: Object.freeze({
-        array: () => append(unwrapped, stage("to.array", "value", "value")),
-        json: () =>
-          append(unwrapped, {
-            ...stage("json.encode", "value", "json-text"),
-            schema: unwrapped,
-          } as ExecutionStage),
-        binary: () =>
-          append(unwrapped, {
-            ...stage("binary.encode", "value", "binary"),
-            schema: unwrapped,
-          } as ExecutionStage),
-      }),
-    },
-  });
-
-  if (unwrapped.type === "array") {
-    const source = queryBuilder ?? (RuntimeJIT.from(unwrapped) as unknown as RuntimeCollectionDescriptor);
-
-    Object.defineProperties(artifact, {
-      filter: {
-        enumerable: false,
-        value: (predicate: unknown) => {
-          const next = source.filter(predicate);
-          const query = next.plan.stages[next.plan.stages.length - 1];
-
-          return append(next.schema, query, next);
-        },
-      },
-      select: {
-        enumerable: false,
-        value: (...fields: string[]) => {
-          const next = source.select(...fields);
-          const query = next.plan.stages[next.plan.stages.length - 1];
-
-          return append(next.schema, query, next);
-        },
-      },
-    });
-  }
+  defineValidationOperation(artifact, unwrapped, append);
+  defineValueOperations(artifact, unwrapped, append);
+  defineEncodingOperations(artifact, unwrapped, append);
+  defineQueryOperations(artifact, unwrapped, queryBuilder, append);
   if (extras !== undefined) {
     for (const [name, value] of Object.entries(extras)) {
       Object.defineProperty(artifact, name, { enumerable: false, value });
@@ -203,6 +100,112 @@ export function executionStub<TSchema extends ATS.AnyTypeSchema, TFunction exten
   }
   registerArtifact(stub as object, { kind: "execution", plan });
   return Object.freeze(stub);
+}
+
+type ExecutionAppender = (
+  schema: ATS.AnyTypeSchema,
+  nextStage: ExecutionStage,
+  query?: RuntimeCollectionDescriptor
+) => unknown;
+
+function defineValidationOperation(
+  artifact: Record<string, unknown>,
+  schema: ATS.AnyTypeSchema,
+  append: ExecutionAppender
+): void {
+  Object.defineProperties(artifact, {
+    schema: { enumerable: true, value: schema },
+    validate: {
+      enumerable: false,
+      value: () =>
+        append(schema, {
+          ...stage("validate", "value", "value"),
+          schema,
+          operation: "parse",
+          provides: ["schema-validated"],
+        } as ExecutionStage),
+    },
+  });
+}
+
+function defineValueOperations(
+  artifact: Record<string, unknown>,
+  schema: ATS.AnyTypeSchema,
+  append: ExecutionAppender
+): void {
+  const many = schema.type === "array";
+  const element = many ? (schema as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : schema;
+  Object.defineProperties(artifact, {
+    map: {
+      enumerable: false,
+      value: (target: SchemaInput<ATS.AnyTypeSchema>, mapping = {}) =>
+        appendMapped(target, mapping, many, element, append),
+    },
+    transform: {
+      enumerable: false,
+      value: (target: SchemaInput<ATS.AnyTypeSchema>, transforms: ATS.TransformSpec<unknown>) => {
+        const targetSchema = unwrapSchema(target);
+        const output = many
+          ? (unwrapSchema(RuntimeJIT.array(targetSchema)) as ATS.ArraySchema<ATS.AnyTypeSchema>)
+          : targetSchema;
+        return append(output, transformStage(element, targetSchema, many, transforms));
+      },
+    },
+    update: {
+      enumerable: false,
+      value: (patch: UpdatePatch<unknown>) => append(schema, updateStage(element, many, patch)),
+    },
+    mask: { enumerable: false, value: () => append(schema, securityStage(element, "mask", many)) },
+    sanitize: { enumerable: false, value: () => append(schema, securityStage(element, "sanitize", many)) },
+  });
+}
+
+function appendMapped(
+  target: SchemaInput<ATS.AnyTypeSchema>,
+  mapping: Readonly<Record<string, unknown>>,
+  many: boolean,
+  element: ATS.AnyTypeSchema,
+  append: ExecutionAppender
+): unknown {
+  const targetSchema = unwrapSchema(target);
+  const output = many
+    ? (unwrapSchema(RuntimeJIT.array(targetSchema)) as ATS.ArraySchema<ATS.AnyTypeSchema>)
+    : targetSchema;
+  return append(output, mapStage(element, targetSchema, many, mapping));
+}
+
+function defineEncodingOperations(
+  artifact: Record<string, unknown>,
+  schema: ATS.AnyTypeSchema,
+  append: ExecutionAppender
+): void {
+  Object.defineProperty(artifact, "to", {
+    enumerable: true,
+    value: Object.freeze({
+      array: () => append(schema, stage("to.array", "value", "value")),
+      json: () => append(schema, { ...stage("json.encode", "value", "json-text"), schema } as ExecutionStage),
+      binary: () => append(schema, { ...stage("binary.encode", "value", "binary"), schema } as ExecutionStage),
+    }),
+  });
+}
+
+function defineQueryOperations(
+  artifact: Record<string, unknown>,
+  schema: ATS.AnyTypeSchema,
+  queryBuilder: RuntimeCollectionDescriptor | undefined,
+  append: ExecutionAppender
+): void {
+  if (schema.type !== "array") return;
+  const source = queryBuilder ?? (RuntimeJIT.from(schema) as unknown as RuntimeCollectionDescriptor);
+  Object.defineProperties(artifact, {
+    filter: { enumerable: false, value: (predicate: unknown) => appendQuery(source.filter(predicate), append) },
+    select: { enumerable: false, value: (...fields: string[]) => appendQuery(source.select(...fields), append) },
+  });
+}
+
+function appendQuery(next: RuntimeCollectionDescriptor, append: ExecutionAppender): unknown {
+  const query = next.plan.stages[next.plan.stages.length - 1];
+  return append(next.schema, query, next);
 }
 
 /** @internal Creates the execution stage for a schema-specialized map. */
