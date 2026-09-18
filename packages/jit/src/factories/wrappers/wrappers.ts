@@ -24,6 +24,14 @@ import { type NativeCoercions, nativeCoercions } from "../coerce.js";
 /**
  * Creates an optional schema builder from a schema input.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Nickname = JIT.optional(JIT.string());
+ * JIT.validate.parse(Nickname)(undefined); // undefined
+ * ```
+ *
  * @template TSchema - The wrapped schema type.
  * @param schema - The schema or builder to wrap.
  * @returns A builder wrapping an optional schema.
@@ -36,6 +44,14 @@ export function optional<TSchema extends AnyTypeSchema>(
 
 /**
  * Creates a nullable schema builder from a schema input.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const ParentId = JIT.nullable(JIT.string());
+ * JIT.validate.is(ParentId)(null); // true
+ * ```
  *
  * @template TSchema - The wrapped schema type.
  * @param schema - The schema or builder to wrap.
@@ -50,6 +66,14 @@ export function nullable<TSchema extends AnyTypeSchema>(
 /**
  * Creates a nullish schema builder from a schema input.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Comment = JIT.nullish(JIT.string());
+ * JIT.validate.is(Comment)(undefined); // true
+ * ```
+ *
  * @template TSchema - The wrapped schema type.
  * @param schema - The schema or builder to wrap.
  * @returns A builder wrapping a nullish schema.
@@ -60,6 +84,14 @@ export function nullish<TSchema extends AnyTypeSchema>(schema: SchemaInput<TSche
 
 /**
  * Creates a readonly schema builder from a schema input.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Settings = JIT.readonly(JIT.object({ theme: JIT.string() }));
+ * JIT.validate.is(Settings)({ theme: "dark" }); // true
+ * ```
  *
  * @template TSchema - The wrapped schema type.
  * @param schema - The schema or builder to wrap.
@@ -74,6 +106,15 @@ export function readonly<TSchema extends AnyTypeSchema>(
 /**
  * Creates a promise schema builder from a resolved-value schema input.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Result = JIT.promise(JIT.number());
+ * const parseResult = JIT.validate.async.parse(Result);
+ * await parseResult(Promise.resolve(200));
+ * ```
+ *
  * @template TSchema - The resolved-value schema type.
  * @param schema - The schema or builder for the resolved value.
  * @returns A builder wrapping a promise schema.
@@ -84,6 +125,14 @@ export function promise<TSchema extends AnyTypeSchema>(schema: SchemaInput<TSche
 
 /**
  * Creates a default-value schema builder from a schema input.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Limit = JIT.default(JIT.number(), 25);
+ * JIT.validate.parse(Limit)(undefined); // 25
+ * ```
  *
  * @template TSchema - The wrapped schema type.
  * @param schema - The schema or builder to wrap.
@@ -100,11 +149,29 @@ function defaultTo<
   return /* @__PURE__ */ createBuilder(Transform.default(unwrapSchema(schema), defaultValue));
 }
 
-/** Provides the JIT default operation for the supplied input. */
+/**
+ * Creates a default-value schema builder.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const PageSize = JIT.default(JIT.number(), 25);
+ * JIT.validate.parse(PageSize)(undefined); // 25
+ * ```
+ */
 export { defaultTo as default };
 
 /**
  * Creates a branded schema builder.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const UserId = JIT.brand(JIT.string().uuid(), "UserId");
+ * JIT.validate.is(UserId)("550e8400-e29b-41d4-a716-446655440000"); // true
+ * ```
  *
  * @template TSchema - The wrapped schema type.
  * @template TBrand - The brand string literal.
@@ -122,6 +189,14 @@ export function brand<TSchema extends AnyTypeSchema, const TBrand extends string
 /**
  * Creates a pipe schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Normalized = JIT.pipe(JIT.string(), (value) => value.trim());
+ * JIT.validate.parse(Normalized)("  jit  "); // "jit"
+ * ```
+ *
  * @template TSchema - The input schema type.
  * @template TOutput - The transform output type.
  * @param schema - The schema or builder to pipe from.
@@ -138,6 +213,17 @@ export function pipe<TSchema extends AnyTypeSchema, TOutput>(
 /**
  * Creates a per-field transform schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Person = JIT.transform(
+ *   JIT.object({ name: JIT.string() }),
+ *   { name: (value) => value.trim() }
+ * );
+ * JIT.validate.parse(Person)({ name: " Ada " });
+ * ```
+ *
  * @template TSchema - The object schema type.
  * @template TSpec - The transform spec type.
  * @param schema - The schema or builder to transform.
@@ -153,6 +239,14 @@ export function transform<TSchema extends AnyTypeSchema, const TSpec extends Tra
 
 /**
  * Creates a refine schema builder.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Even = JIT.refine(JIT.number(), (value) => value % 2 === 0);
+ * JIT.validate.is(Even)(4); // true
+ * ```
  *
  * @template TSchema - The refined schema type.
  * @param schema - The schema or builder to refine.
@@ -188,6 +282,14 @@ function coerceWith<TSchema extends AnyTypeSchema>(
  * - `JIT.coerce.number()` / `.string()` / `.boolean()` / `.bigint()` /
  *   `.date()` — zod-style native coercions, emitted inline
  *   (`Number(v)`, `new Date(v)`, ...) and therefore AOT-safe.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Count = JIT.coerce.number();
+ * JIT.validate.parse(Count)("3"); // 3
+ * ```
  */
 export interface CoerceFactory extends NativeCoercions {
   /** Converts a value with `coercer` before validating the supplied schema. */
@@ -197,5 +299,13 @@ export interface CoerceFactory extends NativeCoercions {
   ): Builder<CoerceSchema<TSchema>>;
 }
 
-/** Provides the JIT coerce configuration used by the public contract. */
+/**
+ * Native and callback-based input coercions.
+ *
+ * @example
+ * ```ts
+ * const Page = JIT.coerce.number().int().positive();
+ * JIT.validate.parse(Page)("3"); // 3
+ * ```
+ */
 export const coerce: CoerceFactory = Object.assign(coerceWith, nativeCoercions);

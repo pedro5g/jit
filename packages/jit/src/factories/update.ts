@@ -26,7 +26,15 @@ import {
 import type { Ability, AccessPlan } from "./access.js";
 import type { QueryParamRef } from "./query.js";
 
-/** Provides the JIT reactive update operation for the supplied input. */
+/**
+ * Reactive immutable update controller for a schema.
+ *
+ * @example
+ * ```ts
+ * const reactive = JIT.state.update(User).reactive({ name: "Grace" });
+ * reactive.update({ name: "Ada" });
+ * ```
+ */
 export type ReactiveUpdate<T> = ReactiveUpdateController<T, UpdateInput<T>>;
 export type {
   ReactiveChange,
@@ -45,6 +53,11 @@ export type {
  * Mutable draft shape accepted by update recipes.
  *
  * @template T - The value type being updated.
+ *
+ * @example
+ * ```ts
+ * type MutableUser = Draft<Readonly<{ name: string }>>;
+ * ```
  */
 export type Draft<T> = T extends readonly (infer TItem)[]
   ? Draft<TItem>[]
@@ -64,12 +77,23 @@ export type Draft<T> = T extends readonly (infer TItem)[]
  * @template T - The value type being updated.
  * @param draft - The mutable draft proxy.
  * @returns Nothing; writes are captured as an update patch.
+ * @example
+ * ```ts
+ * const recipe: UpdateRecipe<User> = (draft) => {
+ *   draft.name = "Ada";
+ * };
+ * ```
  */
 export type UpdateRecipe<T> = (draft: Draft<T>) => void;
 /**
  * Runtime update input: either a structural patch or a draft recipe.
  *
  * @template T - The value type being updated.
+ *
+ * @example
+ * ```ts
+ * const input: UpdateInput<User> = { name: "Ada" };
+ * ```
  */
 export type UpdateInput<T> = UpdatePatch<T> | UpdateRecipe<T>;
 /**
@@ -79,6 +103,11 @@ export type UpdateInput<T> = UpdatePatch<T> | UpdateRecipe<T>;
  * @param value - The value to update.
  * @param input - A structural patch or draft recipe.
  * @returns The updated value.
+ * @example
+ * ```ts
+ * const rename = JIT.state.update(User);
+ * rename({ name: "Grace" }, { name: "Ada" });
+ * ```
  */
 export type RuntimeUpdate<T> = ((value: T, input: UpdateInput<T>) => T) & {
   compile(): RuntimeUpdate<T>;
@@ -96,6 +125,12 @@ export type RuntimeUpdate<T> = ((value: T, input: UpdateInput<T>) => T) & {
  *
  * `explain()` reports which paths the mutation reads and writes and whether the
  * planner could specialize it, without compiling anything.
+ *
+ * @example
+ * ```ts
+ * const patch = JIT.state.update(User).patch({ name: "Ada" });
+ * const rename = patch.compile();
+ * ```
  */
 export interface CompiledPatch<T, TPatch> {
   /** Compiles the patch into an immutable update function. */
@@ -113,7 +148,15 @@ export interface CompiledPatch<T, TPatch> {
   result<const TChannels extends MutationChannels>(channels: TChannels): CompiledMutation<T, TPatch, TChannels>;
 }
 
-/** Describes the JIT compiled mutation contract used by the public API. */
+/**
+ * Describes the JIT compiled mutation contract used by the public API.
+ *
+ * @example
+ * ```ts
+ * const mutation = JIT.state.update(User).patch({ name: "Ada" }).result({ changed: true });
+ * mutation.compile()({ name: "Grace" }, {});
+ * ```
+ */
 export interface CompiledMutation<T, TPatch, TChannels extends MutationChannels> {
   /** Compiles a mutation that returns the requested result channels. */
   compile(): ((value: T, params: UpdatePatchParams<TPatch>) => MutationResult<T, TChannels>) & {
@@ -124,14 +167,29 @@ export interface CompiledMutation<T, TPatch, TChannels extends MutationChannels>
   explain(): MutationExplanation;
 }
 
-/** Describes the JIT mutation result contract used by the public API. */
+/**
+ * Result channels returned by a compiled mutation.
+ *
+ * @example
+ * ```ts
+ * type Result = MutationResult<User, { changed: true }>;
+ * ```
+ */
 export type MutationResult<T, TChannels extends MutationChannels> = {
   readonly value: T;
 } & (TChannels["changed"] extends undefined | false ? Record<never, never> : { readonly changed: number | bigint }) &
   (TChannels["patch"] extends true ? { readonly patch: UpdatePatch<T> | undefined } : Record<never, never>) &
   (TChannels["inverse"] extends true ? { readonly inverse: UpdatePatch<T> | undefined } : Record<never, never>);
 
-/** Describes the JIT mutation explanation contract used by the public API. */
+/**
+ * Static explanation of a mutation plan.
+ *
+ * @example
+ * ```ts
+ * const explanation = JIT.state.update(User).patch({ name: "Ada" }).explain();
+ * explanation.strategy; // "specialized" or "generic"
+ * ```
+ */
 export interface MutationExplanation {
   /** `"specialized"` rebuilds only the changed levels; `"generic"` runs the deep-partial update. */
   readonly strategy: "specialized" | "generic";
@@ -140,7 +198,15 @@ export interface MutationExplanation {
   readonly params: readonly string[];
 }
 
-/** Describes the JIT update patch template contract used by the public API. */
+/**
+ * Deep-partial patch shape accepted by a schema update.
+ *
+ * @example
+ * ```ts
+ * type UserPatch = UpdatePatchTemplate<{ name: string; age: number }>;
+ * const patch: UserPatch = { name: "Ada" };
+ * ```
+ */
 export type UpdatePatchTemplate<T> = T extends object
   ? {
       readonly [TKey in keyof T]?: UpdatePatchTemplate<T[TKey]> | QueryParamRef<T[TKey]> | T[TKey];
@@ -158,7 +224,15 @@ type UpdatePatchParamNames<TPatch> =
           }[keyof TPatch]
         : never;
 
-/** Describes the JIT update patch params contract used by the public API. */
+/**
+ * Parameter object inferred from query parameter references inside a patch.
+ *
+ * @example
+ * ```ts
+ * const template = { name: JIT.cqrs.param("name") } as const;
+ * type Params = UpdatePatchParams<typeof template>;
+ * ```
+ */
 export type UpdatePatchParams<TPatch> = [UpdatePatchParamNames<TPatch>] extends [never]
   ? Readonly<Record<never, never>>
   : Readonly<Record<Extract<UpdatePatchParamNames<TPatch>, string>, unknown>>;
@@ -169,6 +243,11 @@ export type UpdatePatchParams<TPatch> = [UpdatePatchParamNames<TPatch>] extends 
  * @template TSchema - The schema type used for inference.
  * @param schema - The schema or builder used to compile updates.
  * @returns A reusable runtime update function.
+ * @example
+ * ```ts
+ * const rename = JIT.state.update(User);
+ * rename({ name: "Grace" }, { name: "Ada" });
+ * ```
  */
 export function update<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>

@@ -12,7 +12,7 @@ import type {
 } from "./class.js";
 
 export const CLASS_MIXIN = Symbol("jit.class.mixin");
-export const CLASS_FIELD_BUILDER = Symbol("jit.class.fieldBuilder");
+const CLASS_FIELD_BUILDER = Symbol("jit.class.fieldBuilder");
 
 /** Members reserved by scalar Value Objects before application extensions run. */
 export const SCALAR_MEMBERS: ReadonlySet<string> = new Set(["value", "equals", "hashCode", "toJSON"]);
@@ -65,7 +65,7 @@ interface RuntimeClassExtensionFieldBuilder {
   toDescriptor(name: string): ClassMemberDescriptor;
 }
 
-export function createClassExtensionFieldBuilder(
+function createClassExtensionFieldBuilder(
   name: string | undefined,
   schema: SchemaInput<ATS.AnyTypeSchema>,
   visibility: ClassMemberVisibility = "public",

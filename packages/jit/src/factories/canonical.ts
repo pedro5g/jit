@@ -10,6 +10,13 @@ import { unwrapSchema } from "../core/builder/index.js";
  * and serialize differently. `canonical` puts the fields in the order the
  * schema declares them — and returns the original value by reference when it is
  * already in that order, so the common case allocates nothing.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+ * const normalize = JIT.canonical(User);
+ * normalize({ name: "Ada", id: 1 }); // { id: 1, name: "Ada" }
+ * ```
  */
 export function canonical<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>

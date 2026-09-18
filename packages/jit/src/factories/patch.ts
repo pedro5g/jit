@@ -4,7 +4,14 @@ import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { type RuntimeUpdate, update } from "./update.js";
 
-/** One RFC 6902 operation. `from` is required by `move` and `copy`. */
+/**
+ * One RFC 6902 operation. `from` is required by `move` and `copy`.
+ *
+ * @example
+ * ```ts
+ * const operation: JsonPatchOperation = { op: "replace", path: "/name", value: "Ada" };
+ * ```
+ */
 export type JsonPatchOperation =
   | { readonly op: "add" | "replace" | "test"; readonly path: string; readonly value: unknown }
   | { readonly op: "remove"; readonly path: string }
@@ -13,6 +20,12 @@ export type JsonPatchOperation =
 /**
  * An RFC 7396 merge patch. `null` removes a member, which is the one place
  * merge-patch semantics differ from an ordinary partial assignment.
+ *
+ * @example
+ * ```ts
+ * type UserPatch = MergePatch<{ name: string; active: boolean }>;
+ * const patch: UserPatch = { name: "Ada" };
+ * ```
  */
 export type MergePatch<TValue> = TValue extends object
   ? { readonly [K in keyof TValue]?: MergePatch<TValue[K]> | null } | null
@@ -26,6 +39,12 @@ export type MergePatch<TValue> = TValue extends object
  * name: `apply` takes a deep partial where `undefined` means "leave alone",
  * `merge` follows RFC 7396 where `null` means "remove", and `json` follows
  * RFC 6902 where the patch is a list of operations against pointers.
+ *
+ * @example
+ * ```ts
+ * const apply = JIT.state.patch.json(User);
+ * apply({ name: "Grace" }, [{ op: "replace", path: "/name", value: "Ada" }]);
+ * ```
  */
 export const patch = Object.freeze({
   /**

@@ -1,7 +1,15 @@
 import type { DiffChange } from "../compiler/diff.js";
 import type * as ATS from "../core/ats/index.js";
 
-/** An immutable, tree-shakeable operation that installs one prototype capability. */
+/**
+ * An immutable, tree-shakeable operation that installs one prototype capability.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.class(UserSchema).extends(JIT.class.equals);
+ * const capability: JIT.ClassCapability = JIT.class.equals;
+ * ```
+ */
 export interface ClassCapability<TMethods extends object = object> {
   readonly kind: string;
   /** Installs the capability once on a generated class prototype. */
@@ -13,7 +21,14 @@ export interface ClassCapability<TMethods extends object = object> {
   readonly __options?: unknown;
 }
 
-/** A stable built-in capability can be selected either bare or as a callable. */
+/**
+ * A stable built-in capability can be selected either bare or as a callable.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.class(UserSchema).extends(JIT.class.equals());
+ * ```
+ */
 export interface CallableClassCapability<TMethods extends object = object> extends ClassCapability<TMethods> {
   /** Returns the same capability descriptor for fluent composition. */
   (): this;
@@ -25,8 +40,24 @@ export interface CallableClassCapability<TMethods extends object = object> exten
  * One function per name, shared by every instance. There is no dispatcher: a
  * call reaches the prototype the way it reaches a hand-written class method.
  */
+/**
+ * Application-owned prototype fields and methods accepted by `.extends()`.
+ *
+ * @example
+ * ```ts
+ * const methods: ClassMethodsInput = { label() { return "user"; } };
+ * ```
+ */
 export type ClassMethodsInput = Readonly<Record<string, unknown>>;
-/** Provides the JIT class mixin operation for the supplied input. */
+/**
+ * Reusable class mixin with shared prototype methods.
+ *
+ * @example
+ * ```ts
+ * const Audited = JIT.class.mixin({ methods: { label() { return "audited"; } } });
+ * const User = JIT.class(UserSchema).extends(Audited);
+ * ```
+ */
 export interface ClassMixin<
   TOutput extends ClassMethodsInput = ClassMethodsInput,
   TRequires extends ClassMethodsInput = ClassMethodsInput,
@@ -44,13 +75,27 @@ export type NormalizedClassExtension<TExtension> =
       ? TOutput
       : TExtension;
 
-/** Minimal application-owned event publisher contract. */
+/**
+ * Minimal application-owned event publisher contract.
+ *
+ * @example
+ * ```ts
+ * const publisher: EventPublisher<DomainEvent> = { publish: async (event) => bus.send(event) };
+ * ```
+ */
 export interface EventPublisher<TEvent = unknown> {
   /** Publishes one domain event to the application boundary. */
   publish(event: TEvent): void | PromiseLike<void>;
 }
 
-/** Versioned structural metadata exposed by a domain-event instance. */
+/**
+ * Versioned structural metadata exposed by a domain-event instance.
+ *
+ * @example
+ * ```ts
+ * const metadata: StandardEvent = { version: 1, type: "UserCreated", schemaVersion: 1 };
+ * ```
+ */
 export interface StandardEvent {
   readonly version: 1;
   readonly type: string;
@@ -64,7 +109,14 @@ export interface DomainEventBrand {
   readonly [DOMAIN_EVENT]: true;
 }
 
-/** Provides the JIT any domain event operation for the supplied input. */
+/**
+ * Type-only marker shared by domain events.
+ *
+ * @example
+ * ```ts
+ * function publish(event: AnyDomainEvent) { return event; }
+ * ```
+ */
 export type AnyDomainEvent = DomainEventBrand;
 
 /** @internal Constructor shape used by aggregate event registration. */
@@ -100,11 +152,28 @@ export interface CloneMethods {
 /** @internal Type helper used by the runtime-class implementation. */
 /** @internal Type helper shared by the runtime-class type contracts. */
 export type ValueAccessor<TValue> = { readonly value: TValue };
-/** Provides the JIT scalar value object operation for the supplied input. */
+/**
+ * Runtime representation of a scalar Value Object.
+ *
+ * @example
+ * ```ts
+ * const UserId = JIT.ddd.uniqueIdentifier();
+ * const id: ScalarValueObject<string> = UserId.create();
+ * id.value;
+ * ```
+ */
 export interface ScalarValueObject<TValue> extends EqualsMethods, HashCodeMethods {
   readonly value: TValue;
 }
-/** Provides the JIT timestamp options operation for the supplied input. */
+/**
+ * Configuration for timestamp field names and lifecycle behavior.
+ *
+ * @example
+ * ```ts
+ * const options: TimestampOptions = { createdAt: "createdOn", updatedAt: "updatedOn" };
+ * const timestamps = JIT.ddd.timestamps(options);
+ * ```
+ */
 export interface TimestampOptions {
   readonly createdAt?: string;
   readonly updatedAt?: string;
@@ -116,7 +185,14 @@ export interface TimestampOptions {
     readonly touch?: string;
   };
 }
-/** Provides the JIT soft delete options operation for the supplied input. */
+/**
+ * Configuration for soft-delete state and method names.
+ *
+ * @example
+ * ```ts
+ * const capability = JIT.ddd.softDelete({ field: "deletedOn" });
+ * ```
+ */
 export interface SoftDeleteOptions {
   readonly field?: string;
   /** Uses the timestamp clock when omitted and timestamps are installed. */
@@ -127,7 +203,14 @@ export interface SoftDeleteOptions {
     readonly isDeleted?: string;
   };
 }
-/** Provides the JIT versioned options operation for the supplied input. */
+/**
+ * Configuration for optimistic version state.
+ *
+ * @example
+ * ```ts
+ * const capability = JIT.ddd.versioned({ field: "revision" });
+ * ```
+ */
 export interface VersionedOptions {
   readonly field?: string;
 }
@@ -146,21 +229,42 @@ type SoftDeleteMethodsFor<TOptions> = NamedMethod<OptionMethodName<TOptions, "de
   NamedMethod<OptionMethodName<TOptions, "restore", "restore">, () => void> &
   Readonly<NamedMethod<OptionMethodName<TOptions, "isDeleted", "isDeleted">, boolean>>;
 
-/** Provides the JIT timestamp capability operation for the supplied input. */
+/**
+ * Installed timestamp capability and its generated method surface.
+ *
+ * @example
+ * ```ts
+ * const Order = JIT.ddd.aggregateRoot(OrderSchema).extends(JIT.ddd.timestamps());
+ * ```
+ */
 export interface TimestampCapability<TOptions extends TimestampOptions = TimestampOptions>
   extends ClassCapability<TimestampMethodsFor<TOptions>> {
   readonly kind: "ddd.timestamps";
   readonly __options?: TOptions;
 }
 
-/** Provides the JIT soft delete capability operation for the supplied input. */
+/**
+ * Installed soft-delete capability and its generated method surface.
+ *
+ * @example
+ * ```ts
+ * const Order = JIT.ddd.aggregateRoot(OrderSchema).extends(JIT.ddd.softDelete());
+ * ```
+ */
 export interface SoftDeleteCapability<TOptions extends SoftDeleteOptions = SoftDeleteOptions>
   extends ClassCapability<SoftDeleteMethodsFor<TOptions>> {
   readonly kind: "ddd.softDelete";
   readonly __options?: TOptions;
 }
 
-/** Provides the JIT versioned capability operation for the supplied input. */
+/**
+ * Installed version capability and its generated method surface.
+ *
+ * @example
+ * ```ts
+ * const Order = JIT.ddd.aggregateRoot(OrderSchema).extends(JIT.ddd.versioned());
+ * ```
+ */
 export interface VersionedCapability<TOptions extends VersionedOptions = VersionedOptions>
   extends ClassCapability<VersionedMethods> {
   readonly kind: "ddd.versioned";

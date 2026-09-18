@@ -7,7 +7,7 @@ export interface EmittedBinding {
   readonly type: string;
 }
 
-export type ClassArtifactFlag =
+type ClassArtifactFlag =
   | "validationError"
   | "assertionError"
   | "runtimeGetIndex"
@@ -18,7 +18,7 @@ export type ClassArtifactFlag =
   | "domainStateType"
   | "domainEventType";
 
-export interface ValidatorSelection {
+interface ValidatorSelection {
   readonly is: boolean;
   readonly safeParse: boolean;
   readonly parse?: boolean;

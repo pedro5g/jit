@@ -1,5 +1,5 @@
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
-import { canUseFastParse } from "../compiler/validate/emit-validate.js";
+import { canUseFastParse } from "../compiler/validate/emit-validate-support.js";
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import type { ClassArtifact, ClassArtifactEmitContext } from "./emit-class-types.js";
@@ -76,7 +76,7 @@ export function prepareClassArtifact(
   };
 }
 
-export function resolveObjectSchema(schema: ATS.AnyTypeSchema): ATS.ObjectSchema | undefined {
+function resolveObjectSchema(schema: ATS.AnyTypeSchema): ATS.ObjectSchema | undefined {
   const base = resolveWrappers(schema).base;
   return base.type === TypeName.object ? (base as ATS.ObjectSchema) : undefined;
 }

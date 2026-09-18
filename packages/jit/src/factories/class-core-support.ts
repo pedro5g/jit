@@ -1,10 +1,10 @@
-import type { ClassFactoryMemberDescriptor, ClassMemberDescriptor } from "../classes/member-descriptors.js";
-import { isClassMemberDescriptor } from "../classes/member-descriptors.js";
 import { compileValidator } from "../compiler/validate.js";
 import type * as ATS from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import type { ClassMethodDefinition } from "./class-core-state.js";
-import type { CallableClassCapability, RuntimeClass } from "./class-types.js";
+import type { CallableClassCapability, ConstructionMode, RuntimeClass } from "./class-types.js";
+
+export { resolveFactoryOption } from "../classes/factory-option.js";
 
 /** @internal Installs or removes one named factory on a Runtime Class. */
 export function installFactory<TSchema extends ATS.AnyTypeSchema>(
@@ -42,26 +42,29 @@ export function removeFactorySurface(runtime: Function, names: readonly string[]
   for (const name of names) delete surface[name];
 }
 
-/** @internal Resolves a fluent factory descriptor against its current name. */
-export function resolveFactoryOption(
-  option: string | false | ClassMemberDescriptor<ClassFactoryMemberDescriptor> | undefined,
-  previous: string | false,
-  phase: "create" | "hydrate"
-): { readonly name: string | false; readonly implementation?: Function } {
-  if (option === undefined) return { name: previous };
-  if (typeof option === "object") {
-    if (!isClassMemberDescriptor(option) || option.definition.kind !== "factory") {
-      throw new JITError("CLASS_FACTORY_CONFLICT", "Invalid class factory descriptor");
-    }
-    if (option.definition.phase !== phase) {
-      throw new JITError(
-        "CLASS_FACTORY_CONFLICT",
-        `A ${option.definition.phase} factory descriptor cannot configure ${phase}`
-      );
-    }
-    return { name: option.definition.name, implementation: option.definition.implementation };
+/** @internal Checks the singleton construction configuration boundary. */
+export function assertConstructionConfiguration(
+  state: {
+    readonly constructionConfigured: boolean;
+    readonly factoriesConfigured: boolean;
+    readonly isAbstract: boolean;
+    readonly policy: { readonly configured: boolean };
+  },
+  mode: ConstructionMode
+): void {
+  if (state.constructionConfigured)
+    throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+  if (state.factoriesConfigured)
+    throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
+  if (mode !== "constructor" && mode !== "factory") {
+    throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
   }
-  return { name: option };
+  if (state.isAbstract && mode === "constructor") {
+    throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
+  }
+  if (state.policy.configured) {
+    throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
+  }
 }
 
 /** @internal Creates an immutable prototype capability descriptor. */

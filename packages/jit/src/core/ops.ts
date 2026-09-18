@@ -6,7 +6,14 @@
  * transformations that need runtime state.
  */
 
-/** One step of a chain, able to emit itself as an expression. */
+/**
+ * One step of a chain, able to emit itself as an expression.
+ *
+ * @example
+ * ```ts
+ * const handle = JIT.string().pipe(JIT.ops.trim().lowercase());
+ * ```
+ */
 export interface OpStep {
   readonly kind: string;
   /** Emits this step over `expr`, binding runtime values instead of interpolating them. */
@@ -15,14 +22,28 @@ export interface OpStep {
 
 const OPS = "__jitOps";
 
-/** A chain of operations, recognizable at runtime and by the emitter. */
+/**
+ * A chain of operations, recognizable at runtime and by the emitter.
+ *
+ * @example
+ * ```ts
+ * const clean = JIT.string().pipe(JIT.ops.trim().collapseWhitespace());
+ * ```
+ */
 export interface OpChain<TInput = unknown, TOutput = unknown> {
   readonly [OPS]: readonly OpStep[];
   readonly _input?: TInput;
   readonly _output?: TOutput;
 }
 
-/** Provides the JIT string ops operation for the supplied input. */
+/**
+ * String operations available under `JIT.ops`.
+ *
+ * @example
+ * ```ts
+ * const slug = JIT.string().pipe(JIT.ops.trim().lowercase().replace(" ", "-"));
+ * ```
+ */
 export interface StringOps extends OpChain<string, string> {
   /** Removes leading and trailing whitespace. */
   trim(): StringOps;
@@ -48,7 +69,14 @@ export interface StringOps extends OpChain<string, string> {
   toDate(): DateOps;
 }
 
-/** Provides the JIT number ops operation for the supplied input. */
+/**
+ * Number operations available under `JIT.ops`.
+ *
+ * @example
+ * ```ts
+ * const cents = JIT.number().pipe(JIT.ops.round().clamp(0, 100));
+ * ```
+ */
 export interface NumberOps extends OpChain<number, number> {
   /** Rounds to the nearest integer. */
   round(): NumberOps;
@@ -66,7 +94,14 @@ export interface NumberOps extends OpChain<number, number> {
   toText(): StringOps;
 }
 
-/** Provides the JIT date ops operation for the supplied input. */
+/**
+ * Date operations available under `JIT.ops`.
+ *
+ * @example
+ * ```ts
+ * const day = JIT.date().pipe(JIT.ops.startOfDay().toISO());
+ * ```
+ */
 export interface DateOps extends OpChain<Date, Date> {
   /** Drops the time part, in UTC. */
   startOfDay(): DateOps;
@@ -76,7 +111,14 @@ export interface DateOps extends OpChain<Date, Date> {
   toEpoch(): NumberOps;
 }
 
-/** Provides the JIT any op chain operation for the supplied input. */
+/**
+ * Union of all built-in operation-chain surfaces.
+ *
+ * @example
+ * ```ts
+ * const operation: AnyOpChain = JIT.ops.trim();
+ * ```
+ */
 export type AnyOpChain = StringOps | NumberOps | DateOps;
 
 /** True when a `.pipe` argument is a chain rather than a callback. */

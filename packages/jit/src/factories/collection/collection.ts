@@ -15,8 +15,17 @@ import { type ValidationMessage, withValidationMessage } from "../validation-mes
 /**
  * Creates an array schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Tags = JIT.array(JIT.string().min(1));
+ * JIT.validate.parse(Tags)(["jit", "typescript"]);
+ * ```
+ *
  * @template TElement - The element schema type.
  * @param element - The schema or builder for each array element.
+ * @param message - Optional default message for failures in this schema.
  * @returns A builder wrapping an array schema.
  */
 export function array<TElement extends AnyTypeSchema>(
@@ -34,8 +43,17 @@ export function array<TElement extends AnyTypeSchema>(
 /**
  * Creates a Set schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Labels = JIT.set(JIT.string());
+ * JIT.validate.is(Labels)(new Set(["stable"])); // true
+ * ```
+ *
  * @template TElement - The element schema type.
  * @param element - The schema or builder for each Set element.
+ * @param message - Optional default message for failures in this schema.
  * @returns A builder wrapping a Set schema.
  */
 export function set<TElement extends AnyTypeSchema>(
@@ -50,10 +68,19 @@ export function set<TElement extends AnyTypeSchema>(
 /**
  * Creates a Map schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Scores = JIT.map(JIT.string(), JIT.number());
+ * JIT.validate.is(Scores)(new Map([["ada", 10]])); // true
+ * ```
+ *
  * @template TKey - The key schema type.
  * @template TValue - The value schema type.
  * @param key - The schema or builder for Map keys.
  * @param value - The schema or builder for Map values.
+ * @param message - Optional default message for failures in this schema.
  * @returns A builder wrapping a Map schema.
  */
 export function map<TKey extends AnyTypeSchema, TValue extends AnyTypeSchema>(
@@ -69,10 +96,19 @@ export function map<TKey extends AnyTypeSchema, TValue extends AnyTypeSchema>(
 /**
  * Creates a record schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Flags = JIT.record(JIT.string(), JIT.boolean());
+ * JIT.validate.parse(Flags)({ beta: true });
+ * ```
+ *
  * @template TKey - The key schema type.
  * @template TValue - The value schema type.
  * @param key - The schema or builder for record keys.
  * @param value - The schema or builder for record values.
+ * @param message - Optional default message for failures in this schema.
  * @returns A builder wrapping a record schema.
  */
 export function record<TKey extends AnyTypeSchema, TValue extends AnyTypeSchema>(
@@ -90,6 +126,14 @@ export function record<TKey extends AnyTypeSchema, TValue extends AnyTypeSchema>
 
 /**
  * Creates a tuple schema builder.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Entry = JIT.tuple(JIT.string(), JIT.number());
+ * JIT.validate.parse(Entry)(["ada", 10]);
+ * ```
  *
  * @template TItems - The tuple item schema inputs.
  * @param items - The tuple item schemas or builders.

@@ -4,6 +4,7 @@ import { TypeName } from "../core/ats/index.js";
 import { DomainAssertionError, type ValidationIssue } from "../errors/index.js";
 import { type CompiledArtifact, getArtifact } from "../runtime/artifact-registry.js";
 
+/** One nested factory error candidate considered during policy selection. */
 export interface NestedErrorCandidate {
   readonly priority: number;
   readonly depth: number;
@@ -26,6 +27,7 @@ interface NestedErrorWalk {
   order: number;
 }
 
+/** Collects nested factory errors in schema order without evaluating them. */
 export function collectNestedErrorCandidates(schema: ATS.AnyTypeSchema): readonly NestedErrorCandidate[] {
   const walk: NestedErrorWalk = { candidates: [], active: new Set<ATS.AnyTypeSchema>(), order: 0 };
   visitNestedSchema(schema, [], 0, walk);

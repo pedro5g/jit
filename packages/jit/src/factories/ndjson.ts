@@ -17,7 +17,18 @@ import type { RulePredicate } from "./rules.js";
 
 type NdjsonPick<TValue, TKeys extends keyof TValue> = { readonly [TKey in TKeys]: TValue[TKey] };
 
-/** Provides the JIT ndjson parse plan operation for the supplied input. */
+/**
+ * A compiled NDJSON parser that can validate, filter, project and stream rows.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Row = JIT.object({ id: JIT.int(), active: JIT.boolean() });
+ * const parse = JIT.ndjson.parse(Row).validate();
+ * parse('{"id":1,"active":true}\n');
+ * ```
+ */
 export interface NdjsonParsePlan<TRow, TOutput = TRow> {
   /** Parses newline-delimited JSON into an array of rows. */
   (input: NdjsonInput): TOutput[];
@@ -48,7 +59,18 @@ export interface NdjsonParsePlan<TRow, TOutput = TRow> {
   };
 }
 
-/** Provides the JIT ndjson stringify plan operation for the supplied input. */
+/**
+ * A compiled NDJSON serializer with eager and iterator sinks.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Row = JIT.object({ id: JIT.int() });
+ * const stringify = JIT.ndjson.stringify(Row);
+ * stringify([{ id: 1 }]); // '{"id":1}\n'
+ * ```
+ */
 export interface NdjsonStringifyPlan<TRow> {
   /** Serializes rows as newline-delimited JSON. */
   (value: readonly TRow[]): string;
@@ -114,13 +136,31 @@ function stringify<TSchema extends ATS.AnyTypeSchema>(
   return result;
 }
 
-/** Describes the JIT ndjson namespace contract used by the public API. */
+/**
+ * The NDJSON parse and stringify factories exposed by `JIT.ndjson`.
+ *
+ * @example
+ * ```ts
+ * const rows = JIT.ndjson.parse(RowSchema)('{"id":1}\n');
+ * ```
+ */
 export interface NdjsonNamespace {
   readonly parse: typeof parse;
   readonly stringify: typeof stringify;
 }
 
-/** Provides the JIT ndjson operation for the supplied input. */
+/**
+ * NDJSON transport plans compiled from one row schema.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Row = JIT.object({ id: JIT.int() });
+ * const parse = JIT.ndjson.parse(Row);
+ * parse('{"id":1}\n');
+ * ```
+ */
 export const ndjson: NdjsonNamespace = Object.freeze({ parse, stringify });
 
 export type { NdjsonChunk, NdjsonInput } from "../compiler/ndjson.js";

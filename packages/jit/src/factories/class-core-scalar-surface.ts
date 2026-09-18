@@ -3,8 +3,8 @@ import { createSchema, TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { installScalarExtension } from "./class-core-scalar-extensions.js";
-import type { InstalledScalarMethod, ScalarClassSeed } from "./class-core-state.js";
-import { installFactory, resolveFactoryOption } from "./class-core-support.js";
+import type { ScalarClassSeed, ScalarConfigurationState } from "./class-core-state.js";
+import { assertConstructionConfiguration, installFactory, resolveFactoryOption } from "./class-core-support.js";
 import { CLASS_TARGET } from "./class-core-symbols.js";
 import {
   createClassExtensionBuilder,
@@ -12,13 +12,7 @@ import {
   isClassExtensionFactory,
   isClassMixin,
 } from "./class-extensions.js";
-import {
-  applyValidationPolicy,
-  clonePolicyState,
-  type FactoryPolicyState,
-  policyArtifact,
-  runtimeTypeTraits,
-} from "./class-policy.js";
+import { applyValidationPolicy, clonePolicyState, policyArtifact, runtimeTypeTraits } from "./class-policy.js";
 import type {
   AnyClassCapability,
   AnyClassExtension,
@@ -32,21 +26,11 @@ import type {
   ScalarValueObject,
 } from "./class-types.js";
 
-export interface MutableScalarSurface<TSchema extends ATS.AnyTypeSchema> {
+export interface MutableScalarSurface<TSchema extends ATS.AnyTypeSchema> extends ScalarConfigurationState {
   readonly schema: TSchema;
   readonly identifier: boolean;
   readonly isAbstract: boolean;
   readonly classTarget: ScalarFactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>>;
-  readonly policy: FactoryPolicyState;
-  readonly constructionState: { mode: ConstructionMode };
-  readonly installedCapabilities: string[];
-  readonly installedCapabilityValues: AnyClassCapability[];
-  readonly installedMethods: InstalledScalarMethod[];
-  readonly installedMethodNames: Set<string>;
-  factoryNames: { create: string | false; hydrate: string | false };
-  customFactories: { create?: Function; hydrate?: Function };
-  constructionConfigured: boolean;
-  factoriesConfigured: boolean;
   readonly create: Function;
   readonly hydrate: Function;
   readonly recreate: (seed: ScalarClassSeed) => unknown;
@@ -232,19 +216,7 @@ function configureScalarConstruction<TSchema extends ATS.AnyTypeSchema>(
   state: MutableScalarSurface<TSchema>,
   mode: ConstructionMode
 ): ScalarFactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>> {
-  if (state.constructionConfigured)
-    throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
-  if (state.factoriesConfigured)
-    throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
-  if (mode !== "constructor" && mode !== "factory") {
-    throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
-  }
-  if (state.isAbstract && mode === "constructor") {
-    throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
-  }
-  if (state.policy.configured) {
-    throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
-  }
+  assertConstructionConfiguration(state, mode);
   state.constructionConfigured = true;
   state.constructionState.mode = mode;
   if (mode === "factory") {

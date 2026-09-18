@@ -80,5 +80,19 @@ export interface ScalarClassSeed {
   readonly factoriesConfigured?: boolean;
 }
 
+/** @internal Mutable configuration shared by scalar runtime surfaces. */
+export interface ScalarConfigurationState {
+  readonly policy: FactoryPolicyState;
+  readonly constructionState: { mode: ConstructionMode };
+  readonly installedCapabilities: string[];
+  readonly installedCapabilityValues: AnyClassCapability[];
+  readonly installedMethods: InstalledScalarMethod[];
+  readonly installedMethodNames: Set<string>;
+  factoryNames: { create: string | false; hydrate: string | false };
+  customFactories: { create?: Function; hydrate?: Function };
+  constructionConfigured: boolean;
+  factoriesConfigured: boolean;
+}
+
 /** @internal Serializable method metadata retained for scalar class artifacts. */
 export type InstalledScalarMethod = ClassMethodDefinition;

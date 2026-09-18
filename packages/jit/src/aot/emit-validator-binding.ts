@@ -1,4 +1,4 @@
-import { emitValidator } from "../compiler/validate/emit-validate.js";
+import { emitValidator } from "../compiler/validate/emit-validator-entry.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SkippedOperation } from "./generate.js";
 

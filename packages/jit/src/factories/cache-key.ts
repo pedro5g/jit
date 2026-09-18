@@ -16,7 +16,16 @@ const HASH_HELPERS = Object.freeze({
   __hashUnknown: hashUnknown,
 });
 
-/** Provides the JIT cache key builder operation for the supplied input. */
+/**
+ * Builds a schema-specialized cache-key selector.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.object({ tenantId: JIT.string(), id: JIT.number() });
+ * const key = JIT.cacheKey(User).select("tenantId", "id");
+ * key({ tenantId: "acme", id: 7 }); // "acme:7"
+ * ```
+ */
 export interface CacheKeyBuilder<TValue, TKey> {
   /** Builds the key from the named fields, in the order given. */
   select<const TPaths extends readonly ProjectablePath<TValue>[]>(...paths: TPaths): (value: TValue) => TKey;
@@ -32,6 +41,13 @@ export interface CacheKeyBuilder<TValue, TKey> {
  *
  * `string` produces a readable, stable key; `hash` produces a 32-bit integer
  * and never builds a string at all.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.object({ tenantId: JIT.string(), id: JIT.number() });
+ * const key = JIT.cacheKey.hash(User).select("tenantId", "id");
+ * key({ tenantId: "acme", id: 7 }); // a number
+ * ```
  */
 export const cacheKey = Object.assign(
   <TSchema extends ATS.AnyTypeSchema>(

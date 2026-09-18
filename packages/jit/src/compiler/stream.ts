@@ -4,6 +4,7 @@ import { JITError } from "../errors/index.js";
 import { JITValidationError, type ValidationIssue } from "../errors/validation-error.js";
 import type { CompileCacheOptions } from "../runtime/cache/compile-cache.js";
 import { ArrayBoundaryScanner, ValueBoundaryScanner } from "../runtime/stream/boundary-scanner.js";
+import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { compileValidator } from "./validate.js";
 
 type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
@@ -46,26 +47,7 @@ interface SchemaCheckRecord {
 }
 
 function resolveRoot(schema: ATS.AnyTypeSchema): AnySchema {
-  let current = schema as AnySchema;
-
-  while (true) {
-    switch (current.type) {
-      case TypeName.default:
-      case TypeName.brand:
-      case TypeName.readonly:
-      case TypeName.refine:
-      case TypeName.coerce:
-      case TypeName.pipe:
-      case TypeName.transform:
-        current = current.def.innerType as AnySchema;
-        continue;
-      case TypeName.lazy:
-        current = (current.def.getter as () => AnySchema)();
-        continue;
-      default:
-        return current;
-    }
-  }
+  return resolveWrappers(schema).base as AnySchema;
 }
 
 /** First-byte gate: the character class the schema root demands, if rigid. */

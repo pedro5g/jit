@@ -14,8 +14,18 @@ type BuilderShape<TShape extends Record<string, SchemaInput>> = {
 /**
  * Creates an object schema builder from a property shape.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const User = JIT.object({ id: JIT.int(), name: JIT.string().min(1) });
+ * const parseUser = JIT.validate.parse(User);
+ * parseUser({ id: 1, name: "Ada" });
+ * ```
+ *
  * @template TShape - The schema-input shape used to infer object properties.
  * @param shape - Object properties mapped to schemas or builders.
+ * @param message - Optional default message for failures in this schema.
  * @returns A builder wrapping an object schema.
  */
 export function object<const TShape extends Record<string, SchemaInput>>(

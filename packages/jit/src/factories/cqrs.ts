@@ -35,13 +35,32 @@ import {
 } from "./query.js";
 import type { RulePredicate } from "./rules.js";
 
-/** Provides the JIT standard query operation for the supplied input. */
+/**
+ * Portable V1 query envelope emitted by a trusted CQRS query.
+ *
+ * @example
+ * ```ts
+ * const query = JIT.cqrs.query(Users).filter((where) => where.eq("active", true));
+ * const portable: JIT.StandardQuery = query["~query"];
+ * ```
+ */
 export interface StandardQuery {
   readonly version: 1;
   readonly definition: StandardQueryDefinition;
 }
 
-/** Portable V1 description; deliberately independent from JIT's execution IR. */
+/**
+ * Portable V1 description; deliberately independent from JIT's execution IR.
+ *
+ * @example
+ * ```ts
+ * const definition: JIT.StandardQueryDefinition = {
+ *   source: { kind: "object", fields: ["id"] },
+ *   pipeline: [],
+ *   params: [],
+ * };
+ * ```
+ */
 export interface StandardQueryDefinition {
   readonly source: {
     readonly kind: "object";
@@ -59,7 +78,14 @@ export interface StandardQueryDefinition {
   readonly params: readonly string[];
 }
 
-/** Provides the JIT standard query step operation for the supplied input. */
+/**
+ * One semantic step in a portable query pipeline.
+ *
+ * @example
+ * ```ts
+ * const step: JIT.StandardQueryStep = { kind: "select", fields: ["id"] };
+ * ```
+ */
 export type StandardQueryStep =
   | { readonly kind: "where"; readonly condition: StandardQueryCondition }
   | { readonly kind: "select"; readonly fields: readonly string[] }
@@ -113,14 +139,33 @@ export type StandardQueryStep =
       readonly rightKey: string;
     };
 
-/** Provides the JIT standard query value operation for the supplied input. */
+/**
+ * A field, literal, binding or request parameter used by a portable query.
+ *
+ * @example
+ * ```ts
+ * const value: JIT.StandardQueryValue = { kind: "field", path: ["id"] };
+ * ```
+ */
 export type StandardQueryValue =
   | { readonly kind: "field"; readonly path: readonly string[] }
   | { readonly kind: "literal"; readonly value: unknown }
   | { readonly kind: "binding"; readonly name: string }
   | { readonly kind: "param"; readonly name: string };
 
-/** Provides the JIT standard query condition operation for the supplied input. */
+/**
+ * A portable comparison or logical query condition.
+ *
+ * @example
+ * ```ts
+ * const condition: JIT.StandardQueryCondition = {
+ *   kind: "compare",
+ *   operator: "eq",
+ *   left: { kind: "field", path: ["id"] },
+ *   right: { kind: "literal", value: 1 },
+ * };
+ * ```
+ */
 export type StandardQueryCondition =
   | {
       readonly kind: "compare";
@@ -140,7 +185,18 @@ type QueryBoundaryOperators<TValue> = [QueryOperatorsFor<TValue>] extends [never
   ? never
   : true | readonly QueryOperatorsFor<TValue>[];
 
-/** Describes the JIT cqrs input options contract used by the public API. */
+/**
+ * Describes the allowlist and structural budgets for a public query boundary.
+ *
+ * @example
+ * ```ts
+ * const options: JIT.CqrsInputOptions<typeof Users.schema> = {
+ *   select: ["id"],
+ *   filter: { active: true },
+ *   limits: { maxConditions: 4 },
+ * };
+ * ```
+ */
 export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
   readonly filter?: Partial<{
     readonly [TKey in Extract<keyof ATS.TypeofSchema<TSchema>, string>]: QueryBoundaryOperators<
@@ -179,7 +235,15 @@ export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
   };
 }
 
-/** Describes the JIT cqrs input contract used by the public API. */
+/**
+ * A deny-by-default request boundary and its portable query metadata.
+ *
+ * @example
+ * ```ts
+ * const boundary = JIT.api.query(Users, { select: ["id"] });
+ * boundary.explain().cost;
+ * ```
+ */
 export interface CqrsInput<TSchema extends ATS.AnyTypeSchema> {
   readonly schema: TSchema;
   readonly options: CqrsInputOptions<TSchema>;
@@ -190,7 +254,15 @@ export interface CqrsInput<TSchema extends ATS.AnyTypeSchema> {
 
 /** Offset pagination is bounded by default; deep pages are the common amplification. */
 
-/** Structural dynamic-query definition that adapters may inspect without importing JIT. */
+/**
+ * Structural dynamic-query definition that adapters may inspect without importing JIT.
+ *
+ * @example
+ * ```ts
+ * const portable: JIT.StandardQueryInput = boundary["~query"];
+ * portable.version; // 1
+ * ```
+ */
 export interface StandardQueryInput {
   readonly version: 1;
   readonly definition: {
@@ -220,7 +292,15 @@ export interface StandardQueryInput {
     };
   };
 }
-/** Describes the JIT cqrs input condition contract used by the public API. */
+/**
+ * One parsed request condition at the public query boundary.
+ *
+ * @example
+ * ```ts
+ * const parsed = JIT.api.parse(boundary)({ filter: { active: true } });
+ * const condition: JIT.CqrsInputCondition | undefined = parsed.filter[0];
+ * ```
+ */
 export interface CqrsInputCondition {
   readonly kind: string;
   readonly path: readonly string[];
@@ -232,6 +312,12 @@ export interface CqrsInputCondition {
  * The filter is the portable condition of the V1 protocol: the request's own
  * predicate and the actor's row predicate joined with `and`. No access node
  * crosses this boundary — an adapter receives an ordinary query.
+ *
+ * @example
+ * ```ts
+ * const authorize = JIT.api.authorize(boundary, ability, "read");
+ * const request: JIT.AuthorizedApiRequest = authorize({ select: ["id"] });
+ * ```
  */
 export interface AuthorizedApiRequest {
   readonly filter?: StandardQueryCondition;
@@ -243,7 +329,15 @@ export interface AuthorizedApiRequest {
   readonly pagination?: ParsedCqrsInput["pagination"];
 }
 
-/** Describes the JIT parsed cqrs input contract used by the public API. */
+/**
+ * Parsed and normalized request input produced by a CQRS boundary.
+ *
+ * @example
+ * ```ts
+ * const parsed: JIT.ParsedCqrsInput = JIT.api.parse(boundary)({ select: ["id"] });
+ * parsed.select; // ["id"]
+ * ```
+ */
 export interface ParsedCqrsInput {
   readonly filter: readonly CqrsInputCondition[];
   readonly select?: readonly string[];
@@ -304,7 +398,15 @@ type JoinResult<TLeft, TRight, TKind extends QueryJoinKind> = TKind extends "sem
     ? LeftJoinPair<TLeft, TRight>[]
     : JoinPair<TLeft, TRight>[];
 
-/** Describes the JIT cqrs join on builder contract used by the public API. */
+/**
+ * Selects compatible fields for a typed collection join.
+ *
+ * @example
+ * ```ts
+ * const join = JIT.cqrs.query(Orders).join(Customers).on("customerId", "id");
+ * join(orders, customers);
+ * ```
+ */
 export interface CqrsJoinOnBuilder<
   TLeftSchema extends ATS.AnyTypeSchema,
   TRightSchema extends ATS.AnyTypeSchema,
@@ -318,7 +420,15 @@ export interface CqrsJoinOnBuilder<
   >(leftKey: TLeftKey, rightKey: TRightKey): CqrsJoinedQuery<TLeftSchema, TRightSchema, TKind, TParams>;
 }
 
-/** Describes the JIT cqrs joined query contract used by the public API. */
+/**
+ * Compiled join over two collection inputs.
+ *
+ * @example
+ * ```ts
+ * const join = JIT.cqrs.query(Orders).join(Customers).on("customerId", "id");
+ * const pairs = join(orders, customers);
+ * ```
+ */
 export type CqrsJoinedQuery<
   TLeftSchema extends ATS.AnyTypeSchema,
   TRightSchema extends ATS.AnyTypeSchema,
@@ -461,7 +571,17 @@ interface CqrsQueryOps<
     outputMode?: "eager-array" | "generator" | "async-generator" | "visitor"
   ): ReturnType<QueryBuilder<ATS.ArraySchema<TSchema>, TOutput, TResult, TParams>["explain"]>;
 }
-/** Provides the JIT cqrs query operation for the supplied input. */
+/**
+ * A typed CQRS query chain with portable output metadata.
+ *
+ * @example
+ * ```ts
+ * const activeIds = JIT.cqrs.query(Users)
+ *   .filter((query) => query.eq("active", true))
+ *   .select("id");
+ * activeIds(users); // [{ id: 1 }, ...]
+ * ```
+ */
 export type CqrsQuery<
   TSchema extends ATS.AnyTypeSchema,
   TOutput = Row<TSchema>,
@@ -491,7 +611,15 @@ export type { CqrsQueryFor } from "./cqrs-query.js";
 /** Builds a typed CQRS query chain over a schema or a binary collection. */
 export { cqrsQuery };
 
-/** Provides the JIT cqrs input operation for the supplied input. */
+/**
+ * Declares a deny-by-default query boundary for untrusted input.
+ *
+ * @example
+ * ```ts
+ * const boundary = JIT.api.query(Users, { select: ["id"], filter: { active: true } });
+ * const parse = JIT.api.parse(boundary);
+ * ```
+ */
 export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   options: CqrsInputOptions<TSchema>
@@ -501,7 +629,15 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
   return result.input;
 }
 
-/** Reference normalizer for dynamic input; later lowered to specialized source. */
+/**
+ * Compiles a boundary parser for dynamic request input.
+ *
+ * @example
+ * ```ts
+ * const boundary = JIT.api.query(Users, { select: ["id"] });
+ * const parsed = JIT.api.parse(boundary)({ select: ["id"] });
+ * ```
+ */
 export function cqrsParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInput<TSchema>) {
   const boundary = getCqrsBoundary(definition);
   if (!boundary) throw new JITError("INVALID_QUERY", "API query boundary is missing its semantic descriptor");
@@ -528,6 +664,12 @@ export function cqrsParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInp
  * its row predicate. Only the actor's own values are read per request, so a
  * request costs one parse and one predicate construction rather than a walk
  * over the rule set.
+ *
+ * @example
+ * ```ts
+ * const authorize = JIT.api.authorize(boundary, ability, "read");
+ * const request = authorize({ select: ["id"] });
+ * ```
  */
 export function cqrsAuthorize<TSchema extends ATS.AnyTypeSchema, TAction extends string, TActor>(
   definition: CqrsInput<TSchema>,
@@ -612,6 +754,11 @@ export function emitCqrsAuthorizedParser(
  * One reduction inside a composite aggregate. The phantom `_result` carries
  * the field's result type; it is `null` at runtime, like every other phantom
  * in the schema AST.
+ *
+ * @example
+ * ```ts
+ * const spec: JIT.CqrsAggregateSpec<number> = { op: "sum", key: "amount", _result: null as never };
+ * ```
  */
 export interface CqrsAggregateSpec<TResult = number> {
   readonly op: QueryAggregateOperator;
@@ -627,7 +774,15 @@ function aggregateSpec<TResult>(op: QueryAggregateOperator, key?: string): CqrsA
   });
 }
 
-/** Provides the JIT cqrs operation for the supplied input. */
+/**
+ * CQRS query, parameter and aggregate factories.
+ *
+ * @example
+ * ```ts
+ * const query = JIT.cqrs.query(Users).filter((where) => where.eq("active", true));
+ * query(users);
+ * ```
+ */
 export const cqrs = Object.freeze({
   query: cqrsQuery,
   param,

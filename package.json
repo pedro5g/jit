@@ -72,7 +72,7 @@
     "test:watch": "vitest",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:mutation:changed": "QUALITY_MUTATION_SCOPE=changed stryker run stryker.config.mjs",
+    "test:mutation:changed": "node scripts/mutation-changed.mjs",
     "test:mutation:critical": "QUALITY_MUTATION_SCOPE=critical stryker run stryker.config.mjs",
     "test:mutation:full": "QUALITY_MUTATION_SCOPE=full stryker run stryker.config.mjs",
     "quality": "tsx tools/quality/cli.ts",

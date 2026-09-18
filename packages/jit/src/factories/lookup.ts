@@ -11,10 +11,29 @@ type RowKey<TSchema extends ATS.AnyTypeSchema> = Extract<keyof RowOf<TSchema>, s
 /** A `Date` key is looked up by the `Date` itself; the timestamp is read for you. */
 type LookupKeyValue<TRow, TKey extends keyof TRow> = TRow[TKey];
 
-/** Returns the JIT lookup plan result for the supplied input. */
+/**
+ * A compiled lookup plan that returns one row for a key.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Users = JIT.array(JIT.object({ id: JIT.int(), name: JIT.string() })).keyed("id");
+ * const findUser = JIT.lookup(Users).by("id");
+ * findUser([{ id: 1, name: "Ada" }], 1);
+ * ```
+ */
 export interface LookupPlan<TRow, TKey> extends CompiledLookup<TRow, TKey> {}
 
-/** Returns the JIT lookup builder result for the supplied input. */
+/**
+ * Builds a schema-specialized lookup plan and lets the schema facts choose its access path.
+ *
+ * @example
+ * ```ts
+ * const findUser = JIT.lookup(Users).by("id");
+ * findUser(rows, 1);
+ * ```
+ */
 export interface LookupBuilder<TSchema extends ATS.AnyTypeSchema>
   extends LookupPlan<RowOf<TSchema>, RowOf<TSchema>[RowKey<TSchema>]> {
   /** Selects the row field used for lookup. */
@@ -26,6 +45,15 @@ export interface LookupBuilder<TSchema extends ATS.AnyTypeSchema>
  * `.by()` names one, and the access path — cached index, binary search or an
  * early-exit scan — is chosen from those same facts. The caller never names an
  * algorithm; `explain()` reports which one was chosen.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Users = JIT.array(JIT.object({ id: JIT.int() }));
+ * const findUser = JIT.lookup(Users).by("id");
+ * findUser([{ id: 1 }], 1); // { id: 1 }
+ * ```
  */
 export function lookup<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): LookupBuilder<TSchema> {
   const unwrapped = unwrapSchema(schema);

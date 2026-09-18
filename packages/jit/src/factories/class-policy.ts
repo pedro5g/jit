@@ -20,16 +20,17 @@ import type { AssertionOptions, FactoryFailure, FactoryValidationOptions } from 
 import type { NestedErrorCandidate } from "./class-policy-nested-errors.js";
 import { createConditionBuilder, type QueryConditionBuilder } from "./query.js";
 
+/** Internal marker carried by the allocation-free `either` failure result. */
 export const FACTORY_FAILURE: unique symbol = Symbol.for("jit.factory.failure") as never;
 
-export interface AssertionOutcome {
+interface AssertionOutcome {
   readonly errorIndex?: number;
   readonly issues?: readonly AssertionIssue[];
 }
 
-export type { NestedErrorCandidate } from "./class-policy-nested-errors.js";
 export { collectNestedErrorCandidates } from "./class-policy-nested-errors.js";
 
+/** Mutable declaration-time policy state shared by create and hydrate. */
 export interface FactoryPolicyState {
   mode: FactoryReturnMode;
   resultModeExplicit: boolean;
@@ -72,6 +73,7 @@ function createPolicyState(): FactoryPolicyState {
   };
 }
 
+/** Clones policy configuration while preserving independent assertion arrays. */
 export function clonePolicyState(source: FactoryPolicyState | undefined): FactoryPolicyState {
   if (source === undefined) return createPolicyState();
 
@@ -83,6 +85,7 @@ export function clonePolicyState(source: FactoryPolicyState | undefined): Factor
   };
 }
 
+/** Creates the immutable Runtime Type traits stored in a schema node. */
 export function runtimeTypeTraits<TRepresentation extends "object" | "value", TIdentifier extends boolean>(
   representation: TRepresentation,
   identifier: TIdentifier,
@@ -161,12 +164,14 @@ function compileAssertions(policy: FactoryPolicyState): void {
   };
 }
 
+/** Applies the declared success result mode to one factory value. */
 export function policySuccess(policy: FactoryPolicyState, value: unknown): unknown {
   if (policy.mode === "either") return value;
   if (policy.mode === "tuple") return [null, value];
   return value;
 }
 
+/** Applies the declared failure result mode to one factory error. */
 export function policyFailure(policy: FactoryPolicyState, error: unknown): never | unknown {
   if (policy.mode === "either") {
     return Object.defineProperties({ ok: false, error }, { [FACTORY_FAILURE]: { enumerable: false, value: true } });
@@ -183,6 +188,7 @@ export function isFailure<TError>(value: unknown): value is FactoryFailure<TErro
   );
 }
 
+/** Selects the highest-priority configured error for the reported issue paths. */
 export function policyError(policy: FactoryPolicyState, issues: readonly ValidationIssue[]): unknown {
   let selected:
     | {
@@ -273,8 +279,10 @@ export function policyArtifact(policy: FactoryPolicyState): {
   };
 }
 
+/** Reconstructive policy metadata emitted for a configured Runtime Class. */
 export type ClassPolicyArtifact = NonNullable<Extract<CompiledArtifact, { readonly kind: "class" }>["policy"]>;
 
+/** Result shape used by diagnostic factory validation. */
 export type SafeParse<TValue> =
   | { readonly success: true; readonly data: TValue }
   | { readonly success: false; readonly issues: readonly ValidationIssue[] };

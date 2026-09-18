@@ -31,6 +31,7 @@ import {
   type PhysicalQueryExplain,
   resolvePhysicalQueryPlan,
 } from "./physical-query.js";
+import { serializeQueryNodes, serializeQueryUpdateNode } from "./query-serialization.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 
 /** Name the emitted source uses for the shared per-array index cache. */
@@ -247,7 +248,7 @@ export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = Elemen
   // PERF: cache only the pure template; user bindings are applied per compile.
   const template = getCompileCached(
     schema,
-    `query:${serializeQueryNodes(program.nodes)}`,
+    `query:${serializeQueryNodes(program.nodes, serializeQueryUpdateNode)}`,
     () => {
       const source = emitQuerySource(schema, program);
 
@@ -288,65 +289,6 @@ export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = Elemen
  * Deterministic structural key for a query plan. Binding names participate
  * (they are part of the emitted source); binding values do not.
  */
-function serializeQueryNodes(nodes: readonly QueryNode[]): string {
-  return nodes.map(serializeQueryNode).join(";");
-}
-
-function serializeQueryNode(node: QueryNode): string {
-  switch (node.kind) {
-    case "filter":
-      return `f(${serializeCondition(node.condition)})`;
-    case "select:fields":
-      return `s(${node.fields.join(",")})`;
-    case "unique":
-      return `u(${node.key})`;
-    case "distinct":
-      return `D(${node.fields.join(",")})`;
-    case "keyed":
-      return `k(${node.key})`;
-    case "groupBy":
-      return `g(${node.key})`;
-    case "orderBy":
-      return `o(${node.key},${node.direction})`;
-    case "aggregate":
-      return `a(${node.op},${node.key ?? ""})`;
-    case "aggregate:composite":
-      return `A(${node.fields.map((field) => `${field.name}:${field.op}:${field.key ?? ""}`).join(",")})`;
-    case "terminal":
-      return `t(${node.op})`;
-    case "delete":
-      return "d()";
-    case "update":
-      return `m(${Object.keys(node.patch)
-        .map((key) => `${key}=${node.patch[key]?.name}`)
-        .join(",")})`;
-  }
-}
-
-function serializeCondition(condition: QueryConditionNode): string {
-  switch (condition.kind) {
-    case "compare":
-      return `${condition.op}(${serializeValue(condition.left)},${serializeValue(condition.right)})`;
-    case "logical":
-      return `${condition.op}(${serializeCondition(condition.left)},${serializeCondition(condition.right)})`;
-    case "not":
-      return `not(${serializeCondition(condition.inner)})`;
-  }
-}
-
-function serializeValue(value: QueryValueNode): string {
-  switch (value.kind) {
-    case "field":
-      return `.${value.key}`;
-    case "binding":
-      return `$${value.name}`;
-    case "param":
-      return `p:${value.name}`;
-    case "literal":
-      return `#${typeof value.value}:${String(value.value)}`;
-  }
-}
-
 function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
   const filters: QueryFilterNode[] = [];
   const selects: QuerySelectFieldsNode[] = [];

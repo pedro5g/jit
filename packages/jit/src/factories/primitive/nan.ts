@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates a `NaN` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const MissingNumber = JIT.nan();
+ * JIT.validate.is(MissingNumber)(Number.NaN); // true
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping a NaN schema.
  */
 export function nan(message?: ValidationMessage): Builder<NanSchema> {

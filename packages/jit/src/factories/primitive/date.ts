@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates a `Date` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const CreatedAt = JIT.date();
+ * JIT.validate.is(CreatedAt)(new Date()); // true
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping a Date schema.
  */
 export function date(message?: ValidationMessage): Builder<DateSchema<[]>> {

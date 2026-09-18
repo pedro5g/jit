@@ -1,4 +1,4 @@
-import { canUseFastParse } from "../compiler/validate/emit-validate.js";
+import { canUseFastParse } from "../compiler/validate/emit-validate-support.js";
 import type * as ATS from "../core/ats/index.js";
 import type { CompiledArtifact } from "../runtime/artifact-registry.js";
 import type { SkippedOperation } from "./generate.js";

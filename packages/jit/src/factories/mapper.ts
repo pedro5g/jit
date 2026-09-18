@@ -15,6 +15,12 @@ type RenameSources<TSource, TValue> = {
 /**
  * One target-field mapping rule: a computed callback, a rename, a
  * rename-and-convert, or a default for missing values.
+ *
+ * @example
+ * ```ts
+ * type Source = { firstName: string };
+ * const name: MapperOverride<Source, string> = { from: "firstName" };
+ * ```
  */
 export type MapperOverride<TSource, TValue> =
   | ((source: TSource) => TValue)
@@ -35,6 +41,13 @@ export type MapperOverride<TSource, TValue> =
 /**
  * Override map for `JIT.map()`: target fields with no compatible same-name
  * source field are required; auto-matched fields may still be overridden.
+ *
+ * @example
+ * ```ts
+ * type Source = { firstName: string };
+ * type Target = { name: string };
+ * const overrides: MapperOverrides<Source, Target> = { name: { from: "firstName" } };
+ * ```
  */
 export type MapperOverrides<TSource, TTarget> = {
   readonly [TKey in RequiredOverrideKeys<TSource, TTarget>]: MapperOverride<TSource, TTarget[TKey]>;

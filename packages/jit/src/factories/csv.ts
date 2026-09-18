@@ -10,12 +10,31 @@ import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 
-/** Provides the JIT csv schema options operation for the supplied input. */
+/**
+ * Options for column names and RFC 4180 CSV parsing.
+ *
+ * @example
+ * ```ts
+ * const options: CsvSchemaOptions<User> = { columns: { id: "user_id" } };
+ * const parse = JIT.csv.parse(UserSchema, options);
+ * ```
+ */
 export type CsvSchemaOptions<TRow> = Omit<CsvOptions, "columns"> & {
   readonly columns?: Partial<Record<keyof TRow, string>>;
 };
 
-/** Provides the JIT csv parse plan operation for the supplied input. */
+/**
+ * A compiled CSV parser with eager, iterator and visitor sinks.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Row = JIT.object({ id: JIT.int(), name: JIT.string() });
+ * const parse = JIT.csv.parse(Row);
+ * parse("id,name\n1,Ada\n"); // [{ id: 1, name: "Ada" }]
+ * ```
+ */
 export interface CsvParsePlan<TRow> {
   /** Parses CSV input into rows. */
   (input: CsvInput): TRow[];
@@ -27,7 +46,18 @@ export interface CsvParsePlan<TRow> {
   };
 }
 
-/** Provides the JIT csv stringify plan operation for the supplied input. */
+/**
+ * A compiled CSV serializer with eager and iterator sinks.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Row = JIT.object({ id: JIT.int(), name: JIT.string() });
+ * const stringify = JIT.csv.stringify(Row);
+ * stringify([{ id: 1, name: "Ada" }]); // "id,name\n1,Ada\n"
+ * ```
+ */
 export interface CsvStringifyPlan<TRow> {
   /** Serializes rows to CSV text. */
   (value: readonly TRow[]): string;
@@ -81,13 +111,31 @@ function stringify<TSchema extends ATS.AnyTypeSchema>(
   return result;
 }
 
-/** Describes the JIT csv namespace contract used by the public API. */
+/**
+ * The CSV parse and stringify factories exposed by `JIT.csv`.
+ *
+ * @example
+ * ```ts
+ * const rows = JIT.csv.parse(RowSchema)("id,name\n1,Ada\n");
+ * ```
+ */
 export interface CsvNamespace {
   readonly parse: typeof parse;
   readonly stringify: typeof stringify;
 }
 
-/** RFC 4180 transport plans compiled from an object row schema. */
+/**
+ * RFC 4180 transport plans compiled from an object row schema.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Row = JIT.object({ id: JIT.int(), name: JIT.string() });
+ * const csv = JIT.csv.stringify(Row);
+ * csv([{ id: 1, name: "Ada" }]);
+ * ```
+ */
 export const csv: CsvNamespace = Object.freeze({ parse, stringify });
 
 /** Provides the JIT type operation for the supplied input. */

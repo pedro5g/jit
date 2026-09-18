@@ -3,7 +3,17 @@ import type { Builder } from "../core/builder/index.js";
 import type { Regexes } from "../shared/index.js";
 import { string } from "./primitive/string.js";
 
-/** Returns whether the JIT iso factories condition holds. */
+/**
+ * Factories for ISO-8601 strings.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Birthday = JIT.iso.date();
+ * JIT.validate.is(Birthday)("1990-04-12"); // true
+ * ```
+ */
 export interface IsoFactories {
   /** Strict calendar date in `YYYY-MM-DD` form. */
   date(message?: string): Builder<StringSchema>;
@@ -19,6 +29,14 @@ export interface IsoFactories {
  * String-based ISO schemas grouped independently from native `Date` and the
  * Temporal proposal. Legacy `JIT.string().date/time/datetime/duration()`
  * chains delegate to the same checks and remain supported.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const StartedAt = JIT.iso.datetime();
+ * JIT.validate.is(StartedAt)("2024-01-01T12:00:00Z"); // true
+ * ```
  */
 export const iso: IsoFactories = {
   date: (message) => string().date(message),

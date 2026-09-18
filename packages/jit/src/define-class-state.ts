@@ -5,14 +5,14 @@ import {
   type LifecycleDefinition,
   type ManagedFieldDescriptor,
 } from "./classes/effective-schema.js";
-import { isClassMemberDescriptor } from "./classes/member-descriptors.js";
+import { resolveFactoryOption } from "./classes/factory-option.js";
 import { ResolvedMemberTable } from "./classes/members.js";
 import type { AssertionDescriptor } from "./compiler/assertion.js";
 import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
 import type * as ATS from "./core/ats/index.js";
 import { TypeName } from "./core/ats/index.js";
 import type { SchemaInput } from "./core/builder/index.js";
-import type { FactoryPolicyCandidate, FactoryReturnMode, FactoryReturnModeInput } from "./core/factory-policy.js";
+import type { FactoryReturnMode } from "./core/factory-policy.js";
 import { JITError } from "./errors/index.js";
 import type { ClassCapability, ClassMixin, FactoryOptions } from "./factories/class.js";
 
@@ -22,7 +22,7 @@ export interface DefinedClassMethod {
   readonly source: Function;
 }
 
-export interface DefinedClassAssertionFailure {
+interface DefinedClassAssertionFailure {
   readonly rule: string | undefined;
   readonly field: string | undefined;
   readonly code: string;
@@ -106,7 +106,7 @@ export const DEFINED_RESERVED_MEMBER_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /** @internal Failure used by non-executable define-host artifacts. */
-export const DEFINE_EXECUTION_ERROR =
+const DEFINE_EXECUTION_ERROR =
   "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead.";
 
 export function defineArtifactFailure(): never {
@@ -174,7 +174,7 @@ export function definedCapabilityMembers(value: DefinedCapability): readonly str
   return value.__memberNames ?? [];
 }
 
-export function isDefinedSchema(value: unknown): value is ATS.AnyTypeSchema {
+function isDefinedSchema(value: unknown): value is ATS.AnyTypeSchema {
   return typeof value === "object" && value !== null && "type" in value && "def" in value;
 }
 
@@ -194,21 +194,5 @@ export function resolveDefinedFactoryName(
   fallback: string,
   phase: "create" | "hydrate"
 ): { readonly name: string | false; readonly implementation?: Function } {
-  if (option === undefined) return { name: fallback };
-  if (typeof option === "object") {
-    if (!isClassMemberDescriptor(option) || option.definition.kind !== "factory") {
-      throw new JITError("CLASS_FACTORY_CONFLICT", "Invalid class factory descriptor");
-    }
-    if (option.definition.phase !== phase) {
-      throw new JITError(
-        "CLASS_FACTORY_CONFLICT",
-        `A ${option.definition.phase} factory descriptor cannot configure ${phase}`
-      );
-    }
-    return { name: option.definition.name, implementation: option.definition.implementation };
-  }
-  return { name: option };
+  return resolveFactoryOption(option, fallback, phase);
 }
-
-export type DefinedFactoryPolicyCandidate = FactoryPolicyCandidate;
-export type DefinedFactoryReturnModeInput = FactoryReturnModeInput;

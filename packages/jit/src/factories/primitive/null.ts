@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates a `null` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Empty = JIT.null();
+ * JIT.validate.parse(Empty)(null); // null
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping a null schema.
  */
 function nullType(message?: ValidationMessage): Builder<NullSchema> {

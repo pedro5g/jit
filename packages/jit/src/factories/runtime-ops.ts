@@ -46,10 +46,29 @@ export type {
 } from "./execution.js";
 export { from } from "./execution.js";
 
-/** A direct callable artifact; `.compile()` is only an optional warm-up hook. */
+/**
+ * A direct callable artifact; `.compile()` is only an optional warm-up hook.
+ *
+ * @example
+ * ```ts
+ * const parse: JIT.RuntimeCompiledFunction<(value: unknown) => User> = JIT.validate.parse(User);
+ * parse({ id: 1 });
+ * ```
+ */
 export type RuntimeCompiledFunction<TFunction extends (...args: never[]) => unknown> = CallableArtifact<TFunction>;
 
-/** Async validation, for schemas that contain promises or async refinements. */
+/**
+ * Async validation, for schemas that contain promises or async refinements.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Result = JIT.promise(JIT.number());
+ * const parseResult = JIT.validate.async.parse(Result);
+ * await parseResult(Promise.resolve(200));
+ * ```
+ */
 export interface AsyncValidateNamespace {
   /** Compiles asynchronous validation that resolves with the parsed value. */
   parse<TSchema extends ATS.AnyTypeSchema>(
@@ -70,6 +89,15 @@ export interface AsyncValidateNamespace {
  *
  * Every artifact it returns is a Standard Schema (`~standard`), so it can be
  * handed directly to any consumer in the ecosystem.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const User = JIT.object({ id: JIT.int() });
+ * const result = JIT.validate.safeParse(User)({ id: "wrong" });
+ * if (!result.success) result.issues;
+ * ```
  */
 export interface ValidateNamespace {
   /** Compiles a boolean type guard for the schema. */
@@ -103,7 +131,14 @@ export interface ValidateNamespace {
   readonly async: AsyncValidateNamespace;
 }
 
-/** Describes the JIT validation diagnostic options contract used by the public API. */
+/**
+ * Limits how many independent issues diagnostic validation collects.
+ *
+ * @example
+ * ```ts
+ * const parse = JIT.validate.safeParse(User, { maxIssues: 3 });
+ * ```
+ */
 export interface ValidationDiagnosticOptions {
   readonly maxIssues?: number;
 }
@@ -128,7 +163,18 @@ function safeParseAsync<TSchema extends ATS.AnyTypeSchema>(
   >;
 }
 
-/** Capability namespace for validation. It has no compile-selection chain. */
+/**
+ * Capability namespace for validation. It has no compile-selection chain.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const User = JIT.object({ id: JIT.int() });
+ * const parseUser = JIT.validate.parse(User);
+ * parseUser({ id: 1 });
+ * ```
+ */
 export const validate: ValidateNamespace = Object.freeze({
   is<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
     return validationArtifact(schema, "is") as StandardArtifact<
@@ -154,7 +200,24 @@ export const validate: ValidateNamespace = Object.freeze({
   }),
 });
 
-/** Describes the JIT json namespace contract used by the public API. */
+/**
+ * JSON parsing and serialization operations specialized for one schema.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const User = JIT.object({ id: JIT.int() });
+ * const parseUser = JIT.json.parse(User);
+ * parseUser('{"id":1}');
+ * ```
+ *
+ * @example
+ * ```ts
+ * const parse = JIT.json.parse(User);
+ * parse('{"id":1}');
+ * ```
+ */
 export interface JsonNamespace {
   /** Returns the recursive schema for JSON-compatible values. */
   value(message?: ValidationMessage): Builder<ATS.JsonSchema>;
@@ -171,7 +234,17 @@ export interface JsonNamespace {
   ): ExecutionArtifact<ATS.TypeofSchema<TSchema>, IterableIterator<string>>;
 }
 
-/** JSON is a capability namespace; `value()` keeps the JSON-value schema explicit. */
+/**
+ * JSON is a capability namespace; `value()` keeps the JSON-value schema explicit.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const stringifyUser = JIT.json.stringify(JIT.object({ id: JIT.int() }));
+ * stringifyUser({ id: 1 }); // '{"id":1}'
+ * ```
+ */
 export const json: JsonNamespace = Object.freeze({
   value: jsonValue,
   parse: jsonParse,
@@ -196,7 +269,25 @@ export const json: JsonNamespace = Object.freeze({
   },
 });
 
-/** Describes the JIT binary namespace contract used by the public API. */
+/**
+ * Binary encoding and decoding operations specialized for one schema.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const User = JIT.object({ id: JIT.int() });
+ * const codec = JIT.binary.codec(User);
+ * const bytes = codec.encode({ id: 1 });
+ * codec.decode(bytes); // { id: 1 }
+ * ```
+ *
+ * @example
+ * ```ts
+ * const codec = JIT.binary.codec(User);
+ * codec.decode(codec.encode({ id: 1 }));
+ * ```
+ */
 export interface BinaryNamespace {
   /** Encodes a value into the schema's binary wire representation. */
   encode<TSchema extends ATS.AnyTypeSchema>(
@@ -213,7 +304,17 @@ export interface BinaryNamespace {
   ): CompiledCodec<ATS.TypeofSchema<TSchema>>;
 }
 
-/** Persisted binary codec capability. Binary rowsets remain under `process`. */
+/**
+ * Persisted binary codec capability. Binary rowsets remain under `process`.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const codec = JIT.binary.codec(JIT.string());
+ * codec.decode(codec.encode("jit")); // "jit"
+ * ```
+ */
 export const binary: BinaryNamespace = Object.freeze({
   encode: binaryEncode,
   decode: binaryDecode,
@@ -239,7 +340,18 @@ type SelectablePath<TValue, TDepth extends readonly unknown[] = []> = TDepth["le
           }[Extract<keyof TValue, string>]
         : never;
 
-/** Describes the JIT selectable equal contract used by the public API. */
+/**
+ * A schema-aware equality function with optional field selection.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const User = JIT.object({ id: JIT.int(), name: JIT.string() });
+ * const sameId = JIT.compare.equal(User).select("id");
+ * sameId({ id: 1, name: "Ada" }, { id: 1, name: "Grace" }); // true
+ * ```
+ */
 export interface SelectableEqual<TValue> extends RuntimeCompiledFunction<Equal<TValue>> {
   /**
    * Compares only the named fields. The other fields are not read, not
@@ -281,6 +393,16 @@ function equal<TSchema extends ATS.AnyTypeSchema>(
  * `has` is the reason the result is a number: testing one field is a single
  * bitwise `and`, where a `{ field: boolean }` result would have allocated an
  * object per comparison to answer it.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const User = JIT.object({ id: JIT.int(), name: JIT.string() });
+ * const changed = JIT.compare.changed(User).select("name");
+ * const mask = changed({ id: 1, name: "Ada" }, { id: 1, name: "Grace" });
+ * changed.has(mask, "name"); // true
+ * ```
  */
 export interface ChangedMask<TValue, TPath extends string, TMask> {
   /** Compares two values and returns the watched-field bitmask. */
@@ -291,7 +413,16 @@ export interface ChangedMask<TValue, TPath extends string, TMask> {
   readonly fields: readonly TPath[];
 }
 
-/** Describes the JIT changed builder contract used by the public API. */
+/**
+ * Builder for schema-specialized changed-field masks.
+ *
+ * @example
+ * ```ts
+ * const changed = JIT.compare.changed(User).select("name");
+ * const mask = changed(userA, userB);
+ * changed.has(mask, "name");
+ * ```
+ */
 export interface ChangedBuilder<TValue> extends ChangedMask<TValue, SelectablePath<TValue>, number> {
   /**
    * Watches only the named fields. Bit order follows the order given here.
@@ -334,7 +465,18 @@ function createChangedMask(schema: ATS.AnyTypeSchema, paths: readonly string[]) 
   return compiled as ChangedMask<unknown, string, number>;
 }
 
-/** Provides the JIT clone operation for the supplied input. */
+/**
+ * Compiles immutable cloning for a schema.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const User = JIT.object({ id: JIT.int(), tags: JIT.array(JIT.string()) });
+ * const cloneUser = JIT.clone(User);
+ * const copy = cloneUser({ id: 1, tags: ["jit"] });
+ * ```
+ */
 export function clone<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Clone<ATS.TypeofSchema<TSchema>>> {
@@ -362,12 +504,32 @@ function hash<TSchema extends ATS.AnyTypeSchema>(
 /**
  * Compiles a deterministic sample generator. Values satisfy the same checks
  * the validator enforces, so fixtures cannot drift from the schema.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const User = JIT.object({ id: JIT.int(), name: JIT.string() });
+ * const sample = JIT.mock(User)();
+ * JIT.validate.is(User)(sample); // true
+ * ```
  */
 export function mock<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): Mock<ATS.TypeofSchema<TSchema>> {
   return compileMock<ATS.TypeofSchema<TSchema>>(unwrapSchema(schema));
 }
 
-/** Provides the JIT format operation for the supplied input. */
+/**
+ * Compiles formatting for a string schema's declared checks.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Code = JIT.string().trim().uppercase();
+ * const formatCode = JIT.format(Code);
+ * formatCode(" jit "); // "JIT"
+ * ```
+ */
 export function format<TSchema extends ATS.StringSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Format> {
@@ -386,9 +548,29 @@ function sanitize<TSchema extends ATS.AnyTypeSchema>(
   return operationArtifact(schema, "sanitize", "value", "value", compileSanitize);
 }
 
-/** Structural comparison capability: one schema in, one compiled function out. */
+/**
+ * Structural comparison capability: one schema in, one compiled function out.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const same = JIT.compare.equal(JIT.array(JIT.int()));
+ * same([1, 2], [1, 2]); // true
+ * ```
+ */
 export const compare = Object.freeze({ equal, diff, hash, changed });
-/** Boundary hardening capability. `mask` redacts, `sanitize` rewrites. */
+/**
+ * Boundary hardening capability. `mask` redacts, `sanitize` rewrites.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const PublicUser = JIT.security.mask(JIT.object({ secret: JIT.string() }));
+ * PublicUser({ secret: "hidden" });
+ * ```
+ */
 export const security = Object.freeze({ mask, sanitize });
 
 /**
@@ -396,6 +578,16 @@ export const security = Object.freeze({ mask, sanitize });
  * when the target has a field that cannot be matched by name and type, so
  * a straight projection is `JIT.map(User, PublicUser)`. `Map` schemas are a
  * different thing entirely and live on `JIT.mapSchema(key, value)`.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const User = JIT.object({ id: JIT.int(), name: JIT.string() });
+ * const PublicUser = JIT.object({ id: JIT.int(), name: JIT.string() });
+ * const toPublic = JIT.map(User, PublicUser);
+ * toPublic({ id: 1, name: "Ada" });
+ * ```
  */
 export interface MapNamespace {
   /** Maps one source value into the target schema. */

@@ -14,6 +14,14 @@ import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builde
 /**
  * Creates a union schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Identifier = JIT.union(JIT.string(), JIT.number());
+ * JIT.validate.parse(Identifier)("user-1");
+ * ```
+ *
  * @template TOptions - The option schema inputs.
  * @param options - The schemas or builders accepted by the union.
  * @returns A builder wrapping a union schema.
@@ -28,7 +36,17 @@ export function union<const TOptions extends readonly SchemaInput[]>(
   );
 }
 
-/** Provides the JIT xor operation for the supplied input. */
+/**
+ * Creates an exclusive-union schema builder; exactly one option must match.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Value = JIT.xor(JIT.string(), JIT.number());
+ * JIT.validate.is(Value)(42); // true
+ * ```
+ */
 export function xor<const TOptions extends readonly SchemaInput[]>(
   ...options: TOptions
 ): Builder<XorSchema<UnwrapOptions<TOptions>>> {
@@ -39,7 +57,17 @@ export function xor<const TOptions extends readonly SchemaInput[]>(
   );
 }
 
-/** Provides the JIT not operation for the supplied input. */
+/**
+ * Creates a schema that accepts values rejected by the inner schema.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const NotEmpty = JIT.not(JIT.literal(""));
+ * JIT.validate.is(NotEmpty)("jit"); // true
+ * ```
+ */
 export function not<TSchema extends AnyTypeSchema>(schema: SchemaInput<TSchema>): Builder<NotSchema<TSchema>> {
   return /* @__PURE__ */ createBuilder(
     createSchema(TypeName.not, {
@@ -50,6 +78,17 @@ export function not<TSchema extends AnyTypeSchema>(schema: SchemaInput<TSchema>)
 
 /**
  * Creates an intersection schema builder.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Named = JIT.intersection(
+ *   JIT.object({ id: JIT.number() }),
+ *   JIT.object({ name: JIT.string() })
+ * );
+ * JIT.validate.is(Named)({ id: 1, name: "Ada" }); // true
+ * ```
  *
  * @template TOptions - The option schema inputs.
  * @param options - The schemas or builders intersected by the schema.
@@ -67,6 +106,17 @@ export function intersection<const TOptions extends readonly SchemaInput[]>(
 
 /**
  * Creates a discriminated-union schema builder.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Event = JIT.discriminatedUnion("kind", [
+ *   JIT.object({ kind: JIT.literal("created"), id: JIT.number() }),
+ *   JIT.object({ kind: JIT.literal("deleted"), id: JIT.number() }),
+ * ]);
+ * JIT.validate.is(Event)({ kind: "created", id: 1 }); // true
+ * ```
  *
  * @template TDiscriminator - The discriminator property name.
  * @template TOptions - The option schema inputs.

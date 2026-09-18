@@ -31,7 +31,21 @@ type Tag<TValue> = TValue extends object ? TValue[LiteralKeys<TValue>] : never;
 /** Narrows the union to the member carrying `TTag` on its discriminator. */
 type Member<TValue, TTag> = TValue extends object ? (TTag extends TValue[LiteralKeys<TValue>] ? TValue : never) : never;
 
-/** Provides the JIT match builder operation for the supplied input. */
+/**
+ * Builds exhaustive dispatch over a discriminated union.
+ *
+ * @example
+ * ```ts
+ * const Event = JIT.discriminatedUnion("type", [
+ *   JIT.object({ type: JIT.literal("created"), id: JIT.number() }),
+ *   JIT.object({ type: JIT.literal("deleted"), id: JIT.number() }),
+ * ]);
+ * const handle = JIT.match(Event)
+ *   .case("created", (event) => event.id)
+ *   .case("deleted", (event) => -event.id)
+ *   .exhaustive();
+ * ```
+ */
 export interface MatchBuilder<TValue, TResult, TCovered> {
   /** Handles one tag. The value is narrowed to that member. */
   case<const TTag extends Exclude<Tag<TValue> & (string | number | boolean), TCovered>, TNext>(
@@ -55,6 +69,12 @@ export interface MatchBuilder<TValue, TResult, TCovered> {
  * The tags are literals the schema declares, so the match is a `switch` the
  * engine can turn into a jump — not a handler object looked up per call, and
  * not a chain of comparisons.
+ *
+ * @example
+ * ```ts
+ * const handle = JIT.match(Event).otherwise((event) => event.id);
+ * handle({ type: "created", id: 1 }); // 1
+ * ```
  */
 export function match<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>

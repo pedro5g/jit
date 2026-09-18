@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates a `RegExp` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Pattern = JIT.regex();
+ * JIT.validate.is(Pattern)(/^[a-z]+$/); // true
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping a RegExp schema.
  */
 export function regex(message?: ValidationMessage): Builder<RegexSchema> {

@@ -15,7 +15,19 @@ type MigrationArgs<TSource, TTarget> =
     ? [overrides?: MigrationOverrides<TSource, TTarget>]
     : [overrides: MigrationOverrides<TSource, TTarget>];
 
-/** Provides the JIT migration plan operation for the supplied input. */
+/**
+ * A versioned schema migration plan.
+ *
+ * @example
+ * ```ts
+ * const UserV1 = JIT.object({ version: JIT.literal(1), name: JIT.string() });
+ * const UserV2 = JIT.object({ version: JIT.literal(2), displayName: JIT.string() });
+ * const migrateUser = JIT.migrate(UserV1).to(UserV2, {
+ *   displayName: (input) => input.name,
+ * });
+ * migrateUser({ version: 1, name: "Ada" });
+ * ```
+ */
 export interface MigrationPlan<TInput, TCurrentSchema extends ATS.AnyTypeSchema> {
   /** Migrates one value through the declared version chain. */
   (value: TInput | ATS.TypeofSchema<TCurrentSchema>): ATS.TypeofSchema<TCurrentSchema>;
@@ -37,6 +49,12 @@ export interface MigrationPlan<TInput, TCurrentSchema extends ATS.AnyTypeSchema>
 
 /**
  * Compiles a schema-version chain into one switch plus one MapperPlan per edge.
+ *
+ * @example
+ * ```ts
+ * const current = JIT.migrate(UserV1).to(UserV2, { displayName: (input) => input.name });
+ * current.explain().strategy; // "VersionSwitch"
+ * ```
  */
 export function migrate<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>

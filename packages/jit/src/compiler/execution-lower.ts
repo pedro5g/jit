@@ -13,7 +13,8 @@ import { emitQuerySource } from "./query.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "./sanitize.js";
 import { emitSerialize } from "./serialize/emit-serialize.js";
 import { emitUpdateSource } from "./update.js";
-import { canUseFastParse, emitValidator } from "./validate/emit-validate.js";
+import { canUseFastParse } from "./validate/emit-validate-support.js";
+import { emitValidator } from "./validate/emit-validator-entry.js";
 
 type FunctionLike = (...args: never[]) => unknown;
 

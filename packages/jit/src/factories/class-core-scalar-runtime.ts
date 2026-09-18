@@ -13,31 +13,13 @@ import {
   type MutableScalarSurface,
   registerScalarArtifact,
 } from "./class-core-scalar-surface.js";
-import type { InstalledScalarMethod, ScalarClassSeed } from "./class-core-state.js";
+import type { InstalledScalarMethod, ScalarClassSeed, ScalarConfigurationState } from "./class-core-state.js";
 import { definePrototype, installMethodDefinition } from "./class-core-support.js";
 import { SCALAR_MEMBERS } from "./class-extensions.js";
 import { clonePolicyState } from "./class-policy.js";
-import type {
-  AnyClassCapability,
-  ConstructionMode,
-  CreateArguments,
-  RuntimeClass,
-  ScalarFactoryRuntimeClass,
-  ScalarValueObject,
-} from "./class-types.js";
+import type { CreateArguments, RuntimeClass, ScalarFactoryRuntimeClass, ScalarValueObject } from "./class-types.js";
 
-interface ScalarFactoryState {
-  readonly policy: ReturnType<typeof clonePolicyState>;
-  readonly constructionState: { mode: ConstructionMode };
-  readonly installedCapabilities: string[];
-  readonly installedCapabilityValues: AnyClassCapability[];
-  readonly installedMethods: InstalledScalarMethod[];
-  readonly installedMethodNames: Set<string>;
-  factoryNames: { create: string | false; hydrate: string | false };
-  customFactories: { create?: Function; hydrate?: Function };
-  constructionConfigured: boolean;
-  factoriesConfigured: boolean;
-}
+type ScalarFactoryState = ScalarConfigurationState;
 
 function createScalarFactoryState(seed: ScalarClassSeed | undefined): ScalarFactoryState {
   const installedCapabilityValues = [...(seed?.capabilities ?? [])];

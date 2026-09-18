@@ -34,7 +34,18 @@ import type {
   MixinThisSurface,
 } from "./class-types-schema.js";
 
-/** Provides the JIT class mixin definition operation for the supplied input. */
+/**
+ * Declarative shape of a class mixin.
+ *
+ * @example
+ * ```ts
+ * const definition: ClassMixinDefinition = {
+ *   fields: { label: "user" },
+ *   methods: { describe() { return this.label; } },
+ * };
+ * const mixin = JIT.class.mixin(definition);
+ * ```
+ */
 export interface ClassMixinDefinition<
   TFields extends ClassMethodsInput = ClassMethodsInput,
   TMethods extends ClassMethodsInput = ClassMethodsInput,
@@ -46,7 +57,16 @@ export interface ClassMixinDefinition<
   readonly methods?: TMethods & ThisType<MixinThisSurface<TFields, TRequires>>;
 }
 
-/** Provides the JIT aggregate runtime class operation for the supplied input. */
+/**
+ * Aggregate Root Runtime Class with identity and ordered event behavior.
+ *
+ * @example
+ * ```ts
+ * const Order = JIT.ddd.aggregateRoot(OrderSchema);
+ * const order = Order.create({ id: "o1" });
+ * order.pullEvents();
+ * ```
+ */
 export type AggregateRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,

@@ -781,7 +781,3 @@ export class ValidatorEmitter {
     return emitDiscriminatedUnionImpl(this, schema, value, path);
   }
 }
-
-export { canUseFastParse } from "./emit-validate-support.js";
-export type { EmittedValidator, EmitValidatorOptions } from "./emit-validator-entry.js";
-export { emitValidator } from "./emit-validator-entry.js";

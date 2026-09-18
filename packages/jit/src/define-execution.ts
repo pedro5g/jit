@@ -1,5 +1,11 @@
 import type { ExecutionPlan, ExecutionStage } from "./compiler/execution-plan.js";
-import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
+import {
+  createMapStage as mapStage,
+  createSecurityStage as securityStage,
+  createExecutionStage as stage,
+  createTransformStage as transformStage,
+  createUpdateStage as updateStage,
+} from "./compiler/execution-stage.js";
 import type { UpdatePatch } from "./compiler/update.js";
 import type * as ATS from "./core/ats/index.js";
 import type { SchemaInput } from "./core/builder/index.js";
@@ -22,16 +28,7 @@ export type RuntimeCollectionDescriptor = {
   select(...fields: string[]): RuntimeCollectionDescriptor;
 };
 
-const NO_EFFECTS = Object.freeze({
-  mayThrow: false,
-  mayAllocate: false,
-  usesExternalBindings: false,
-});
-const THROWING_EFFECTS = Object.freeze({
-  mayThrow: true,
-  mayAllocate: false,
-  usesExternalBindings: false,
-});
+export { mapStage, stage };
 /** @internal Creates a non-executable AOT operation descriptor. */
 export function operationStub<TSchema extends ATS.AnyTypeSchema, TFunction extends (...args: never[]) => unknown>(
   schema: SchemaInput<TSchema>,
@@ -206,129 +203,4 @@ function defineQueryOperations(
 function appendQuery(next: RuntimeCollectionDescriptor, append: ExecutionAppender): unknown {
   const query = next.plan.stages[next.plan.stages.length - 1];
   return append(next.schema, query, next);
-}
-
-/** @internal Creates the execution stage for a schema-specialized map. */
-export function mapStage(
-  source: ATS.AnyTypeSchema,
-  target: ATS.AnyTypeSchema,
-  many: boolean,
-  mapping: Readonly<Record<string, unknown>>
-): ExecutionStage {
-  return {
-    ...stage("map", "value", "value"),
-    schema: target,
-    source,
-    target,
-    many,
-    bindings: [mapping],
-    provides: ["mapped"],
-    effects: {
-      ...NO_EFFECTS,
-      mayAllocate: true,
-      usesExternalBindings: Object.keys(mapping).length > 0,
-    },
-  } as ExecutionStage;
-}
-
-/** @internal Creates the execution stage for a schema-specialized transform. */
-export function transformStage(
-  source: ATS.AnyTypeSchema,
-  target: ATS.AnyTypeSchema,
-  many: boolean,
-  transforms: ATS.TransformSpec<unknown>
-): ExecutionStage {
-  assertTransformTarget(source, target, transforms);
-
-  return {
-    ...stage("transform", "value", "value"),
-    schema: target,
-    source,
-    target,
-    many,
-    transforms: transforms as Readonly<Record<string, unknown>>,
-    provides: ["transformed"],
-    effects: {
-      ...NO_EFFECTS,
-      mayAllocate: true,
-      usesExternalBindings: Object.keys(transforms).length > 0,
-    },
-  } as ExecutionStage;
-}
-
-/** @internal Checks the object-shape contract of a transform stage. */
-export function assertTransformTarget(
-  source: ATS.AnyTypeSchema,
-  target: ATS.AnyTypeSchema,
-  transforms: ATS.TransformSpec<unknown>
-): void {
-  if (transforms === null || typeof transforms !== "object" || Array.isArray(transforms)) {
-    throw new JITError("INVALID_OPERATION", "execution transforms must be a field-to-callback object");
-  }
-
-  const sourceObject = resolveWrappers(source).base;
-  const targetObject = resolveWrappers(target).base;
-
-  if (sourceObject.type !== "object" || targetObject.type !== "object") {
-    throw new JITError("INVALID_OPERATION", "execution transforms require object source and target schemas");
-  }
-
-  const sourceKeys = Object.keys((sourceObject as ATS.ObjectSchema).def.props);
-  const targetKeys = Object.keys((targetObject as ATS.ObjectSchema).def.props);
-
-  if (sourceKeys.length !== targetKeys.length || sourceKeys.some((key) => !targetKeys.includes(key))) {
-    throw new JITError(
-      "INVALID_OPERATION",
-      "execution transform targets must preserve the source object's field set; use .map() for projections or renames"
-    );
-  }
-
-  for (const key of Object.keys(transforms)) {
-    if (!sourceKeys.includes(key)) {
-      throw new JITError("INVALID_OPERATION", `execution transform selected unknown field ${JSON.stringify(key)}`);
-    }
-    if (typeof transforms[key as keyof typeof transforms] !== "function") {
-      throw new JITError("INVALID_OPERATION", `execution transform for ${JSON.stringify(key)} must be a function`);
-    }
-  }
-}
-
-/** @internal Creates the execution stage for an immutable update. */
-export function updateStage(schema: ATS.AnyTypeSchema, many: boolean, patch: unknown): ExecutionStage {
-  return {
-    ...stage("update", "value", "value"),
-    schema,
-    many,
-    patch,
-    provides: ["updated"],
-    effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: true },
-  } as ExecutionStage;
-}
-
-/** @internal Creates a mask or sanitize execution stage. */
-export function securityStage(
-  schema: ATS.AnyTypeSchema,
-  operation: "mask" | "sanitize",
-  many: boolean
-): ExecutionStage {
-  return {
-    ...stage("security", "value", "value"),
-    schema,
-    operation,
-    many,
-    provides: [operation === "mask" ? "masked" : "sanitized"],
-    effects: { ...NO_EFFECTS, mayAllocate: true },
-  } as ExecutionStage;
-}
-
-/** @internal Creates a normalized execution stage descriptor. */
-export function stage(kind: string, input: ExecutionStage["input"], output: ExecutionStage["output"]): ExecutionStage {
-  return {
-    kind,
-    input,
-    output,
-    requires: [],
-    provides: [],
-    effects: kind === "value" ? NO_EFFECTS : THROWING_EFFECTS,
-  } as ExecutionStage;
 }

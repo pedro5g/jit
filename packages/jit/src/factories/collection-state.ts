@@ -22,7 +22,16 @@ import { getCachedIndex } from "../runtime/index/index-cache.js";
 import { createConditionBuilder, type QueryConditionBuilder } from "./query.js";
 import { collectPatchWrites, type UpdatePatchParams, type UpdatePatchTemplate } from "./update.js";
 
-/** A compiled collection mutation, and the access path it resolved to. */
+/**
+ * A compiled collection mutation, and the access path it resolved to.
+ *
+ * @example
+ * ```ts
+ * const Users = JIT.array(JIT.object({ id: JIT.number(), name: JIT.string() })).keyed("id");
+ * const rename = JIT.state.collection(Users).updateByKey({ key: "id", patch: { name: "Ada" } });
+ * rename([{ id: 1, name: "Grace" }], { key: 1 }); // [{ id: 1, name: "Ada" }]
+ * ```
+ */
 export type CollectionMutation<TRow, TParams> = ((value: readonly TRow[], params: TParams) => readonly TRow[]) & {
   explain(): CollectionMutationExplain;
 };
@@ -33,6 +42,13 @@ export type CollectionMutation<TRow, TParams> = ((value: readonly TRow[], params
  * This is not an array API. The operation says what should happen to a row —
  * update this key, remove it, upsert it — and the collection's declared facts
  * decide how that row is reached: a cached index, a binary search, or a scan.
+ *
+ * @example
+ * ```ts
+ * const Users = JIT.array(JIT.object({ id: JIT.number(), active: JIT.boolean() })).keyed("id");
+ * const remove = JIT.state.collection(Users).removeWhere((query) => query.eq("active", false));
+ * const remaining = remove([{ id: 1, active: true }, { id: 2, active: false }], {});
+ * ```
  */
 export interface CollectionState<TSchema extends AnyTypeSchema, TRow> {
   /** Updates the row identified by the supplied key. */
@@ -103,6 +119,11 @@ export type CollectionMutationHost = <TRow, TParams>(
  * Opens the mutation surface of one collection schema.
  *
  * @param schema - An array schema, normally carrying `.keyed()` or `.ordered()`.
+ * @example
+ * ```ts
+ * const Users = JIT.array(JIT.object({ id: JIT.number(), name: JIT.string() })).keyed("id");
+ * const update = JIT.state.collection(Users).updateByKey({ key: "id", patch: { name: "Ada" } });
+ * ```
  */
 export function collection<TElement extends AnyTypeSchema>(
   schema: SchemaInput<ArraySchema<TElement>>

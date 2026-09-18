@@ -20,7 +20,16 @@ type TransformMapped<TOutput, TKey extends keyof TOutput, TValue> = Omit<TOutput
   readonly [TField in TKey]: TValue;
 };
 
-/** Describes the JIT transform expression contract used by the public API. */
+/**
+ * Describes an inline transform expression emitted into the compiled function.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.object({ name: JIT.string() });
+ * const clean = JIT.transform(User).map("name", (field) => field.trim()).compile();
+ * clean({ name: " Ada " }); // { name: "Ada" }
+ * ```
+ */
 export interface TransformExpression<TInput, TOutput> {
   readonly __jitTransformExpression: true;
   readonly emit: (valueExpr: string) => string;
@@ -28,7 +37,14 @@ export interface TransformExpression<TInput, TOutput> {
   readonly _output: TOutput;
 }
 
-/** Converts the supplied input into the JIT transform field ops representation. */
+/**
+ * Field operations available to a transform mapper.
+ *
+ * @example
+ * ```ts
+ * const clean = JIT.transform(User).map("name", (field) => field.lowercase()).compile();
+ * ```
+ */
 export type TransformFieldOps<TValue> = TValue extends string
   ? {
       lowercase(): TransformExpression<string, string>;
@@ -44,7 +60,17 @@ type TransformMapperResult<TValue, TSource, TResult> =
   | TransformExpression<TValue, TResult>
   | ((value: TValue, source: TSource) => TResult);
 
-/** Converts the supplied input into the JIT transform builder representation. */
+/**
+ * Fluent object transform builder.
+ *
+ * @example
+ * ```ts
+ * const clean = JIT.transform(User)
+ *   .select("id", "name")
+ *   .map("name", (field) => field.trim())
+ *   .compile();
+ * ```
+ */
 export interface TransformBuilder<TSource, TOutput> {
   /** Keeps only the selected output fields. */
   select<const TKeys extends readonly TransformKeys<TOutput>[]>(
@@ -64,7 +90,15 @@ interface TransformState<TSource> {
   readonly transforms: TransformMap<TSource>;
 }
 
-/** Converts the supplied input into the JIT transform representation. */
+/**
+ * Starts a schema-specialized object transform.
+ *
+ * @example
+ * ```ts
+ * const clean = JIT.transform(User).map("name", (field) => field.trim()).compile();
+ * clean({ id: 1, name: " Ada " }); // { id: 1, name: "Ada" }
+ * ```
+ */
 export function transform<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): TransformBuilder<ATS.TypeofSchema<TSchema>, ATS.TypeofSchema<TSchema>> {

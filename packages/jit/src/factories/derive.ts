@@ -32,7 +32,15 @@ type PathValue<TState, TPath extends string> = TPath extends `${infer THead}.${i
     ? TState[TPath]
     : never;
 
-/** Provides the JIT derived explanation operation for the supplied input. */
+/**
+ * Describes which state fields a derived computation reads.
+ *
+ * @example
+ * ```ts
+ * const selected = JIT.state.derive(Order).select("price", "quantity");
+ * selected.explain().reads; // ["price", "quantity"]
+ * ```
+ */
 export interface DerivedExplanation {
   /** Fields the computation reads, in the order it reads them. */
   readonly reads: readonly string[];
@@ -46,6 +54,12 @@ export interface DerivedExplanation {
  *
  * @template TState - The state the computation reads from.
  * @template TResult - The value it derives.
+ *
+ * @example
+ * ```ts
+ * const selected = JIT.state.derive(Order).select("price", "quantity");
+ * selected({ price: 10, quantity: 2 }); // { price: 10, quantity: 2 }
+ * ```
  */
 export interface DerivedComputation<TState, TResult> {
   /** Computes the derived value for one state. */
@@ -70,7 +84,14 @@ export interface DerivedComputation<TState, TResult> {
   layout(): ChangeLayout;
 }
 
-/** Provides the JIT derived builder operation for the supplied input. */
+/**
+ * Selects the dependencies of a derived computation.
+ *
+ * @example
+ * ```ts
+ * const selected = JIT.state.derive(Order).select("price", "quantity");
+ * ```
+ */
 export interface DerivedBuilder<TState> {
   /** Declares the fields the computation reads; they become its dependencies. */
   select<const TPaths extends readonly DerivablePath<TState>[]>(
@@ -88,6 +109,11 @@ export interface DerivedBuilder<TState> {
  *
  * @param schema - The state schema the computation reads from.
  * @param options - `layout` fixes the path-to-bit agreement masks are read in.
+ * @example
+ * ```ts
+ * const selected = JIT.state.derive(Order).select("price", "quantity");
+ * selected({ price: 10, quantity: 2 });
+ * ```
  */
 export function derive<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>,

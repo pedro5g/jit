@@ -137,6 +137,14 @@ it("keeps scalar DDD definitions reconstructive on the define host", async () =>
   expect(source).not.toContain('from "@jit-compiler/jit"');
 });
 
+it("accepts an unambiguous DDD identity on the define host", () => {
+  const UserId = DefineJIT.ddd.uniqueIdentifier(DefineJIT.string());
+  const User = DefineJIT.ddd.entity(DefineJIT.object({ userId: UserId, name: DefineJIT.string() }));
+
+  expect(User.schema.def.innerType.def.props.userId).toBe(UserId.schema);
+  expect(User.schema.def.innerType.def.props.name).toBeDefined();
+});
+
 it("keeps validation opt-in in generated DDD factories", async () => {
   const schema = JIT.object({
     id: JIT.string(),
@@ -464,6 +472,23 @@ it("should preserve transform, update, and security stages in an import-free com
   expect(
     generated.publicUsers('[{"id":1,"role":"admin","name":" Ada ","email":"ada@math.org","note":"<b>ok</b>"}]')
   ).toBe('[{"id":1,"name":"PUBLIC","email":"***.org","note":"ok"}]');
+});
+
+it("should serialize static collection update patches with their runtime semantics", async () => {
+  const User = JIT.object({ id: JIT.number(), tags: JIT.array(JIT.string()) });
+  const setPublicTags = JIT.from(JIT.array(User)).update({ tags: ["public"] });
+  const result = AOT.generate({ groups: {}, artifacts: { setPublicTags }, outDir });
+  const source = readFileSync(join(outDir, "index.js"), "utf8");
+  const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+    readonly setPublicTags: (users: readonly { id: number; tags: readonly string[] }[]) => {
+      id: number;
+      tags: readonly string[];
+    }[];
+  };
+
+  expect(result.skipped).toHaveLength(0);
+  expect(source).toContain('["public"]');
+  expect(generated.setPublicTags([{ id: 1, tags: ["private"] }])).toEqual([{ id: 1, tags: ["public"] }]);
 });
 
 it("should emit filtered terminal aggregates as one import-free AOT loop", async () => {

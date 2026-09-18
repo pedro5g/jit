@@ -53,13 +53,28 @@ const dddBase = {
   }),
 };
 
-/** Provides the JIT ddd extensions operation for the supplied input. */
+/**
+ * Declaration-merging surface for application-defined DDD extensions.
+ *
+ * @example
+ * ```ts
+ * const custom = JIT.ddd.$extends({ aggregate: () => JIT.class.mixin({}) });
+ * ```
+ */
 export interface DddExtensions {}
 type DddExtensionFactory = (...args: never[]) => ClassMixin;
 const DDD_BUILTINS = new Set(Object.keys(dddBase).concat("$extends"));
 const registered = new Map<string, DddExtensionFactory>();
 
-/** Provides the JIT ddd namespace operation for the supplied input. */
+/**
+ * DDD presets and application extension factories.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.ddd.entity(JIT.object({ id: JIT.string() }));
+ * const user = User.create({ id: "u1" });
+ * ```
+ */
 export type DddNamespace = typeof dddBase &
   DddExtensions & {
     readonly $extends: <T extends Record<string, DddExtensionFactory>>(extensions: T) => typeof ddd & T;
@@ -89,7 +104,15 @@ function extendDdd<T extends Record<string, DddExtensionFactory>>(extensions: T)
 
 import { JITError } from "../errors/index.js";
 
-/** Provides the JIT ddd operation for the supplied input. */
+/**
+ * Runtime namespace for value objects, entities, aggregates and domain events.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.ddd.entity(JIT.object({ id: JIT.string() }));
+ * User.create({ id: "u1" });
+ * ```
+ */
 export const ddd = {
   ...dddBase,
   $extends: extendDdd,

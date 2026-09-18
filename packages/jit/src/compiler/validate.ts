@@ -2,7 +2,8 @@ import type * as ATS from "../core/ats/index.js";
 import { JITValidationError, type ValidationIssue } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
-import { canUseFastParse, emitValidator } from "./validate/emit-validate.js";
+import { canUseFastParse } from "./validate/emit-validate-support.js";
+import { emitValidator } from "./validate/emit-validator-entry.js";
 
 /** Provides the JIT validator ops configuration used by the public contract. */
 export const VALIDATOR_OPS = ["is", "parse", "safeParse", "parseAsync", "safeParseAsync"] as const;

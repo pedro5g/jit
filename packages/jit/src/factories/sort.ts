@@ -3,12 +3,20 @@ import { type CompiledSort, compileSort } from "../compiler/sort.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
+import type { RowKey, RowOf } from "./row-types.js";
 
-type RowOf<TSchema extends ATS.AnyTypeSchema> =
-  ATS.TypeofSchema<TSchema> extends readonly (infer TRow)[] ? TRow : ATS.TypeofSchema<TSchema>;
-type RowKey<TSchema extends ATS.AnyTypeSchema> = Extract<keyof RowOf<TSchema>, string>;
-
-/** Provides the JIT sort plan operation for the supplied input. */
+/**
+ * A compiled stable sort plan.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Users = JIT.array(JIT.object({ name: JIT.string(), age: JIT.int() }));
+ * const sortUsers = JIT.sort(Users).by("age").thenBy("name");
+ * sortUsers([{ name: "Ada", age: 37 }]);
+ * ```
+ */
 export interface SortPlan<TSchema extends ATS.AnyTypeSchema> extends CompiledSort<RowOf<TSchema>> {
   /** Replaces the ordering criteria with one key. */
   by<TKey extends RowKey<TSchema>>(key: TKey, direction?: OrderDirection): SortPlan<TSchema>;
@@ -16,13 +24,32 @@ export interface SortPlan<TSchema extends ATS.AnyTypeSchema> extends CompiledSor
   thenBy<TKey extends RowKey<TSchema>>(key: TKey, direction?: OrderDirection): SortPlan<TSchema>;
 }
 
-/** Provides the JIT sort builder operation for the supplied input. */
+/**
+ * Starts a schema-specialized stable sort plan.
+ *
+ * @example
+ * ```ts
+ * const sortUsers = JIT.sort(Users).by("age").thenBy("name");
+ * sortUsers(rows);
+ * ```
+ */
 export interface SortBuilder<TSchema extends ATS.AnyTypeSchema> {
   /** Starts ordering by one row field. */
   by<TKey extends RowKey<TSchema>>(key: TKey, direction?: OrderDirection): SortPlan<TSchema>;
 }
 
-/** Provides the JIT sort operation for the supplied input. */
+/**
+ * Starts a schema-specialized stable sort plan.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Rows = JIT.array(JIT.object({ score: JIT.number() }));
+ * const sortRows = JIT.sort(Rows).by("score", "desc");
+ * sortRows([{ score: 2 }, { score: 1 }]);
+ * ```
+ */
 export function sort<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): SortBuilder<TSchema> {
   const unwrapped = unwrapSchema(schema);
 

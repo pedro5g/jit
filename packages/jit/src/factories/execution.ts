@@ -1,9 +1,14 @@
 import { compileCodec } from "../compiler/codec.js";
 import { lowerExecutionPlan } from "../compiler/execution-lower.js";
 import { type ExecutionPlan, type ExecutionStage, NO_EFFECTS, THROWING_EFFECTS } from "../compiler/execution-plan.js";
+import {
+  createMapStage as mapStage,
+  createSecurityStage as securityStage,
+  createTransformStage as transformStage,
+  createUpdateStage as updateStage,
+} from "../compiler/execution-stage.js";
 import { compileJsonParse } from "../compiler/json-parse.js";
 import type { MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
-import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { compileSerialize } from "../compiler/serialize.js";
 import type { UpdatePatch } from "../compiler/update.js";
 import { compileValidatorSelection } from "../compiler/validate.js";
@@ -24,7 +29,16 @@ type NumericElementKey<TElement> = {
 
 const OPERATION_ARTIFACTS = new WeakMap<ATS.AnyTypeSchema, Map<string, CallableArtifact<FunctionLike>>>();
 
-/** A callable, lazily-lowered execution plan. */
+/**
+ * A callable, lazily-lowered execution plan.
+ *
+ * @example
+ * ```ts
+ * const parse = JIT.from(User).validate().compile();
+ * parse({ id: 1 });
+ * parse.explain().stages;
+ * ```
+ */
 export type CallableArtifact<TFunction extends FunctionLike> = TFunction & {
   readonly plan: ExecutionPlan;
   /** Lowers and caches the artifact's callable implementation. */
@@ -33,18 +47,43 @@ export type CallableArtifact<TFunction extends FunctionLike> = TFunction & {
   explain(): ExecutionPlan;
 };
 
-/** Provides the JIT execution artifact operation for the supplied input. */
+/**
+ * One-input callable artifact in the shared execution-plan vocabulary.
+ *
+ * @example
+ * ```ts
+ * const parse = JIT.from(User).validate();
+ * parse({ id: 1 });
+ * ```
+ */
 export type ExecutionArtifact<TInput, TOutput> = CallableArtifact<(input: TInput) => TOutput>;
 
 /**
  * A compiled artifact that also satisfies the Standard Schema contract, so
  * it can be handed to any consumer in the ecosystem with no wrapper.
  */
+/**
+ * A Standard Schema-compatible callable artifact.
+ *
+ * @example
+ * ```ts
+ * const parse = JIT.validate.parse(User);
+ * parse["~standard"].validate({ id: 1 });
+ * ```
+ */
 export type StandardArtifact<TFunction extends FunctionLike, TOutput> = CallableArtifact<TFunction> & {
   readonly "~standard": StandardSchemaProps<unknown, TOutput>;
 };
 
-/** Provides the JIT value artifact operation for the supplied input. */
+/**
+ * Value pipeline artifact with schema-preserving map, transform and update stages.
+ *
+ * @example
+ * ```ts
+ * const pipeline = JIT.from(User).validate();
+ * pipeline({ id: 1 });
+ * ```
+ */
 export type ValueArtifact<TInput, TOutput, TSchema extends ATS.AnyTypeSchema> = ExecutionArtifact<TInput, TOutput> & {
   readonly schema: TSchema;
   /** Standard Schema interop; `validate` runs the compiled validator. */
@@ -70,7 +109,15 @@ export type ValueArtifact<TInput, TOutput, TSchema extends ATS.AnyTypeSchema> = 
   readonly to: ValueSinks<TInput, TOutput>;
 };
 
-/** Provides the JIT collection artifact operation for the supplied input. */
+/**
+ * Collection pipeline artifact with fused filter, projection and aggregation stages.
+ *
+ * @example
+ * ```ts
+ * const active = JIT.from(Users).filter((where) => where.eq("active", true));
+ * active(users);
+ * ```
+ */
 export type CollectionArtifact<
   TInput,
   TElement,
@@ -116,14 +163,29 @@ export type CollectionArtifact<
   readonly to: CollectionSinks<TInput, TElement>;
 };
 
-/** Provides the JIT schema artifact operation for the supplied input. */
+/**
+ * Schema-specialized value or collection artifact selected from the root schema.
+ *
+ * @example
+ * ```ts
+ * const artifact: SchemaArtifact<unknown, typeof User.schema> = JIT.from(User);
+ * ```
+ */
 export type SchemaArtifact<TInput, TSchema extends ATS.AnyTypeSchema> = [TSchema] extends [
   ATS.ArraySchema<infer TElement>,
 ]
   ? CollectionArtifact<TInput, ATS.TypeofSchema<TElement>, TSchema>
   : ValueArtifact<TInput, ATS.TypeofSchema<TSchema>, TSchema>;
 
-/** Describes the JIT value sinks contract used by the public API. */
+/**
+ * Alternative terminal representations for a value pipeline.
+ *
+ * @example
+ * ```ts
+ * const asJson = JIT.from(User).to.json();
+ * asJson({ id: 1 });
+ * ```
+ */
 export interface ValueSinks<TInput, TOutput> {
   /** Selects an array result sink. */
   array(): ExecutionArtifact<TInput, TOutput>;
@@ -133,7 +195,15 @@ export interface ValueSinks<TInput, TOutput> {
   binary(): ExecutionArtifact<TInput, Uint8Array>;
 }
 
-/** Describes the JIT collection sinks contract used by the public API. */
+/**
+ * Alternative terminal representations for a collection pipeline.
+ *
+ * @example
+ * ```ts
+ * const asJson = JIT.from(Users).to.json();
+ * asJson(users);
+ * ```
+ */
 export interface CollectionSinks<TInput, TElement> {
   /** Selects an array result sink. */
   array(): ExecutionArtifact<TInput, TElement[]>;
@@ -171,7 +241,15 @@ function freezePlan(schema: ATS.AnyTypeSchema, stages: readonly ExecutionStage[]
   });
 }
 
-/** Creates the only runtime object that can execute a plan. Lowering is delayed until use. */
+/**
+ * Creates the only runtime object that can execute a plan. Lowering is delayed until use.
+ *
+ * @example
+ * ```ts
+ * const artifact = createExecutionArtifact(plan, () => (value) => value);
+ * artifact(input);
+ * ```
+ */
 export function createExecutionArtifact<TFunction extends FunctionLike>(
   plan: ExecutionPlan,
   lower: () => TFunction,
@@ -203,7 +281,15 @@ export function createExecutionArtifact<TFunction extends FunctionLike>(
   return artifact;
 }
 
-/** Starts a value pipeline without compiling an identity function. */
+/**
+ * Starts a value pipeline without compiling an identity function.
+ *
+ * @example
+ * ```ts
+ * const validated = JIT.from(User).validate();
+ * validated({ id: 1 });
+ * ```
+ */
 export function from<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): SchemaArtifact<ATS.TypeofSchema<TSchema>, TSchema> {
@@ -1006,118 +1092,6 @@ function appendQueryStage(
       effects: { ...NO_EFFECTS, mayAllocate: operation === "select" },
     },
   ]);
-}
-
-function mapStage(
-  source: ATS.AnyTypeSchema,
-  target: ATS.AnyTypeSchema,
-  many: boolean,
-  mapping: MapperOverridesInput
-): ExecutionStage {
-  return {
-    kind: "map",
-    input: "value",
-    output: "value",
-    schema: target,
-    source,
-    target,
-    many,
-    bindings: [mapping],
-    requires: [],
-    provides: ["mapped"],
-    effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: Object.keys(mapping).length > 0 },
-  };
-}
-
-function transformStage(
-  source: ATS.AnyTypeSchema,
-  target: ATS.AnyTypeSchema,
-  many: boolean,
-  transforms: ATS.TransformSpec<unknown>
-): ExecutionStage {
-  assertTransformTarget(source, target, transforms);
-
-  return {
-    kind: "transform",
-    input: "value",
-    output: "value",
-    schema: target,
-    source,
-    target,
-    many,
-    transforms: transforms as Readonly<Record<string, unknown>>,
-    requires: [],
-    provides: ["transformed"],
-    effects: {
-      ...NO_EFFECTS,
-      mayAllocate: true,
-      usesExternalBindings: Object.keys(transforms).length > 0,
-    },
-  };
-}
-
-function assertTransformTarget(
-  source: ATS.AnyTypeSchema,
-  target: ATS.AnyTypeSchema,
-  transforms: ATS.TransformSpec<unknown>
-): void {
-  if (transforms === null || typeof transforms !== "object" || Array.isArray(transforms)) {
-    throw new JITError("INVALID_OPERATION", "execution transforms must be a field-to-callback object");
-  }
-
-  const sourceObject = resolveWrappers(source).base;
-  const targetObject = resolveWrappers(target).base;
-
-  if (sourceObject.type !== TypeName.object || targetObject.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", "execution transforms require object source and target schemas");
-  }
-
-  const sourceKeys = Object.keys((sourceObject as ATS.ObjectSchema).def.props);
-  const targetKeys = Object.keys((targetObject as ATS.ObjectSchema).def.props);
-
-  if (sourceKeys.length !== targetKeys.length || sourceKeys.some((key) => !targetKeys.includes(key))) {
-    throw new JITError(
-      "INVALID_OPERATION",
-      "execution transform targets must preserve the source object's field set; use .map() for projections or renames"
-    );
-  }
-
-  for (const key of Object.keys(transforms)) {
-    if (!sourceKeys.includes(key)) {
-      throw new JITError("INVALID_OPERATION", `execution transform selected unknown field ${JSON.stringify(key)}`);
-    }
-    if (typeof transforms[key as keyof typeof transforms] !== "function") {
-      throw new JITError("INVALID_OPERATION", `execution transform for ${JSON.stringify(key)} must be a function`);
-    }
-  }
-}
-
-function updateStage(schema: ATS.AnyTypeSchema, many: boolean, patch: unknown): ExecutionStage {
-  return {
-    kind: "update",
-    input: "value",
-    output: "value",
-    schema,
-    many,
-    patch,
-    requires: [],
-    provides: ["updated"],
-    effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: true },
-  };
-}
-
-function securityStage(schema: ATS.AnyTypeSchema, operation: "mask" | "sanitize", many: boolean): ExecutionStage {
-  return {
-    kind: "security",
-    input: "value",
-    output: "value",
-    schema,
-    operation,
-    many,
-    requires: [],
-    provides: [operation === "mask" ? "masked" : "sanitized"],
-    effects: { ...NO_EFFECTS, mayAllocate: true },
-  };
 }
 
 function arraySchema<TElement extends ATS.AnyTypeSchema>(element: TElement): ATS.ArraySchema<TElement> {

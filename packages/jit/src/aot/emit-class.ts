@@ -4,14 +4,6 @@ import { emitClassPolicy } from "./emit-class-policy.js";
 import { prepareClassArtifact } from "./emit-class-setup.js";
 import type { ClassArtifact, ClassArtifactEmitContext, EmittedBinding } from "./emit-class-types.js";
 
-export { emitClassPolicy } from "./emit-class-policy.js";
-export type {
-  ClassArtifactEmitContext,
-  ClassArtifactFlag,
-  EmittedBinding,
-  ValidatorSelection,
-} from "./emit-class-types.js";
-
 export function emitClassArtifact(
   context: ClassArtifactEmitContext,
   binding: string,

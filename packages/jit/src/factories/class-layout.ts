@@ -8,11 +8,11 @@ import { JITError } from "../errors/index.js";
 import type { AccessorMember, AccessorOptions, AccessorVisibility, ConstructionMode } from "./class.js";
 
 export const INTERNAL_CONSTRUCT = Symbol("jit.class.construct");
-export const DOMAIN_STATE = Symbol("jit.class.domainState");
+const DOMAIN_STATE = Symbol("jit.class.domainState");
 export const EVENT_BUFFER = Symbol("jit.class.events");
 export const TRUSTED_MATERIALIZER = "__jitMaterialize";
 
-export interface ResolvedAccessor {
+interface ResolvedAccessor {
   readonly key: string;
   readonly field: AccessorVisibility;
   readonly get: string | false;

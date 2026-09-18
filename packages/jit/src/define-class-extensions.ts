@@ -8,6 +8,7 @@ import { type ClassMemberDefinition, isClassMemberDescriptor } from "./classes/m
 import type { ResolvedClassMember, ResolvedMemberTable } from "./classes/members.js";
 import { isOverrideDescriptor, type OverrideDescriptor } from "./classes/override.js";
 import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
+import { hasSchemaDefault } from "./compiler/schema-default.js";
 import type * as ATS from "./core/ats/index.js";
 import { createSchema, TypeName } from "./core/ats/index.js";
 import type { SchemaInput } from "./core/builder/index.js";
@@ -252,7 +253,7 @@ function applyDefinedContract(
   }
   if (definition.kind === "field" && definition.schema !== undefined) {
     const field = unwrapSchema(definition.schema);
-    if (definition.noConstructor === true && !definedHasDefault(field)) {
+    if (definition.noConstructor === true && !hasSchemaDefault(field)) {
       throw new JITError(
         "CLASS_FIELD_DESCRIPTOR_CONFLICT",
         `No-constructor field ${JSON.stringify(name)} requires a default initializer`
@@ -411,32 +412,6 @@ function definedFieldAccessorDefaults(
     getter: getter === true || typeof getter === "function",
     setter: setter === true || typeof setter === "function",
   };
-}
-
-function definedHasDefault(schema: ATS.AnyTypeSchema): boolean {
-  let current = schema;
-  while (true) {
-    if (current.type === TypeName.default) return true;
-    if (current.type === TypeName.lazy) {
-      current = (current.def as ATS.LazyDef).getter();
-      continue;
-    }
-    if (
-      current.type === TypeName.optional ||
-      current.type === TypeName.nullable ||
-      current.type === TypeName.nullish ||
-      current.type === TypeName.brand ||
-      current.type === TypeName.readonly ||
-      current.type === TypeName.refine ||
-      current.type === TypeName.coerce ||
-      current.type === TypeName.pipe ||
-      current.type === TypeName.transform
-    ) {
-      current = (current.def as ATS.InnerTypeDef).innerType;
-      continue;
-    }
-    return false;
-  }
 }
 
 function throwDefinedFieldConflict(name: string): never {

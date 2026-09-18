@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates a `boolean` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Enabled = JIT.boolean();
+ * JIT.validate.is(Enabled)(true); // true
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping a boolean schema.
  */
 export function boolean(message?: ValidationMessage): Builder<BooleanSchema> {

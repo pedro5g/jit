@@ -6,6 +6,15 @@ import { createBuilder, unwrapSchema } from "../core/builder/index.js";
  * Marks a schema as an application boundary without creating a second DTO
  * compiler, execution IR, or operation facade. The result is an ordinary
  * schema builder and therefore works with every capability namespace.
+ *
+ * @example
+ * ```ts
+ * const UserInput = JIT.dto(JIT.object({ name: JIT.string().min(1) }));
+ * JIT.validate.parse(UserInput)({ name: "Ada" });
+ * ```
+ *
+ * @param schema - The schema to mark as a DTO boundary.
+ * @returns The same schema shape with DTO metadata attached.
  */
 export function dto<TSchema extends AnyTypeSchema>(schema: SchemaInput<TSchema>): Builder<TSchema> {
   const unwrapped = unwrapSchema(schema);

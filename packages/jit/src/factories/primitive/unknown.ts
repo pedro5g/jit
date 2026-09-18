@@ -6,6 +6,14 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates an `unknown` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Payload = JIT.unknown();
+ * JIT.validate.is(Payload)({ anything: "goes" }); // true
+ * ```
+ *
  * @returns A builder wrapping an unknown schema.
  */
 export function unknown(): Builder<UnknownSchema> {

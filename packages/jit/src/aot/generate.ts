@@ -13,7 +13,7 @@ import { isValidIdentifier } from "../shared/parse.js";
 import { declarationImportType, memberImportType } from "./artifact-types.js";
 import type { ArtifactTypeContext } from "./emit-artifact-type.js";
 import { type ArtifactEmitterFlag, createArtifactEmitter, type EmittedBinding } from "./emit-artifacts.js";
-import type { ClassArtifactEmitContext } from "./emit-class.js";
+import type { ClassArtifactEmitContext } from "./emit-class-types.js";
 import { emitTypeScriptType } from "./emit-type.js";
 import { serializeCallback } from "./serialize-callback.js";
 
@@ -290,18 +290,44 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   if (assertionSources.length > 0) js.push("");
 
   const mark = (flag: ArtifactEmitterFlag): void => {
-    if (flag === "runtimeGetIndex") needsRuntimeGetIndex = true;
-    else if (flag === "runtimeCachedIndex") needsRuntimeCachedIndex = true;
-    else if (flag === "hashHelpers") needsHashHelpers = true;
-    else if (flag === "hashCache") needsHashCache = true;
-    else if (flag === "jsonPatchHelpers") needsJsonPatchHelpers = true;
-    else if (flag === "validationError") needsValidationError = true;
-    else if (flag === "assertionError") needsAssertionError = true;
-    else if (flag === "aggregateType") needsAggregateType = true;
-    else if (flag === "domainStateType") needsDomainStateType = true;
-    else if (flag === "domainEventType") needsDomainEventType = true;
-    else if (flag === "mockHelpers") needsMockHelpers = true;
-    else if (flag === "callHelper") needsCallHelper = true;
+    switch (flag) {
+      case "runtimeGetIndex":
+        needsRuntimeGetIndex = true;
+        break;
+      case "runtimeCachedIndex":
+        needsRuntimeCachedIndex = true;
+        break;
+      case "hashHelpers":
+        needsHashHelpers = true;
+        break;
+      case "hashCache":
+        needsHashCache = true;
+        break;
+      case "jsonPatchHelpers":
+        needsJsonPatchHelpers = true;
+        break;
+      case "validationError":
+        needsValidationError = true;
+        break;
+      case "assertionError":
+        needsAssertionError = true;
+        break;
+      case "aggregateType":
+        needsAggregateType = true;
+        break;
+      case "domainStateType":
+        needsDomainStateType = true;
+        break;
+      case "domainEventType":
+        needsDomainEventType = true;
+        break;
+      case "mockHelpers":
+        needsMockHelpers = true;
+        break;
+      case "callHelper":
+        needsCallHelper = true;
+        break;
+    }
   };
 
   const classArtifactContext: Omit<ClassArtifactEmitContext, "emitValidatorBinding" | "emitHashBinding"> = {
@@ -746,11 +772,13 @@ function serializeStaticData(value: unknown, seen = new Set<object>()): string |
       if (Object.is(value, -0)) return "-0";
       return String(value);
     case "object":
-      break;
+      return serializeStaticObject(value, seen);
     default:
       return undefined;
   }
+}
 
+function serializeStaticObject(value: object, seen: Set<object>): string | undefined {
   if (seen.has(value)) return undefined;
   seen.add(value);
 
@@ -760,29 +788,35 @@ function serializeStaticData(value: unknown, seen = new Set<object>()): string |
       return Number.isNaN(time) ? "new Date(NaN)" : `new Date(${time})`;
     }
 
-    if (Array.isArray(value)) {
-      const items = value.map((item) => serializeStaticData(item, seen));
+    if (Array.isArray(value)) return serializeStaticArray(value, seen);
 
-      if (items.some((item) => item === undefined)) return undefined;
-      return `[${items.join(", ")}]`;
-    }
-
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return undefined;
-    const descriptors = Object.getOwnPropertyDescriptors(value);
-    const entries: string[] = [];
-
-    for (const key of Object.keys(descriptors)) {
-      const descriptor = descriptors[key];
-      if (descriptor === undefined || !("value" in descriptor)) return undefined;
-      const entry = serializeStaticData(descriptor.value, seen);
-      if (entry === undefined) return undefined;
-      entries.push(`${JSON.stringify(key)}: ${entry}`);
-    }
-    return `{ ${entries.join(", ")} }`;
+    return serializeStaticRecord(value, seen);
   } finally {
     seen.delete(value);
   }
+}
+
+function serializeStaticArray(value: readonly unknown[], seen: Set<object>): string | undefined {
+  const items = value.map((item) => serializeStaticData(item, seen));
+
+  if (items.some((item) => item === undefined)) return undefined;
+  return `[${items.join(", ")}]`;
+}
+
+function serializeStaticRecord(value: object, seen: Set<object>): string | undefined {
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return undefined;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const entries: string[] = [];
+
+  for (const key of Object.keys(descriptors)) {
+    const descriptor = descriptors[key];
+    if (descriptor === undefined || !("value" in descriptor)) return undefined;
+    const entry = serializeStaticData(descriptor.value, seen);
+    if (entry === undefined) return undefined;
+    entries.push(`${JSON.stringify(key)}: ${entry}`);
+  }
+  return `{ ${entries.join(", ")} }`;
 }
 
 /**

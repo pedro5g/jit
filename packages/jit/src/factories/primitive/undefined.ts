@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates an `undefined` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Missing = JIT.undefined();
+ * JIT.validate.is(Missing)(undefined); // true
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping an undefined schema.
  */
 function undefinedType(message?: ValidationMessage): Builder<UndefinedSchema> {

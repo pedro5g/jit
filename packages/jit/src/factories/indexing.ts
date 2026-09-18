@@ -40,16 +40,43 @@ type Grouped<TIndex> =
       : Map<TKey, TValue[]>
     : never;
 
-/** A compiled index builder. Calling it builds; `cached` reuses per array. */
+/**
+ * A compiled index builder. Calling it builds; `cached` reuses per array.
+ *
+ * @example
+ * ```ts
+ * const Users = JIT.array(JIT.object({ id: JIT.number() })).keyed("id");
+ * const byId = JIT.index(Users);
+ * byId([{ id: 1 }]).get(1); // { id: 1 }
+ * ```
+ */
 export interface IndexPlan<TRow, TIndex> extends CompiledIndex<TRow, TIndex> {}
 
-/** An index whose keys are settled, so the grouped shape is derivable. */
+/**
+ * An index whose keys are settled, so the grouped shape is derivable.
+ *
+ * @example
+ * ```ts
+ * const Users = JIT.array(JIT.object({ tenant: JIT.string(), id: JIT.number() }));
+ * const byTenant = JIT.index(Users).by("tenant").grouped();
+ * byTenant([{ tenant: "acme", id: 1 }]).get("acme"); // [{ tenant: "acme", id: 1 }]
+ * ```
+ */
 export interface KeyedIndexPlan<TRow, TIndex> extends IndexPlan<TRow, TIndex> {
   /** Builds a grouped index whose terminal values are row arrays. */
   grouped(): IndexPlan<TRow, Grouped<TIndex>>;
 }
 
-/** Provides the JIT index builder operation for the supplied input. */
+/**
+ * Starts a schema-specialized index plan.
+ *
+ * @example
+ * ```ts
+ * const Users = JIT.array(JIT.object({ id: JIT.number(), email: JIT.string() })).keyed("id");
+ * const byEmail = JIT.index(Users).by("email");
+ * const found = byEmail([{ id: 1, email: "ada@example.com" }]).get("ada@example.com");
+ * ```
+ */
 export interface IndexBuilder<TSchema extends ATS.AnyTypeSchema>
   extends KeyedIndexPlan<RowOf<TSchema>, Map<unknown, RowOf<TSchema>>> {
   /** Selects one or more row fields as the index key. */
@@ -62,6 +89,13 @@ export interface IndexBuilder<TSchema extends ATS.AnyTypeSchema>
  * Materializes an index over a collection. The key comes from the collection's
  * own facts — `.keyed`, `.indexBy`, `.uniqueBy` or an entity hint — unless
  * `.by()` names one. Naming the keys is what gives the index a precise type.
+ *
+ * @example
+ * ```ts
+ * const Users = JIT.array(JIT.object({ id: JIT.number(), email: JIT.string() })).keyed("id");
+ * const byId = JIT.index(Users);
+ * byId([{ id: 1, email: "ada@example.com" }]).get(1)?.email; // "ada@example.com"
+ * ```
  */
 export function index<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): IndexBuilder<TSchema> {
   const unwrapped = unwrapSchema(schema);

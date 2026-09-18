@@ -24,27 +24,57 @@ type TypeofInputShape<TShape extends InputShape> = {
 type InputArgs<TInputs> = keyof TInputs extends never ? readonly [] : readonly [inputs: TInputs];
 type NoInputs = Readonly<Record<never, never>>;
 
-/** Provides the JIT rule input value operation for the supplied input. */
+/**
+ * A typed reference to a value supplied when a rule runs.
+ *
+ * @example
+ * ```ts
+ * const threshold: RuleInputValue<number> = { kind: "param", name: "threshold" };
+ * ```
+ */
 export interface RuleInputValue<TValue> {
   readonly kind: "param";
   readonly name: string;
   readonly __value?: TValue;
 }
 
-/** Describes the JIT rule field value contract used by the public API. */
+/**
+ * A reference to a field copied into a rule outcome.
+ *
+ * @example
+ * ```ts
+ * const subjectId: RuleFieldValue<number> = { kind: "field", key: "id" };
+ * ```
+ */
 export interface RuleFieldValue<TValue> {
   readonly kind: "field";
   readonly key: string;
   readonly __value?: TValue;
 }
 
-/** Provides the JIT rule input ref operation for the supplied input. */
+/**
+ * References declared rule inputs by name.
+ *
+ * @example
+ * ```ts
+ * const options: RuleOptions<{ active: boolean }, { threshold: number }, undefined> = {
+ *   when: (query, inputs) => query.eq("active", true),
+ * };
+ * ```
+ */
 export interface RuleInputRef<TInputs> {
   /** References a declared rule input by field name. */
   field<TKey extends Field<TInputs>>(key: TKey): RuleInputValue<TInputs[TKey]>;
 }
 
-/** Describes the JIT rule subject ref contract used by the public API. */
+/**
+ * References subject fields while constructing an emitted outcome.
+ *
+ * @example
+ * ```ts
+ * const values = (subject: RuleSubjectRef<{ id: number }>) => ({ id: subject.field("id") });
+ * ```
+ */
 export interface RuleSubjectRef<TSubject> {
   /** References a subject field when constructing an emitted outcome. */
   field<TKey extends Field<TSubject>>(key: TKey): RuleFieldValue<TSubject[TKey]>;
@@ -52,7 +82,14 @@ export interface RuleSubjectRef<TSubject> {
 
 type RuleOperand<TValue> = TValue | RuleInputValue<TValue>;
 
-/** Query-compatible conditions over subject fields and declared typed inputs. */
+/**
+ * Query-compatible conditions over subject fields and declared typed inputs.
+ *
+ * @example
+ * ```ts
+ * const active = (query: RuleConditionBuilder<{ active: boolean }>) => query.eq("active", true);
+ * ```
+ */
 export interface RuleConditionBuilder<TSubject> {
   /** Compares a subject field with a literal or input value. */
   eq<TKey extends Field<TSubject>>(left: TKey, right: RuleOperand<TSubject[TKey]>): QueryCompareNode;
@@ -86,7 +123,14 @@ export interface RuleConditionBuilder<TSubject> {
   not(inner: QueryConditionNode): QueryConditionNode;
 }
 
-/** The value a rule emits: a domain event instance, or the target schema type. */
+/**
+ * The value a rule emits: a domain event instance, or the target schema type.
+ *
+ * @example
+ * ```ts
+ * type Result = RuleOutcomeOf<typeof ResultSchema>;
+ * ```
+ */
 export type RuleOutcomeOf<TEmit> = TEmit extends { create(input: never): infer TResult }
   ? TResult
   : TEmit extends SchemaInput<infer TSchema>
@@ -104,7 +148,16 @@ type RuleOutcomeValues<TPayload> = {
   readonly [TKey in keyof TPayload]?: RuleFieldValue<TPayload[TKey]> | RuleInputValue<TPayload[TKey]> | TPayload[TKey];
 };
 
-/** Provides the JIT rule options operation for the supplied input. */
+/**
+ * Condition and pure-data consequence for one declared rule.
+ *
+ * @example
+ * ```ts
+ * const options: RuleOptions<{ active: boolean }, Record<never, never>, undefined> = {
+ *   when: (query) => query.eq("active", true),
+ * };
+ * ```
+ */
 export interface RuleOptions<TSubject, TInputs, TEmit> {
   readonly priority?: number;
   readonly when: (query: RuleConditionBuilder<TSubject>, inputs: RuleInputRef<TInputs>) => QueryConditionNode;
@@ -117,20 +170,48 @@ export interface RuleOptions<TSubject, TInputs, TEmit> {
   ) => RuleOutcomeValues<RuleEmitPayload<TEmit>>;
 }
 
-/** A single rule condition, reusable as a query predicate. */
+/**
+ * A single rule condition, reusable as a query predicate.
+ *
+ * @example
+ * ```ts
+ * const isActive: RulePredicate<{ active: boolean }, Record<never, never>> = (subject) => subject.active;
+ * ```
+ */
 export type RulePredicate<TSubject, TInputs> = (subject: TSubject, ...args: InputArgs<TInputs>) => boolean;
 
-/** Describes the JIT rules visitor contract used by the public API. */
+/**
+ * Visitor callback for one rule evaluation.
+ *
+ * @example
+ * ```ts
+ * const visit: RulesVisitor<"active" | "inactive", string> = (rule, outcome) => console.log(rule, outcome);
+ * ```
+ */
 export type RulesVisitor<TRuleId extends string, TOutcome> = (rule: TRuleId, outcome: TOutcome | undefined) => void;
 
-/** Describes the JIT rules many visitor contract used by the public API. */
+/**
+ * Visitor callback for collection rule evaluation.
+ *
+ * @example
+ * ```ts
+ * const visit: RulesManyVisitor<"active", string> = (rule, outcome, index) => console.log(index, rule, outcome);
+ * ```
+ */
 export type RulesManyVisitor<TRuleId extends string, TOutcome> = (
   rule: TRuleId,
   outcome: TOutcome | undefined,
   index: number
 ) => void;
 
-/** Collection specialization: one generated loop over every record. */
+/**
+ * Collection specialization: one generated loop over every record.
+ *
+ * @example
+ * ```ts
+ * const matches = plan.many()(subjects);
+ * ```
+ */
 export interface RulesManyPlan<TInputs, TRuleId extends string, TOutcome, TSubject> {
   /** Runs matching outcomes over every subject. */
   (subjects: readonly TSubject[], ...args: InputArgs<TInputs>): TOutcome[];
@@ -145,13 +226,32 @@ export interface RulesManyPlan<TInputs, TRuleId extends string, TOutcome, TSubje
   };
 }
 
-/** Describes the JIT rules explained contract used by the public API. */
+/**
+ * Rule ids evaluated and matched by a diagnostic explanation.
+ *
+ * @example
+ * ```ts
+ * const explanation: RulesExplained<"active" | "inactive"> = {
+ *   evaluated: ["active"],
+ *   matched: ["active"],
+ * };
+ * ```
+ */
 export interface RulesExplained<TRuleId extends string> {
   readonly matched: readonly TRuleId[];
   readonly evaluated: readonly TRuleId[];
 }
 
-/** Provides the JIT rules plan operation for the supplied input. */
+/**
+ * Compiled decision graph with short-circuit and visitor sinks.
+ *
+ * @example
+ * ```ts
+ * const plan = JIT.rules(User)
+ *   .rule("active", { when: (query) => query.eq("active", true) });
+ * plan.first({ active: true }); // "active"
+ * ```
+ */
 export interface RulesPlan<
   TSubject,
   TInputs extends Readonly<Record<string, unknown>>,
@@ -195,7 +295,15 @@ export interface RulesPlan<
   inspect(): RulesInspection;
 }
 
-/** Provides the JIT rules builder operation for the supplied input. */
+/**
+ * Starts a pure, typed rule graph for a subject schema.
+ *
+ * @example
+ * ```ts
+ * const active = JIT.rules(User)
+ *   .rule("active", { when: (query) => query.eq("active", true) });
+ * ```
+ */
 export interface RulesBuilder<TSubject> extends RulesPlan<TSubject, NoInputs, never, never> {}
 
 /**
@@ -204,6 +312,13 @@ export interface RulesBuilder<TSubject> extends RulesPlan<TSubject, NoInputs, ne
  * Conditions reuse the query AST, inputs are declared schemas, and rule ids
  * stay literal, so every execution sink lowers to direct comparisons over
  * known fields instead of a rule/fact/operator runtime.
+ *
+ * @example
+ * ```ts
+ * const active = JIT.rules(User)
+ *   .rule("active", { when: (query) => query.eq("active", true) });
+ * active.first({ active: true }); // "active"
+ * ```
  */
 export function rules<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>

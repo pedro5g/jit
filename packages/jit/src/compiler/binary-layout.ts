@@ -480,7 +480,7 @@ export function alignmentForSize(size: number): 1 | 4 | 8 {
   return 1;
 }
 
-export function createViewUsage(fields: readonly BinaryFieldLayout[]): BinaryRowViewUsage {
+function createViewUsage(fields: readonly BinaryFieldLayout[]): BinaryRowViewUsage {
   let int32 = false;
   let uint32 = false;
   let float32 = false;

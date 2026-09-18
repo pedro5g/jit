@@ -388,21 +388,9 @@ export function emitUnion(emitter: ValidatorEmitter, schema: AnySchema, value: s
   const out = emitter.nextVar("o");
 
   emitter.writer.line(`let ${out} = ${value};`);
-  options.forEach((option, position) => {
-    emitter.writer.line(`${position === 0 ? "if" : "} else if"} (${tests[position]}) {`);
-    emitter.writer.indent(() => {
-      if (needsBuild(option)) {
-        const branchOut = emitter.emitNode(option, value, path);
-
-        emitter.writer.line(`${out} = ${branchOut};`);
-      }
-    });
-  });
-  emitter.writer.line("} else {");
-  emitter.writer.indent(() => {
+  emitOptionBranches(emitter, options, tests, value, path, out, () => {
     emitter.emitFail(path, "invalid_union", "union", emitter.requiredMessage(schema, "value matched no union option"));
   });
-  emitter.writer.line("}");
   return out;
 }
 
@@ -432,20 +420,38 @@ export function emitXor(emitter: ValidatorEmitter, schema: AnySchema, value: str
   });
   emitter.writer.line("} else {");
   emitter.writer.indent(() => {
-    options.forEach((option, position) => {
-      emitter.writer.line(`${position === 0 ? "if" : "} else if"} (${tests[position]}) {`);
-      emitter.writer.indent(() => {
-        if (needsBuild(option)) {
-          const branchOut = emitter.emitNode(option, value, path);
-
-          emitter.writer.line(`${out} = ${branchOut};`);
-        }
-      });
-    });
-    if (options.length > 0) emitter.writer.line("}");
+    emitOptionBranches(emitter, options, tests, value, path, out);
   });
   emitter.writer.line("}");
   return out;
+}
+
+function emitOptionBranches(
+  emitter: ValidatorEmitter,
+  options: readonly ATS.AnyTypeSchema[],
+  tests: readonly string[],
+  value: string,
+  path: PathRef,
+  output: string,
+  noMatch?: () => void
+): void {
+  options.forEach((option, position) => {
+    emitter.writer.line(`${position === 0 ? "if" : "} else if"} (${tests[position]}) {`);
+    emitter.writer.indent(() => {
+      if (needsBuild(option)) {
+        const branchOut = emitter.emitNode(option, value, path);
+
+        emitter.writer.line(`${output} = ${branchOut};`);
+      }
+    });
+  });
+  if (noMatch !== undefined) {
+    emitter.writer.line("} else {");
+    emitter.writer.indent(noMatch);
+    emitter.writer.line("}");
+  } else if (options.length > 0) {
+    emitter.writer.line("}");
+  }
 }
 
 /** Emits (once per option schema) a hoisted `function iuN(value)` deep check. */

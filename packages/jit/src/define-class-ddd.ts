@@ -1,4 +1,5 @@
 import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
+import { findRuntimeTypeSchema } from "./compiler/runtime-type/find-runtime-type-schema.js";
 import type * as ATS from "./core/ats/index.js";
 import { createSchema, TypeName } from "./core/ats/index.js";
 import type { SchemaInput } from "./core/builder/index.js";
@@ -41,34 +42,7 @@ function defineIdentityKey(
 }
 
 function defineIsIdentifierSchema(schema: ATS.AnyTypeSchema): boolean {
-  return defineFindRuntimeTypeSchema(schema)?.def.identifier === true;
-}
-
-function defineFindRuntimeTypeSchema(schema: ATS.AnyTypeSchema): ATS.RuntimeTypeSchema | undefined {
-  let current = schema;
-  while (true) {
-    if (current.type === TypeName.runtimeType) return current as ATS.RuntimeTypeSchema;
-    if (current.type === TypeName.lazy) {
-      current = (current.def as ATS.LazyDef).getter();
-      continue;
-    }
-    if (
-      current.type === TypeName.optional ||
-      current.type === TypeName.nullable ||
-      current.type === TypeName.nullish ||
-      current.type === TypeName.default ||
-      current.type === TypeName.brand ||
-      current.type === TypeName.readonly ||
-      current.type === TypeName.refine ||
-      current.type === TypeName.coerce ||
-      current.type === TypeName.pipe ||
-      current.type === TypeName.transform
-    ) {
-      current = (current.def as ATS.InnerTypeDef).innerType;
-      continue;
-    }
-    return undefined;
-  }
+  return findRuntimeTypeSchema(schema)?.def.identifier === true;
 }
 
 function defineScalarValueObject(

@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates an integer-number schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Quantity = JIT.int();
+ * JIT.validate.parse(Quantity)(3); // 3
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping an int schema.
  */
 export function int(message?: ValidationMessage): Builder<IntSchema<[]>> {

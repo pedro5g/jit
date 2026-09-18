@@ -3,7 +3,19 @@ import { createSchema, TypeName } from "../core/ats/index.js";
 import type { Builder, SchemaInput } from "../core/builder/index.js";
 import { createBuilder, unwrapSchema } from "../core/builder/index.js";
 
-/** Describes the JIT value codec options contract used by the public API. */
+/**
+ * Describes the JIT value codec options contract used by the public API.
+ *
+ * @example
+ * ```ts
+ * const Input = JIT.string();
+ * const Output = JIT.date();
+ * const options: JIT.ValueCodecOptions<typeof Input.schema, typeof Output.schema> = {
+ *   decode: (value) => new Date(value),
+ *   encode: (value) => value.toISOString(),
+ * };
+ * ```
+ */
 export interface ValueCodecOptions<TInput extends ATS.AnyTypeSchema, TOutput extends ATS.AnyTypeSchema> {
   readonly decode: (value: ATS.TypeofSchema<TInput>) => ATS.TypeofSchema<TOutput>;
   readonly encode: (value: ATS.TypeofSchema<TOutput>) => ATS.TypeofSchema<TInput>;

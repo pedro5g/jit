@@ -25,10 +25,19 @@ import type {
   ClassCreateInput,
   ClassHydrateInput,
   ExtendedInstance,
+  TransparentSchema,
 } from "./class-types-schema.js";
 import type { QueryConditionBuilder } from "./query.js";
 
-/** Describes the shared runtime class contract before construction is fixed. */
+/**
+ * Shared Runtime Class contract before construction is fixed.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.class(UserSchema);
+ * const withFactory = User.construction("factory");
+ * ```
+ */
 export interface RuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,
@@ -102,7 +111,15 @@ export type RuntimeClassConstructionMembers =
   | "validate"
   | "assert";
 
-/** The default `JIT.class` surface: direct construction, no static factories. */
+/**
+ * The default `JIT.class` surface: direct construction, no static factories.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.class(UserSchema);
+ * const user = new User({ id: 1 });
+ * ```
+ */
 export type ConstructorRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,
@@ -143,7 +160,15 @@ export type ConstructorRuntimeClass<
       Omit<ConstructorRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, "accessors">;
   };
 
-/** Describes the JIT factory options contract used by the public API. */
+/**
+ * Names or disables the generated `create` and `hydrate` factory methods.
+ *
+ * @example
+ * ```ts
+ * const options: FactoryOptions = { create: "make", hydrate: "restore" };
+ * const User = JIT.class(UserSchema).factories(options);
+ * ```
+ */
 export interface FactoryOptions {
   readonly create?: string | false | ClassMemberDescriptor<ClassFactoryMemberDescriptor>;
   readonly hydrate?: string | false | ClassMemberDescriptor<ClassFactoryMemberDescriptor>;
@@ -177,17 +202,7 @@ type NestedFactoryModeCandidates<TSchema extends ATS.AnyTypeSchema> =
         ? NestedFactoryModeCandidates<TElement>
         : TSchema extends ATS.LazySchema<infer TInner>
           ? NestedFactoryModeCandidates<TInner>
-          : TSchema extends
-                | ATS.OptionalSchema<infer TInner>
-                | ATS.NullableSchema<infer TInner>
-                | ATS.NullishSchema<infer TInner>
-                | ATS.DefaultSchema<infer TInner>
-                | ATS.BrandSchema<infer TInner>
-                | ATS.ReadonlySchema<infer TInner>
-                | ATS.RefineSchema<infer TInner>
-                | ATS.CoerceSchema<infer TInner>
-                | ATS.PipeSchema<infer TInner>
-                | ATS.TransformSchema<infer TInner>
+          : TSchema extends TransparentSchema<infer TInner>
             ? NestedFactoryModeCandidates<TInner>
             : never;
 
@@ -233,17 +248,7 @@ export type NestedFactoryErrors<TSchema extends ATS.AnyTypeSchema> =
         ? NestedFactoryErrors<TElement>
         : TSchema extends ATS.LazySchema<infer TInner>
           ? NestedFactoryErrors<TInner>
-          : TSchema extends
-                | ATS.OptionalSchema<infer TInner>
-                | ATS.NullableSchema<infer TInner>
-                | ATS.NullishSchema<infer TInner>
-                | ATS.DefaultSchema<infer TInner>
-                | ATS.BrandSchema<infer TInner>
-                | ATS.ReadonlySchema<infer TInner>
-                | ATS.RefineSchema<infer TInner>
-                | ATS.CoerceSchema<infer TInner>
-                | ATS.PipeSchema<infer TInner>
-                | ATS.TransformSchema<infer TInner>
+          : TSchema extends TransparentSchema<infer TInner>
             ? NestedFactoryErrors<TInner>
             : never;
 

@@ -31,19 +31,40 @@ import type {
   MixinRequirementsMet,
 } from "./class-types-state.js";
 
-/** Describes the JIT construction mode contract used by the public API. */
+/**
+ * Construction boundary selected for a Runtime Class.
+ *
+ * @example
+ * ```ts
+ * const FactoryUser = JIT.class(UserSchema).construction("factory");
+ * ```
+ */
 export type ConstructionMode = "constructor" | "factory";
 
 /** How a factory reports a rejected input. Fixed at declaration, never per call. */
 
-/** Provides the JIT factory failure operation for the supplied input. */
+/**
+ * Failure value returned by a factory configured with the `either` policy.
+ *
+ * @example
+ * ```ts
+ * const result: FactoryFailure<Error> = { ok: false, error: new Error("invalid") } as never;
+ * ```
+ */
 export interface FactoryFailure<TError> {
   readonly [FACTORY_FAILURE]: true;
   readonly ok: false;
   readonly error: TError;
 }
 
-/** Provides the JIT class json options operation for the supplied input. */
+/**
+ * Names the JSON method installed by the class JSON capability.
+ *
+ * @example
+ * ```ts
+ * const options: ClassJsonOptions = { method: "serialize" };
+ * ```
+ */
 export interface ClassJsonOptions {
   readonly method?: string;
 }
@@ -53,14 +74,28 @@ type ClassJsonMethods<TOptions extends ClassJsonOptions> = NamedMethod<
   () => string
 >;
 
-/** Provides the JIT class json capability operation for the supplied input. */
+/**
+ * Reconstructive JSON capability installed on a Runtime Class prototype.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.class(UserSchema).extends(JIT.class.json());
+ * ```
+ */
 export interface ClassJsonCapability<TOptions extends ClassJsonOptions = ClassJsonOptions>
   extends ClassCapability<ClassJsonMethods<TOptions>> {
   readonly kind: "class.json";
   readonly __options?: TOptions;
 }
 
-/** Provides the JIT factory either operation for the supplied input. */
+/**
+ * Union of a successful factory instance and its declared failure value.
+ *
+ * @example
+ * ```ts
+ * type Result = FactoryEither<User, Error>;
+ * ```
+ */
 export type FactoryEither<TValue, TError> = TValue | FactoryFailure<TError>;
 
 /** @internal Type helper shared by the runtime-class type contracts. */
@@ -96,7 +131,14 @@ export type AssertionTraits<TTraits extends ATS.RuntimeTypeTraits, TError> = ATS
   }
 >;
 
-/** The failure channel and the phases it covers. */
+/**
+ * The failure channel and the phases it covers.
+ *
+ * @example
+ * ```ts
+ * const policy: FactoryValidationOptions = { result: "either", create: true, hydrate: true };
+ * ```
+ */
 export interface FactoryValidationOptions {
   readonly result?: FactoryReturnModeInput;
   /** Stops diagnostic validation as soon as this many issues have been emitted. */
@@ -109,12 +151,26 @@ export interface FactoryValidationOptions {
   readonly hydrate?: boolean;
 }
 
-/** Describes the JIT factory construction context contract used by the public API. */
+/**
+ * Context passed to a custom factory construction function.
+ *
+ * @example
+ * ```ts
+ * const context: FactoryConstructionContext<User> = { construct: (state) => new User(state) };
+ * ```
+ */
 export interface FactoryConstructionContext<TInstance = unknown> {
   readonly construct: (state: unknown) => TInstance;
 }
 
-/** Describes the JIT assertion options contract used by the public API. */
+/**
+ * Metadata and error customization for one domain assertion.
+ *
+ * @example
+ * ```ts
+ * const options: AssertionOptions = { rule: "active", code: "USER_INACTIVE" };
+ * ```
+ */
 export interface AssertionOptions {
   /** Identifier reported by the failure; defaults to the field the condition names. */
   readonly rule?: string;
@@ -127,7 +183,14 @@ export interface AssertionOptions {
   readonly priority?: number;
 }
 
-/** A successful or rejected factory call, in the shape the policy declared. */
+/**
+ * A successful or rejected factory call, in the shape the policy declared.
+ *
+ * @example
+ * ```ts
+ * type Result = FactoryOutcome<User, "tuple", Error>;
+ * ```
+ */
 export type FactoryOutcome<TInstance, TMode, TError> = TMode extends "either"
   ? FactoryEither<TInstance, TError>
   : TMode extends "tuple"
@@ -142,6 +205,12 @@ export type FactoryOutcome<TInstance, TMode, TError> = TMode extends "either"
  * so a body reads its own fields and its already-installed capabilities and
  * nothing else. A name the instance already carries is rejected here rather
  * than shadowing something at run time.
+ *
+ * @example
+ * ```ts
+ * const extension: JIT.ClassMethodsInput = { label() { return "user"; } };
+ * const User = JIT.class(UserSchema).extends(extension);
+ * ```
  */
 export type ClassExtensionArgs<
   TSchema extends ATS.AnyTypeSchema,
@@ -211,7 +280,16 @@ export type IsAny<TValue> = 0 extends 1 & TValue ? true : false;
 export type IsOverrideValue<TValue> =
   IsAny<TValue> extends true ? false : TValue extends OverrideDescriptor ? true : false;
 
-/** Provides the JIT class extension builder operation for the supplied input. */
+/**
+ * Builder passed to functional `.extends()` extensions.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.class(UserSchema).extends(($) => ({
+ *   score: $.field(JIT.number()).public(),
+ * }));
+ * ```
+ */
 export interface ClassExtensionBuilder<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
@@ -293,7 +371,16 @@ type FieldBuilderDefinition<
 } & (TGetter extends Function ? { readonly getter: TGetter } : {}) &
   (TSetter extends Function ? { readonly setter: TSetter } : {});
 
-/** Provides the JIT class extension field builder operation for the supplied input. */
+/**
+ * Configures visibility and accessors for an extension field.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.class(UserSchema).extends(($) => ({
+ *   score: $.field(JIT.number()).public(),
+ * }));
+ * ```
+ */
 export interface ClassExtensionFieldBuilder<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,

@@ -124,6 +124,24 @@ describe("JIT AOT source output and tree-shakable exports", () => {
     expect(result.files.map((file) => file.split("/").pop())).toEqual(["index.js"]);
     expect(readFileSync(join(outDir, "index.js"), "utf8")).toContain("export { User_is, Order_stringify };");
   });
+
+  it("should preserve declaration-backed query types and emit their type helper", () => {
+    const Users = JIT.array(JIT.object({ id: JIT.number(), active: JIT.boolean() }));
+    const activeUsers = JIT.cqrs.query(Users).filter((query) => query.eq("active", true));
+
+    AOT.generate({
+      artifacts: { activeUsers },
+      outDir,
+      format: "ts",
+      sources: new Map([["activeUsers", join(outDir, "users.jit.ts")]]),
+      exported: new Set(["activeUsers"]),
+    });
+
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
+
+    expect(source).toContain("type __JitCall<");
+    expect(source).toContain("const activeUsers: __JitCall<");
+  });
 });
 
 describe("JIT AOT self-contained types", () => {

@@ -21,6 +21,19 @@ import type {
 import type { AnyClassExtension, IsAny, IsOverrideValue } from "./class-types-extension.js";
 import type { IdentityKeys, IdentityKeysFromInstance, InternalInstance } from "./class-types-state.js";
 
+/** @internal Schemas whose wrappers preserve the nested Runtime Type contract. */
+export type TransparentSchema<TInner extends ATS.AnyTypeSchema> =
+  | ATS.OptionalSchema<TInner>
+  | ATS.NullableSchema<TInner>
+  | ATS.NullishSchema<TInner>
+  | ATS.DefaultSchema<TInner>
+  | ATS.BrandSchema<TInner>
+  | ATS.ReadonlySchema<TInner>
+  | ATS.RefineSchema<TInner>
+  | ATS.CoerceSchema<TInner>
+  | ATS.PipeSchema<TInner>
+  | ATS.TransformSchema<TInner>;
+
 /** @internal Type helper used while contextualizing structural mixin methods. */
 export type MixinThisSurface<TFields extends ClassMethodsInput, TRequires extends ClassMethodsInput> = ATS.TypeofSchema<
   ATS.ObjectSchema<SchemaFieldShape<TFields & TRequires>>

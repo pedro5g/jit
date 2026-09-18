@@ -4,7 +4,7 @@ import type { ExecutionPlan, ExecutionStage } from "../compiler/execution-plan.j
 import { buildMapperPlan, type MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
 import { emitMapperSource } from "../compiler/mapper.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
-import { canUseFastParse } from "../compiler/validate/emit-validate.js";
+import { canUseFastParse } from "../compiler/validate/emit-validate-support.js";
 import type * as ATS from "../core/ats/index.js";
 import type { CompiledArtifact } from "../runtime/artifact-registry.js";
 import { type AotComposedExecutionHost, emitComposedExecutionArtifact } from "./emit-composed-execution.js";

@@ -22,12 +22,20 @@ type CollectionElement<TValue> = TValue extends readonly (infer TElement)[]
  * Result returned by a compiled runtime watcher.
  *
  * @template TItem - The watched collection element type.
+ * @example
+ * ```ts
+ * const result: WatchedListResult<User> = JIT.state.watch(Users, { key: "id" })(previous, current);
+ * ```
  */
 export type WatchedListResult<TItem> = import("../compiler/watch.js").WatchResult<TItem>;
 /**
  * Input options accepted by `JIT.state.watch(schema, options)`.
  *
  * @template TValue - The watched collection type.
+ * @example
+ * ```ts
+ * const options: WatchInput<readonly User[]> = { key: "id" };
+ * ```
  */
 export type WatchInput<TValue> = WatchOptions<CollectionElement<TValue>>;
 /**
@@ -37,6 +45,10 @@ export type WatchInput<TValue> = WatchOptions<CollectionElement<TValue>>;
  * @param previous - The previous collection snapshot.
  * @param current - The current collection snapshot.
  * @returns Added, removed, updated, and change-summary information.
+ * @example
+ * ```ts
+ * const changes = JIT.state.watch(Users, { key: "id" })(previous, current);
+ * ```
  */
 export type RuntimeWatch<TValue> = Watch<TValue>;
 /** Provides the JIT type operation for the supplied input. */
@@ -54,6 +66,11 @@ export { KeyedWatchedList, WatchedList };
  * @param schema - The schema or builder the watcher runs against.
  * @param options - The key and optional change callbacks.
  * @returns A compiled runtime watcher.
+ * @example
+ * ```ts
+ * const changes = JIT.state.watch(Users, { key: "id" });
+ * changes(previous, current);
+ * ```
  */
 export function watch<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
@@ -73,6 +90,11 @@ export function watch<TSchema extends ATS.AnyTypeSchema>(
  * @param initialItems - The initial collection items.
  * @param options - Identity and comparison options.
  * @returns A watched list instance.
+ * @example
+ * ```ts
+ * const list = new JIT.WatchedList([{ id: 1 }], { key: "id" });
+ * list.add({ id: 2 });
+ * ```
  */
 export function watchedList<TSchema extends ATS.AnyTypeSchema>(
   _schema: SchemaInput<TSchema>,

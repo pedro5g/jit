@@ -70,7 +70,16 @@ type TypeofParamShape<TShape extends ParamSchemaShape> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema> ? ATS.TypeofSchema<TSchema> : never;
 };
 type QueryComparable<TValue> = TValue | QueryConstRef<TValue> | QueryParamRef;
-/** Describes the JIT query runtime params contract used by the public API. */
+/**
+ * References the declared query parameters with their inferred value types.
+ *
+ * @example
+ * ```ts
+ * const byId = JIT.cqrs.query(Users)
+ *   .params({ id: JIT.number() })
+ *   .filter((where, params) => where.eq("id", params.id));
+ * ```
+ */
 export type QueryRuntimeParams<TParams extends Readonly<Record<string, unknown>>> = {
   readonly [TKey in keyof TParams]: QueryParamRef<TParams[TKey]>;
 };
@@ -100,6 +109,11 @@ type IterableElement<TValue> = TValue extends Iterable<infer TElement> ? TElemen
  * Type-safe condition factory passed to `query().filter()`.
  *
  * @template TElement - The collection element type being filtered.
+ *
+ * @example
+ * ```ts
+ * const active = JIT.cqrs.query(Users).filter((where) => where.eq("active", true));
+ * ```
  */
 export interface QueryConditionBuilder<TElement> {
   /** Compares a field with a literal, parameter or query constant. */
@@ -150,6 +164,14 @@ export interface QueryConditionBuilder<TElement> {
  * @template TSchema - The collection schema type.
  * @template TOutput - The current element/result item type.
  * @template TResult - The final query result type.
+ *
+ * @example
+ * ```ts
+ * const activeIds = JIT.cqrs.query(Users)
+ *   .filter((where) => where.eq("active", true))
+ *   .select("id");
+ * activeIds(users);
+ * ```
  */
 export type QueryBuilder<
   TSchema extends ATS.AnyTypeSchema,
@@ -158,7 +180,16 @@ export type QueryBuilder<
   TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 > = QueryCompiledFunction<TSchema, TResult, TParams> & QueryBuilderOps<TSchema, TOutput, TResult, TParams>;
 
-/** Chain operators carried by every query builder; the builder itself runs the query. */
+/**
+ * Chain operators carried by every query builder; the builder itself runs the query.
+ *
+ * @example
+ * ```ts
+ * const firstActive = JIT.cqrs.query(Users)
+ *   .filter((where) => where.eq("active", true))
+ *   .first();
+ * ```
+ */
 export interface QueryBuilderOps<
   TSchema extends ATS.AnyTypeSchema,
   TOutput,
@@ -310,7 +341,15 @@ export interface QueryBuilderOps<
   explain(outputMode?: "eager-array" | "generator" | "async-generator" | "visitor"): QueryExecutionPlan;
 }
 
-/** Describes the JIT query sinks contract used by the public API. */
+/**
+ * Alternative sinks for one compiled query program.
+ *
+ * @example
+ * ```ts
+ * const visit = JIT.cqrs.query(Users).to.visitor();
+ * visit(users, (user) => console.log(user.id));
+ * ```
+ */
 export interface QuerySinks<
   TSchema extends ATS.AnyTypeSchema,
   TOutput,
@@ -324,7 +363,15 @@ export interface QuerySinks<
   visitor(): QueryVisitorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
 }
 
-/** A lazy query is the generator itself; sinks reshape the same program. */
+/**
+ * A lazy query is the generator itself; sinks reshape the same program.
+ *
+ * @example
+ * ```ts
+ * const lazy = JIT.cqrs.query(Users).lazy();
+ * for (const user of lazy(users)) console.log(user.id);
+ * ```
+ */
 export type LazyQueryBuilder<
   TSchema extends ATS.AnyTypeSchema,
   TOutput,
@@ -338,6 +385,11 @@ export type LazyQueryBuilder<
  * Query builder backed by a binary rowset layout. It accepts the same filter
  * AST as regular `JIT.cqrs.query`, but compiles supported filters/projections into
  * byte-offset scans over `ArrayBuffer` rows.
+ *
+ * @example
+ * ```ts
+ * const active = JIT.cqrs.query(binaryRows).filter((where) => where.eq("active", true));
+ * ```
  */
 export type BinaryQueryBuilder<
   TElement,
@@ -347,7 +399,14 @@ export type BinaryQueryBuilder<
 > = BinaryQueryCompiledFunction<TElement, TResult, TParams> &
   BinaryQueryBuilderOps<TElement, TOutput, TResult, TParams>;
 
-/** Describes the JIT binary query builder ops contract used by the public API. */
+/**
+ * Operators available on a binary rowset query.
+ *
+ * @example
+ * ```ts
+ * const total = JIT.cqrs.query(binaryRows).sum("amount");
+ * ```
+ */
 export interface BinaryQueryBuilderOps<
   TElement,
   TOutput,
@@ -389,25 +448,58 @@ export interface BinaryQueryBuilderOps<
   ): BinaryQueryBuilder<TElement, TOutput, number | undefined, TParams>;
 }
 
-/** Describes the JIT query param ref contract used by the public API. */
+/**
+ * A named value supplied when a compiled query runs.
+ *
+ * @example
+ * ```ts
+ * const id = JIT.cqrs.param("id");
+ * const query = JIT.cqrs.query(Users).filter((where) => where.eq("id", id));
+ * ```
+ */
 export interface QueryParamRef<TValue = unknown> {
   readonly __jitQueryValue: "param";
   readonly name: string;
   readonly _type?: TValue;
 }
 
-/** Describes the JIT query const ref contract used by the public API. */
+/**
+ * A reusable literal value in a query condition.
+ *
+ * @example
+ * ```ts
+ * const active = JIT.cqrs.const(true);
+ * const query = JIT.cqrs.query(Users).filter((where) => where.eq("active", active));
+ * ```
+ */
 export interface QueryConstRef<TValue = unknown> {
   readonly __jitQueryValue: "const";
   readonly value: TValue;
 }
 
-/** Provides the JIT param operation for the supplied input. */
+/**
+ * Creates a named query parameter reference.
+ *
+ * @example
+ * ```ts
+ * const byId = JIT.cqrs.query(Users)
+ *   .filter((where) => where.eq("id", JIT.cqrs.param("id")));
+ * byId(users, { id: 1 });
+ * ```
+ */
 export function param<const TName extends string>(name: TName): QueryParamRef<never> & { readonly name: TName } {
   return { __jitQueryValue: "param", name, _type: null as never };
 }
 
-/** Provides the JIT constant operation for the supplied input. */
+/**
+ * Creates a query constant reference.
+ *
+ * @example
+ * ```ts
+ * const query = JIT.cqrs.query(Users)
+ *   .filter((where) => where.eq("active", JIT.cqrs.const(true)));
+ * ```
+ */
 export function constant<const TValue extends string | number | bigint | boolean | null | undefined>(
   value: TValue
 ): QueryConstRef<TValue> {
@@ -420,6 +512,11 @@ export function constant<const TValue extends string | number | bigint | boolean
  * @template TSchema - The collection schema type.
  * @param schema - The schema or builder the query runs against.
  * @returns A fluent query builder that compiles to specialized JavaScript.
+ * @example
+ * ```ts
+ * const active = JIT.cqrs.query(Users).filter((where) => where.eq("active", true));
+ * active(users);
+ * ```
  */
 export function query<TElement>(
   target: BinaryArray<TElement> | BinaryRowSet<TElement>

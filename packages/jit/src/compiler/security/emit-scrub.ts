@@ -2,6 +2,7 @@ import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
 import { JITError } from "../../errors/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
+import { resolveWrappers } from "../resolvers/resolve-wrappers.js";
 import { findRecursiveSchemas } from "../schema-recursion.js";
 import { emitPropertyAccess } from "../source/access.js";
 import { emitLiteral } from "../source/literal.js";
@@ -227,41 +228,8 @@ interface ResolvedScrubWrappers {
 }
 
 function resolveScrubWrappers(schema: ATS.AnyTypeSchema): ResolvedScrubWrappers {
-  let current = schema as AnySchema;
-  let optional = false;
-  let nullable = false;
-
-  while (true) {
-    switch (current.type) {
-      case TypeName.optional:
-        optional = true;
-        current = current.def.innerType as AnySchema;
-        continue;
-      case TypeName.nullable:
-        nullable = true;
-        current = current.def.innerType as AnySchema;
-        continue;
-      case TypeName.nullish:
-        optional = true;
-        nullable = true;
-        current = current.def.innerType as AnySchema;
-        continue;
-      case TypeName.default:
-      case TypeName.brand:
-      case TypeName.readonly:
-      case TypeName.refine:
-      case TypeName.coerce:
-      case TypeName.pipe:
-      case TypeName.transform:
-        current = current.def.innerType as AnySchema;
-        continue;
-      case TypeName.lazy:
-        current = (current.def.getter as () => AnySchema)();
-        continue;
-      default:
-        return { base: current, optional, nullable };
-    }
-  }
+  const resolved = resolveWrappers(schema);
+  return { base: resolved.base as AnySchema, optional: resolved.optional, nullable: resolved.nullable };
 }
 
 /** True when any leaf in the subtree is selected for rewriting. */

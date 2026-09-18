@@ -12,12 +12,7 @@ import { resolveRowObjectSchema } from "../compiler/row-keys.js";
 import { emitSortSource } from "../compiler/sort.js";
 import type * as ATS from "../core/ats/index.js";
 import type { CompiledArtifact } from "../runtime/artifact-registry.js";
-import type { SkippedOperation } from "./generate.js";
-
-interface EmittedBinding {
-  readonly binding: string;
-  readonly type: string;
-}
+import type { ArtifactEmissionContext, EmittedBinding } from "./emit-context-types.js";
 
 type PlanArtifactArguments<TFunction> = TFunction extends (
   context: PlanArtifactEmitterContext,
@@ -26,22 +21,10 @@ type PlanArtifactArguments<TFunction> = TFunction extends (
   ? Arguments
   : never;
 
-export interface PlanArtifactEmitterContext {
-  readonly js: string[];
-  readonly skipped: SkippedOperation[];
-  readonly mark: (
-    flag: "runtimeGetIndex" | "runtimeCachedIndex" | "hashHelpers" | "hashCache" | "jsonPatchHelpers"
-  ) => void;
-  readonly internalIdentifier: (preferred: string) => string;
-  readonly asExpression: (source: string, entry: string) => string;
-  readonly indentBlock: (source: string) => string[];
-  readonly tryEmit: <TValue>(
-    schema: string,
-    operation: string,
-    skipped: SkippedOperation[],
-    emit: () => TValue
-  ) => TValue | undefined;
-}
+export interface PlanArtifactEmitterContext
+  extends ArtifactEmissionContext<
+    "runtimeGetIndex" | "runtimeCachedIndex" | "hashHelpers" | "hashCache" | "jsonPatchHelpers"
+  > {}
 
 export interface PlanArtifactEmitters {
   readonly emitSortPlanArtifact: (

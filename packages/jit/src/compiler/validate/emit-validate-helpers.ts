@@ -1,6 +1,7 @@
 import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
 import { isOpChain } from "../../core/ops.js";
+import { resolveWrappers } from "../resolvers/resolve-wrappers.js";
 import { emitLiteral } from "../source/literal.js";
 import type {
   AnySchema,
@@ -76,7 +77,7 @@ export function temporalConstructorName(kind: ATS.TemporalKind): string {
   }
 }
 
-export function templateLiteralPartSource(part: string | ATS.AnyTypeSchema): string {
+function templateLiteralPartSource(part: string | ATS.AnyTypeSchema): string {
   return typeof part === "string" ? escapeRegExp(part) : templateLiteralSchemaSource(part);
 }
 
@@ -114,7 +115,7 @@ const TEMPLATE_LITERAL_EMITTERS: Readonly<Record<string, TemplateLiteralSchemaEm
   [TypeName.lazy]: (schema) => templateLiteralSchemaSource((schema.def.getter as () => ATS.AnyTypeSchema)()),
 };
 
-export function templateLiteralSchemaSource(schema: ATS.AnyTypeSchema): string {
+function templateLiteralSchemaSource(schema: ATS.AnyTypeSchema): string {
   const current = schema as AnySchema;
   const emitter = TEMPLATE_LITERAL_EMITTERS[current.type];
   if (emitter !== undefined) return emitter(current);
@@ -131,7 +132,7 @@ function emitTemplateLiteralInner(schema: AnySchema): string {
   return templateLiteralSchemaSource(schema.def.innerType as ATS.AnyTypeSchema);
 }
 
-export function escapeRegExp(value: string): string {
+function escapeRegExp(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
@@ -189,7 +190,7 @@ export function appendIssuePath(path: PathRef, segments: readonly ATS.IssuePathS
   };
 }
 
-export function dynamicPath(parts: readonly string[]): PathRef {
+function dynamicPath(parts: readonly string[]): PathRef {
   return { kind: "dynamic", source: `[${parts.join(", ")}]`, parts };
 }
 
@@ -211,30 +212,8 @@ export function literalTag(option: ATS.AnyTypeSchema, discriminator: string): st
   return typeof literalValue === "string" || typeof literalValue === "number" ? literalValue : undefined;
 }
 
-export function unwrapPassthrough(schema: ATS.AnyTypeSchema): AnySchema {
-  let current = schema as AnySchema;
-
-  while (true) {
-    switch (current.type) {
-      case TypeName.optional:
-      case TypeName.nullable:
-      case TypeName.nullish:
-      case TypeName.default:
-      case TypeName.brand:
-      case TypeName.readonly:
-      case TypeName.refine:
-      case TypeName.coerce:
-      case TypeName.pipe:
-      case TypeName.transform:
-        current = current.def.innerType as AnySchema;
-        continue;
-      case TypeName.lazy:
-        current = (current.def.getter as () => AnySchema)();
-        continue;
-      default:
-        return current;
-    }
-  }
+function unwrapPassthrough(schema: ATS.AnyTypeSchema): AnySchema {
+  return resolveWrappers(schema).base as AnySchema;
 }
 
 interface ValidationUnwrapState {
@@ -383,7 +362,7 @@ function unwrapRuntimeType(schema: AnySchema, emitter: ValidatorEmitter, state: 
   return schema.def.innerType as AnySchema;
 }
 
-export function bindFieldTransforms(spec: unknown, emitter: ValidatorEmitter): Record<string, string> {
+function bindFieldTransforms(spec: unknown, emitter: ValidatorEmitter): Record<string, string> {
   const bindings: Record<string, string> = {};
 
   for (const [key, fn] of Object.entries(spec as Record<string, unknown>)) {
@@ -393,7 +372,7 @@ export function bindFieldTransforms(spec: unknown, emitter: ValidatorEmitter): R
   return bindings;
 }
 
-export function hasNoEmptyCheck(schema: AnySchema): boolean {
+function hasNoEmptyCheck(schema: AnySchema): boolean {
   if (schema.type !== TypeName.string) return false;
 
   const checks = (schema.def.checks as readonly SchemaCheckRecord[] | undefined) ?? [];

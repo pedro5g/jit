@@ -18,15 +18,6 @@ import { classMixin } from "./factories/class.js";
 
 export { defineClassExtensions } from "./define-class-extensions.js";
 export { defineRuntimeClass } from "./define-class-materialize.js";
-export type {
-  DefinedCapability,
-  DefinedClassAssertionFailure,
-  DefinedClassAssertions,
-  DefinedClassFieldPolicy,
-  DefinedClassMethod,
-  DefinedClassPolicy,
-  DefinedClassState,
-} from "./define-class-state.js";
 export { defineCapability, defineClassState } from "./define-class-state.js";
 
 export const defineClass = Object.assign(

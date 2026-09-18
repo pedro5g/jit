@@ -1,4 +1,12 @@
-/** Provides the JIT validation message operation for the supplied input. */
+/**
+ * Custom validation message accepted by schema factories.
+ *
+ * @example
+ * ```ts
+ * const Name = JIT.string({ message: "name is required" });
+ * const Age = JIT.number("age must be numeric");
+ * ```
+ */
 export type ValidationMessage = string | { readonly message?: string };
 
 /** Returns the JIT resolve validation message result for the supplied input. */

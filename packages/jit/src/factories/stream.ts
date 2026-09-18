@@ -8,7 +8,16 @@ type ArrayItem<TValue> = TValue extends readonly (infer TItem)[] ? TItem : never
 
 type JsonStreamOptions<TItem> = Omit<StreamOptions<TItem>, "format"> & CompileCacheOptions;
 
-/** Describes the JIT stream namespace contract used by the public API. */
+/**
+ * Describes the JIT stream namespace contract used by the public API.
+ *
+ * @example
+ * ```ts
+ * const stream = JIT.stream.json(JIT.array(Event));
+ * stream.write("[{\"id\":1}]");
+ * stream.end();
+ * ```
+ */
 export interface StreamNamespace {
   /** Creates an NDJSON stream when `format` is explicitly selected. */
   <TSchema extends ATS.AnyTypeSchema>(
@@ -59,7 +68,16 @@ function streamFactory<TSchema extends ATS.AnyTypeSchema>(
   return compileStream(unwrapSchema(schema), options as never);
 }
 
-/** Callable for compatibility, with explicit JSON and NDJSON transport specializations. */
+/**
+ * Callable stream factory with explicit JSON and NDJSON transport specializations.
+ *
+ * @example
+ * ```ts
+ * const stream = JIT.stream.ndjson(Event, { onItem: (event) => queue.push(event) });
+ * stream.write("{\"id\":1}\n");
+ * stream.end();
+ * ```
+ */
 export const stream = Object.assign(streamFactory, {
   json<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,

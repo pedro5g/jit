@@ -9,15 +9,10 @@ import { emitMockSource } from "../compiler/mock.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
 import { emitUpdateSource } from "../compiler/update.js";
-import { canUseFastParse } from "../compiler/validate/emit-validate.js";
+import { canUseFastParse } from "../compiler/validate/emit-validate-support.js";
 import type * as ATS from "../core/ats/index.js";
 import type { CompiledArtifact } from "../runtime/artifact-registry.js";
-import type { SkippedOperation } from "./generate.js";
-
-interface EmittedBinding {
-  readonly binding: string;
-  readonly type: string;
-}
+import type { ArtifactEmissionContext, EmittedBinding } from "./emit-context-types.js";
 
 interface ValidatorSelection {
   readonly is: boolean;
@@ -38,19 +33,8 @@ interface OperationPlanEmitters {
   ) => string | undefined;
 }
 
-export interface OperationArtifactEmitterContext {
-  readonly js: string[];
-  readonly skipped: SkippedOperation[];
-  readonly mark: (flag: "validationError" | "mockHelpers" | "runtimeGetIndex") => void;
-  readonly internalIdentifier: (preferred: string) => string;
-  readonly asExpression: (source: string, entry: string) => string;
-  readonly indentBlock: (source: string) => string[];
-  readonly tryEmit: <TValue>(
-    schema: string,
-    operation: string,
-    skipped: SkippedOperation[],
-    emit: () => TValue
-  ) => TValue | undefined;
+export interface OperationArtifactEmitterContext
+  extends ArtifactEmissionContext<"validationError" | "mockHelpers" | "runtimeGetIndex"> {
   readonly inlineCodecBindings: (names: readonly string[], values: readonly unknown[]) => string[] | undefined;
   readonly emitValidatorBinding: (
     binding: string,

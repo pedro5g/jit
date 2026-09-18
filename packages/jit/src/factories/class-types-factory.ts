@@ -34,10 +34,24 @@ import type {
 import type { IdentityKeys, InternalInstance } from "./class-types-state.js";
 import type { QueryConditionBuilder } from "./query.js";
 
-/** Visibility applied to a generated field or accessor. `false` omits it. */
+/**
+ * Visibility applied to a generated field or accessor. `false` omits it.
+ *
+ * @example
+ * ```ts
+ * const visibility: AccessorVisibility = "protected";
+ * ```
+ */
 export type AccessorVisibility = "public" | "protected" | "private" | false;
 
-/** Describes the JIT accessor member contract used by the public API. */
+/**
+ * Name and visibility override for one generated accessor.
+ *
+ * @example
+ * ```ts
+ * const member: AccessorMember = { name: "displayName", visibility: "public" };
+ * ```
+ */
 export interface AccessorMember {
   readonly name?: string;
   readonly visibility?: AccessorVisibility;
@@ -50,7 +64,17 @@ interface FieldAccessorOptions {
   readonly set?: AccessorVisibility | AccessorMember;
 }
 
-/** Describes the JIT accessor options contract used by the public API. */
+/**
+ * Visibility and naming options for schema-backed accessors.
+ *
+ * @example
+ * ```ts
+ * const options: AccessorOptions<typeof UserSchema.schema> = {
+ *   fields: { name: { get: "public", set: false } },
+ * };
+ * const User = JIT.class(UserSchema).accessors(options);
+ * ```
+ */
 export interface AccessorOptions<TSchema extends ATS.AnyTypeSchema> {
   readonly default?: FieldAccessorOptions;
   readonly fields?: Partial<Record<Extract<keyof ATS.TypeofSchema<TSchema>, string>, FieldAccessorOptions>>;
@@ -153,7 +177,16 @@ type ResolvedAssertionError<TOptions, TError> = TOptions extends {
   ? TError | TNext
   : TError | DomainAssertionError;
 
-/** Describes the JIT configured runtime class contract used by the public API. */
+/**
+ * Runtime Class after factory names or validation policy have been configured.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.class(UserSchema)
+ *   .factories({ create: "make" })
+ *   .validate({ result: "either" });
+ * ```
+ */
 export type ConfiguredRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
@@ -277,7 +310,15 @@ export type ConfiguredRuntimeClass<
         ): ConfiguredRuntimeClass<TSchema, TInstance, TNext, TMode, TError, TValidated, true, TTraits, TEncapsulated>;
       });
 
-/** Describes the JIT factory runtime class contract used by the public API. */
+/**
+ * Factory-first Runtime Class exposing its configured construction boundary.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.class(UserSchema).construction("factory");
+ * const user = User.create({ id: 1 });
+ * ```
+ */
 export type FactoryRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,
@@ -295,7 +336,15 @@ export type FactoryRuntimeClass<
   TEncapsulated
 >;
 
-/** Entity declaration before a structural identifier extension is applied. */
+/**
+ * Entity declaration before a structural identifier extension is applied.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.ddd.entity(UserSchema);
+ * User.create({ id: "u1" });
+ * ```
+ */
 export type PendingEntityRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
@@ -373,7 +422,14 @@ export type IdentifierRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance>
   readonly schema: ATS.RuntimeTypeSchema<TSchema, TInstance, "value", true, IdentifierRuntimeTraits>;
 };
 
-/** A generated base constructor that cannot itself be instantiated through `create` or `hydrate`. */
+/**
+ * A generated base constructor that cannot itself be instantiated through `create` or `hydrate`.
+ *
+ * @example
+ * ```ts
+ * const Base = JIT.ddd.abstract.entity(UserSchema);
+ * ```
+ */
 export type AbstractRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,

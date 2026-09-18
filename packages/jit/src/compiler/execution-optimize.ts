@@ -2,7 +2,7 @@ import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import type { ExecutionPlan, ExecutionStage } from "./execution-plan.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
-import { canUseFastParse } from "./validate/emit-validate.js";
+import { canUseFastParse } from "./validate/emit-validate-support.js";
 
 /** Describes the JIT semantic fact kind contract used by the public API. */
 export type SemanticFactKind =

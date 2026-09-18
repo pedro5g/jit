@@ -14,10 +14,24 @@ import { createBuilder, unwrapSchema } from "../core/builder/index.js";
 /**
  * A schema built from a JSON Schema document. The document literal already
  * states the shape, so the builder is typed without repeating it.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.jsonSchema.from({ type: "string", minLength: 1 } as const);
+ * JIT.validate.is(User)("Ada");
+ * ```
  */
 export type JsonSchemaBuilder<TNode> = Builder<ATS.TypeSchema<InferJsonSchema<TNode>>>;
 
-/** Describes the JIT json schema namespace contract used by the public API. */
+/**
+ * Converts schemas to JSON Schema and imports JSON Schema documents as typed builders.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.jsonSchema.from({ type: "object", properties: { id: { type: "number" } } } as const);
+ * const document = JIT.jsonSchema.to(User);
+ * ```
+ */
 export interface JsonSchemaNamespace {
   /**
    * Describes a schema as a JSON Schema document — what OpenAPI, form

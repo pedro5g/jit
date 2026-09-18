@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates a `never` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Unreachable = JIT.never();
+ * JIT.validate.is(Unreachable)(undefined); // false
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping a never schema.
  */
 export function never(message?: ValidationMessage): Builder<NeverSchema> {

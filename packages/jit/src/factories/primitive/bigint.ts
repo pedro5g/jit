@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates a `bigint` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Counter = JIT.bigint();
+ * JIT.validate.parse(Counter)(42n); // 42n
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping a bigint schema.
  */
 export function bigint(message?: ValidationMessage): Builder<BigIntSchema> {

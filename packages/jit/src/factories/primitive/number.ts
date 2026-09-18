@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates a `number` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Price = JIT.number().nonnegative();
+ * JIT.validate.parse(Price)(12.5); // 12.5
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping a number schema.
  */
 export function number(message?: ValidationMessage): Builder<NumberSchema<[]>> {

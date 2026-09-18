@@ -9,7 +9,8 @@ import { emitQuerySource } from "../compiler/query.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
 import { emitUpdateSource } from "../compiler/update.js";
-import { canUseFastParse, emitValidator } from "../compiler/validate/emit-validate.js";
+import { canUseFastParse } from "../compiler/validate/emit-validate-support.js";
+import { emitValidator } from "../compiler/validate/emit-validator-entry.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SkippedOperation } from "./generate.js";
 

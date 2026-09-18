@@ -9,24 +9,42 @@ import {
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
+import type { RowKey, RowOf } from "./row-types.js";
 
-type RowOf<TSchema extends ATS.AnyTypeSchema> =
-  ATS.TypeofSchema<TSchema> extends readonly (infer TRow)[] ? TRow : ATS.TypeofSchema<TSchema>;
-type RowKey<TSchema extends ATS.AnyTypeSchema> = Extract<keyof RowOf<TSchema>, string>;
-
-/** One structural difference, as `JIT.compare.diff` reports it. */
+/**
+ * One structural difference, as `JIT.compare.diff` reports it.
+ *
+ * @example
+ * ```ts
+ * const changes: ReconcileDelta = [{ type: "update", path: ["name"], value: "Ada" }];
+ * ```
+ */
 export type ReconcileDelta = readonly (
   | { readonly type: "add" | "update"; readonly path: readonly PropertyKey[]; readonly value: unknown }
   | { readonly type: "remove"; readonly path: readonly PropertyKey[] }
 )[];
 
-/** Provides the JIT reconcile change operation for the supplied input. */
+/**
+ * Before-and-after rows for one changed identity.
+ *
+ * @example
+ * ```ts
+ * const change: ReconcileChange<User> = { before: oldUser, after: newUser };
+ * ```
+ */
 export interface ReconcileChange<TRow> {
   readonly before: TRow;
   readonly after: TRow;
 }
 
-/** Provides the JIT reconcile change with diff operation for the supplied input. */
+/**
+ * Before-and-after rows plus a structural diff.
+ *
+ * @example
+ * ```ts
+ * const change: ReconcileChangeWithDiff<User> = { before: oldUser, after: newUser, diff: [] };
+ * ```
+ */
 export interface ReconcileChangeWithDiff<TRow> extends ReconcileChange<TRow> {
   readonly diff: ReconcileDelta;
 }
@@ -40,21 +58,42 @@ export type ResolvedChannels<TChannels> = {
     : true;
 };
 
-/** Only the channels that were asked for are present, because only they are built. */
+/**
+ * Only the channels that were asked for are present, because only they are built.
+ *
+ * @example
+ * ```ts
+ * type Channels = ResolvedChannels<{ changed: false }>;
+ * ```
+ */
 export type ReconcileResult<TRow, TChannels, TChange> = {
   readonly [K in keyof ReconcileChannels as TChannels[K & keyof TChannels] extends false
     ? never
     : K]: K extends "changed" ? TChange[] : TRow[];
 };
 
-/** Provides the JIT reconcile event operation for the supplied input. */
+/**
+ * One streamed reconciliation event.
+ *
+ * @example
+ * ```ts
+ * const event: ReconcileEvent<User, ReconcileChange<User>> = { type: "added", value: user };
+ * ```
+ */
 export type ReconcileEvent<TRow, TChange> =
   | { readonly type: "added"; readonly value: TRow }
   | { readonly type: "removed"; readonly value: TRow }
   | { readonly type: "unchanged"; readonly value: TRow }
   | { readonly type: "changed"; readonly value: TChange };
 
-/** A visitor is handed each result as it is found; nothing is collected. */
+/**
+ * A visitor is handed each result as it is found; nothing is collected.
+ *
+ * @example
+ * ```ts
+ * const visitor: ReconcileVisitor<User> = { changed: (before, after) => console.log(before, after) };
+ * ```
+ */
 export interface ReconcileVisitor<TRow> {
   /** Receives a row present only in the current snapshot. */
   added?(value: TRow): void;
@@ -66,7 +105,15 @@ export interface ReconcileVisitor<TRow> {
   changed?(before: TRow, after: TRow, diff?: ReconcileDelta): void;
 }
 
-/** Describes the JIT reconcile sinks contract used by the public API. */
+/**
+ * Allocation-aware sinks for a reconciliation plan.
+ *
+ * @example
+ * ```ts
+ * const visit = JIT.state.reconcile(Users).to.visitor();
+ * visit(previous, current, visitor);
+ * ```
+ */
 export interface ReconcileSinks<TRow, TChange> {
   /** Streams results as they are found, materializing nothing. */
   iterator(): (previous: readonly TRow[], current: readonly TRow[]) => IterableIterator<ReconcileEvent<TRow, TChange>>;
@@ -74,7 +121,15 @@ export interface ReconcileSinks<TRow, TChange> {
   visitor(): (previous: readonly TRow[], current: readonly TRow[], visitor: ReconcileVisitor<TRow>) => void;
 }
 
-/** Provides the JIT reconcile plan operation for the supplied input. */
+/**
+ * Compiled comparison plan for two keyed collection snapshots.
+ *
+ * @example
+ * ```ts
+ * const plan = JIT.state.reconcile(Users).changes("diff");
+ * const result = plan(previous, current);
+ * ```
+ */
 export interface ReconcilePlan<TSchema extends ATS.AnyTypeSchema, TChannels, TChange> {
   /** Reconciles two snapshots and returns the enabled result channels. */
   (
@@ -99,6 +154,13 @@ export interface ReconcilePlan<TSchema extends ATS.AnyTypeSchema, TChannels, TCh
  * same values is unchanged rather than changed. Channels that are turned off
  * are not allocated, not appended to and — for `removed` — not even walked;
  * turning both `changed` and `unchanged` off removes the comparison itself.
+ *
+ * @example
+ * ```ts
+ * const Users = JIT.array(User).keyed("id");
+ * const plan = JIT.state.reconcile(Users, { added: true, removed: true });
+ * plan(previous, current);
+ * ```
  */
 export function reconcile<TSchema extends ATS.AnyTypeSchema, const TChannels extends Partial<ReconcileChannels> = {}>(
   schema: SchemaInput<TSchema>,

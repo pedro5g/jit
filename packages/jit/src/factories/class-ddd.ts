@@ -11,7 +11,6 @@ import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import * as Transform from "../transforms/index.js";
-import type { IdentityState } from "./class-core.js";
 import {
   capability,
   classType,
@@ -20,6 +19,7 @@ import {
   isIdentifierSchema,
   removeFactorySurface,
 } from "./class-core.js";
+import type { IdentityState } from "./class-core-state.js";
 import type {
   AggregateRuntimeClass,
   AnyClassCapability,
@@ -44,6 +44,7 @@ import type {
   VersionedCapability,
   VersionedOptions,
 } from "./class-types.js";
+import type { IdentityKeys } from "./class-types-state.js";
 
 const valueAccessorCapability = capability<ValueAccessor<unknown>>("value", (prototype) => {
   Object.defineProperty(prototype, "value", {
@@ -55,9 +56,25 @@ const valueAccessorCapability = capability<ValueAccessor<unknown>>("value", (pro
   });
 });
 
-/** Immutable class preset with compiled structural equality and hash code. */
+/**
+ * Immutable Value Object preset with compiled structural equality and hash code.
+ *
+ * @example
+ * ```ts
+ * const Money = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
+ * const money = Money.create({ amount: 10, currency: "USD" });
+ * money.equals(Money.create({ amount: 10, currency: "USD" })); // true
+ * ```
+ */
 export function valueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
+): ValueObjectRuntimeClass<TSchema> {
+  return createValueObject(schema, false);
+}
+
+function createValueObject<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  isAbstract: boolean
 ): ValueObjectRuntimeClass<TSchema> {
   const unwrapped = unwrapSchema(schema);
   const base = resolveWrappers(unwrapped).base;
@@ -65,9 +82,9 @@ export function valueObject<TSchema extends ATS.AnyTypeSchema>(
     if (!isPrimitiveLikeSchema(base)) {
       throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
     }
-    return createScalarValueObject(unwrapped, false, false) as unknown as ValueObjectRuntimeClass<TSchema>;
+    return createScalarValueObject(unwrapped, false, isAbstract) as unknown as ValueObjectRuntimeClass<TSchema>;
   }
-  const runtime = createRuntimeClass(unwrapped, false, true, false, "factory", false, undefined, {
+  const runtime = createRuntimeClass(unwrapped, isAbstract, true, false, "factory", false, undefined, {
     factoryValidationOptIn: true,
   });
   return ("value" in (base as ATS.ObjectSchema).def.props
@@ -95,36 +112,32 @@ type ValueObjectRuntimeClass<TSchema extends ATS.AnyTypeSchema> =
     ? FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>
     : ScalarFactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>;
 
-/** Provides the JIT abstract value object operation for the supplied input. */
+/**
+ * Creates an abstract Value Object base for subclassing.
+ *
+ * @example
+ * ```ts
+ * const Money = JIT.ddd.abstract.valueObject(JIT.object({ amount: JIT.number() }));
+ * ```
+ */
 export function abstractValueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): ValueObjectRuntimeClass<TSchema> {
-  const unwrapped = unwrapSchema(schema);
-  const base = resolveWrappers(unwrapped).base;
-  if (base.type !== TypeName.object) {
-    if (!isPrimitiveLikeSchema(base)) {
-      throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
-    }
-    return createScalarValueObject(unwrapped, false, true) as unknown as ValueObjectRuntimeClass<TSchema>;
-  }
-  const runtime = createRuntimeClass(unwrapped, true, true, false, "factory", false, undefined, {
-    factoryValidationOptIn: true,
-  });
-  return ("value" in (base as ATS.ObjectSchema).def.props
-    ? (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
-        classType.equals,
-        classType.hashCode
-      )
-    : (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
-        valueAccessorCapability,
-        classType.equals,
-        classType.hashCode
-      )) as unknown as ValueObjectRuntimeClass<TSchema>;
+  return createValueObject(schema, true);
 }
 
 type DefaultIdentifierSchema = ATS.DefaultSchema<ATS.StringSchema>;
 
-/** Creates a scalar identifier Value Object with identifier metadata. */
+/**
+ * Creates a scalar identifier Value Object with identifier metadata.
+ *
+ * @example
+ * ```ts
+ * const UserId = JIT.ddd.uniqueIdentifier();
+ * const id = UserId.create();
+ * id.value; // UUID string
+ * ```
+ */
 export function uniqueIdentifier(): IdentifierRuntimeClass<DefaultIdentifierSchema, ScalarValueObject<string>>;
 export function uniqueIdentifier<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
@@ -147,34 +160,6 @@ export function uniqueIdentifier<TSchema extends ATS.AnyTypeSchema>(schema?: Sch
   return createScalarValueObject(identifierSchema, true, false);
 }
 
-type HasIdentifierMetadata<TSchema extends ATS.AnyTypeSchema> =
-  TSchema extends ATS.RuntimeTypeSchema<ATS.AnyTypeSchema, unknown, "value", true, infer TTraits>
-    ? TTraits extends ATS.RuntimeTypeTraits<"value", true>
-      ? true
-      : false
-    : TSchema extends ATS.LazySchema<infer TInner>
-      ? HasIdentifierMetadata<TInner>
-      : TSchema extends
-            | ATS.OptionalSchema<infer TInner>
-            | ATS.NullableSchema<infer TInner>
-            | ATS.NullishSchema<infer TInner>
-            | ATS.DefaultSchema<infer TInner>
-            | ATS.BrandSchema<infer TInner>
-            | ATS.ReadonlySchema<infer TInner>
-            | ATS.RefineSchema<infer TInner>
-            | ATS.CoerceSchema<infer TInner>
-            | ATS.PipeSchema<infer TInner>
-            | ATS.TransformSchema<infer TInner>
-        ? HasIdentifierMetadata<TInner>
-        : false;
-
-type IdentityKeys<TSchema extends ATS.AnyTypeSchema> =
-  TSchema extends ATS.ObjectSchema<infer TShape>
-    ? {
-        [TKey in keyof TShape]: HasIdentifierMetadata<TShape[TKey]> extends true ? TKey : never;
-      }[keyof TShape] &
-        string
-    : never;
 type IsUnion<TValue, TWhole = TValue> = [TValue] extends [never]
   ? false
   : TValue extends unknown
@@ -223,7 +208,15 @@ function resolveIdentityState(
 /** Adds structural timestamp fields and lifecycle mutation semantics. */
 export function timestamps(): TimestampCapability<{}>;
 export function timestamps<const TOptions extends TimestampOptions>(options?: TOptions): TimestampCapability<TOptions>;
-/** Provides the JIT timestamps operation for the supplied input. */
+/**
+ * Creates a timestamp capability for an aggregate class.
+ *
+ * @example
+ * ```ts
+ * const Order = JIT.ddd.aggregateRoot(OrderSchema).extends(JIT.ddd.timestamps());
+ * order.touch();
+ * ```
+ */
 export function timestamps<const TOptions extends TimestampOptions>(options?: TOptions): TimestampCapability<TOptions> {
   const resolved = options ?? ({} as TOptions);
   const touch = resolved.methods?.touch ?? "touch";
@@ -238,7 +231,15 @@ export function timestamps<const TOptions extends TimestampOptions>(options?: TO
 /** Adds structural soft-delete state and reversible lifecycle methods. */
 export function softDelete(): SoftDeleteCapability<{}>;
 export function softDelete<const TOptions extends SoftDeleteOptions>(options: TOptions): SoftDeleteCapability<TOptions>;
-/** Provides the JIT soft delete operation for the supplied input. */
+/**
+ * Creates a soft-delete capability for an aggregate class.
+ *
+ * @example
+ * ```ts
+ * const Order = JIT.ddd.aggregateRoot(OrderSchema).extends(JIT.ddd.softDelete());
+ * order.softDelete();
+ * ```
+ */
 export function softDelete<const TOptions extends SoftDeleteOptions>(
   options?: TOptions
 ): SoftDeleteCapability<TOptions> {
@@ -259,7 +260,14 @@ export function softDelete<const TOptions extends SoftDeleteOptions>(
 /** Adds structural version state and lifecycle versioning. */
 export function versioned(): VersionedCapability<{}>;
 export function versioned<const TOptions extends VersionedOptions>(options?: TOptions): VersionedCapability<TOptions>;
-/** Provides the JIT versioned operation for the supplied input. */
+/**
+ * Creates an optimistic-version capability for an aggregate class.
+ *
+ * @example
+ * ```ts
+ * const Order = JIT.ddd.aggregateRoot(OrderSchema).extends(JIT.ddd.versioned());
+ * ```
+ */
 export function versioned<const TOptions extends VersionedOptions>(options?: TOptions): VersionedCapability<TOptions> {
   const resolved = options ?? ({} as TOptions);
   return Object.freeze({
@@ -330,7 +338,14 @@ export function entity<TSchema extends ATS.AnyTypeSchema>(
   return createEntity(schema, false, ...args);
 }
 
-/** Abstract factory-first Entity base, intended exclusively for subclassing. */
+/**
+ * Abstract factory-first Entity base, intended exclusively for subclassing.
+ *
+ * @example
+ * ```ts
+ * const AbstractUser = JIT.ddd.abstract.entity(UserSchema);
+ * ```
+ */
 export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema> & (IsUnion<IdentityKeys<TSchema>> extends true ? never : unknown)
 ): EntityRuntimeClassFor<TSchema, DddInstance<TSchema>, InitialRuntimeTypeTraits<TSchema>>;
@@ -348,7 +363,16 @@ export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
   return createEntity(schema, true, ...args);
 }
 
-/** Aggregate Root preset using the same structural definition pipeline as entities. */
+/**
+ * Aggregate Root preset using the same structural definition pipeline as entities.
+ *
+ * @example
+ * ```ts
+ * const Order = JIT.ddd.aggregateRoot(JIT.object({ id: JIT.string() }));
+ * const order = Order.create({ id: "o1" });
+ * order.pullEvents();
+ * ```
+ */
 function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   isAbstract: boolean,
@@ -398,7 +422,14 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   return createAggregateRoot(schema, false, ...(args as AggregateIdentityArguments<TSchema>));
 }
 
-/** Abstract Aggregate Root base, intended exclusively for subclassing. */
+/**
+ * Abstract Aggregate Root base, intended exclusively for subclassing.
+ *
+ * @example
+ * ```ts
+ * const AbstractOrder = JIT.ddd.abstract.aggregateRoot(OrderSchema);
+ * ```
+ */
 export function abstractAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema> & (IdentityKeys<TSchema> extends never ? never : unknown)
 ): AggregateRuntimeClass<TSchema, DddInstance<TSchema>>;
@@ -437,7 +468,19 @@ type DomainEventOutput<
 > = DomainEventState<TPayload, TType, TVersion> & {
   readonly "~event": StandardEvent;
 };
-/** Provides the JIT domain event operation for the supplied input. */
+/**
+ * The materialized envelope produced by a domain-event class.
+ *
+ * @example
+ * ```ts
+ * const Created = JIT.ddd.domainEvent("UserCreated", {
+ *   version: 1,
+ *   payload: JIT.object({ id: JIT.string() }),
+ * });
+ * const event = Created.create({ id: "u1" });
+ * event.type; // "UserCreated"
+ * ```
+ */
 export type DomainEvent<TPayload extends ATS.AnyTypeSchema, TType extends string, TVersion extends number> = Omit<
   RuntimeClass<EventSchema<TPayload, TType, TVersion>, DomainEventOutput<TPayload, TType, TVersion>>,
   "create" | "hydrate"
@@ -451,7 +494,18 @@ export type DomainEvent<TPayload extends ATS.AnyTypeSchema, TType extends string
     readonly version: TVersion;
   };
 
-/** Creates an immutable, versioned domain-event class from a payload schema. */
+/**
+ * Creates an immutable, versioned domain-event class from a payload schema.
+ *
+ * @example
+ * ```ts
+ * const Created = JIT.ddd.domainEvent("UserCreated", {
+ *   version: 1,
+ *   payload: JIT.object({ id: JIT.string() }),
+ * });
+ * const event = Created.create({ id: "u1" });
+ * ```
+ */
 export function domainEvent<TPayload extends ATS.AnyTypeSchema, TType extends string, TVersion extends number>(
   type: TType,
   options: {

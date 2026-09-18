@@ -1,4 +1,12 @@
-/** Runtime Class construction, factory and DDD public surface. */
+/**
+ * Runtime Class construction, factory and DDD public surface.
+ *
+ * @example
+ * ```ts
+ * const User = JIT.class(JIT.object({ id: JIT.number() }));
+ * const user = new User({ id: 1 });
+ * ```
+ */
 export type {
   ClassFactoryMemberDescriptor,
   ClassFieldMemberDescriptor,
@@ -17,8 +25,9 @@ export type {
   RuntimeTypeTraits,
 } from "../core/ats/type-schema.js";
 export type { FactoryReturnMode } from "../core/factory-policy.js";
-export type { ClassFactory, IdentityState } from "./class-core.js";
+export type { ClassFactory } from "./class-core.js";
 export { classMixin, classType, classType as class, getRuntimeClassTarget } from "./class-core.js";
+export type { IdentityState } from "./class-core-state.js";
 export type { DomainEvent } from "./class-ddd.js";
 export {
   abstractAggregateRoot,

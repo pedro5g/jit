@@ -7,6 +7,16 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates a `File` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Upload = JIT.file();
+ * const isUpload = JIT.validate.is(Upload);
+ * isUpload(new File(["hello"], "hello.txt")); // true
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping a File schema.
  */
 export function file(message?: ValidationMessage): Builder<FileSchema> {

@@ -20,6 +20,13 @@ export interface RuntimeClassOperationContext<TSchema extends ATS.AnyTypeSchema>
   readonly policySafeHydrate: () => (input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
 }
 
+interface CustomFactoryInputOptions<TSchema extends ATS.AnyTypeSchema> {
+  readonly validationEnabled: boolean;
+  readonly safeParse: () => (input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
+  readonly parse: (input: unknown) => unknown;
+  readonly materialize: (input: unknown) => unknown;
+}
+
 export function createClassInstance<TSchema extends ATS.AnyTypeSchema, TThis extends RuntimeClass<TSchema>>(
   context: RuntimeClassOperationContext<TSchema>,
   receiver: TThis,
@@ -33,17 +40,23 @@ export function createClassInstance<TSchema extends ATS.AnyTypeSchema, TThis ext
     validated?: boolean
   ) => InstanceType<TThis>;
   const customFactory = state.customFactories.create;
-  if (customFactory !== undefined) return createWithCustomFactory(context, receiver, construct, input, customFactory);
+  if (customFactory !== undefined)
+    return runCustomFactory(context, receiver, construct, input, customFactory, {
+      validationEnabled: policy.validationConfigured && policy.create,
+      safeParse: context.policySafeParse,
+      parse: context.parse,
+      materialize: context.materialize,
+    });
   if (!policy.configured && state.factoryValidationOptIn) {
     return new construct(context.materialize(input), INTERNAL_CONSTRUCT, true);
   }
   if (!policy.configured) return createWithoutPolicy(context, construct, input);
   if (!policy.validationConfigured && policy.create) {
-    return createWithMaterialization(context, construct, input);
+    return constructWithMaterialization(context, construct, input, context.materialize);
   }
   if (!policy.create) return createWithoutFactoryValidation(context, construct, input);
   if (policy.maxIssues === undefined && policy.assert === undefined) {
-    return createWithFailFastValidation(context, construct, input);
+    return constructWithFailFastValidation(context, construct, input, context.parse);
   }
   return createWithDiagnosticValidation(context, construct, input);
 }
@@ -61,17 +74,23 @@ export function hydrateClassInstance<TSchema extends ATS.AnyTypeSchema, TThis ex
     validated?: boolean
   ) => InstanceType<TThis>;
   const customFactory = state.customFactories.hydrate;
-  if (customFactory !== undefined) return hydrateWithCustomFactory(context, receiver, construct, input, customFactory);
+  if (customFactory !== undefined)
+    return runCustomFactory(context, receiver, construct, input, customFactory, {
+      validationEnabled: policy.validationConfigured && policy.hydrate,
+      safeParse: context.policySafeHydrate,
+      parse: context.hydrateInput,
+      materialize: context.materializeHydrated,
+    });
   if (!policy.configured && state.factoryValidationOptIn) {
     return new construct(context.materializeHydrated(input), INTERNAL_CONSTRUCT, true);
   }
   if (!policy.configured) return new construct(context.hydrateInput(input), INTERNAL_CONSTRUCT, true);
   if (!policy.validationConfigured && policy.hydrate) {
-    return hydrateWithMaterialization(context, construct, input);
+    return constructWithMaterialization(context, construct, input, context.materializeHydrated);
   }
   if (!policy.hydrate) return new construct(context.hydrateInput(input), INTERNAL_CONSTRUCT, true);
   if (policy.maxIssues === undefined && policy.assert === undefined) {
-    return hydrateWithFailFastValidation(context, construct, input);
+    return constructWithFailFastValidation(context, construct, input, context.hydrateInput);
   }
   return hydrateWithDiagnosticValidation(context, construct, input);
 }
@@ -131,15 +150,16 @@ function createWithoutFactoryValidation<TSchema extends ATS.AnyTypeSchema, TInst
   return createWithoutPolicy(context, construct, input);
 }
 
-function createWithMaterialization<TSchema extends ATS.AnyTypeSchema, TInstance>(
+function constructWithMaterialization<TSchema extends ATS.AnyTypeSchema, TInstance>(
   context: RuntimeClassOperationContext<TSchema>,
   construct: new (input: unknown, token: symbol, validated?: boolean) => TInstance,
-  input: Input<TSchema>
+  input: unknown,
+  materialize: (input: unknown) => unknown
 ): TInstance {
   const { policy } = context;
   let materialized: unknown;
   try {
-    materialized = context.materialize(input);
+    materialized = materialize(input);
   } catch (error) {
     if (error instanceof JITValidationError)
       return policyFailure(policy, policyError(policy, error.issues)) as TInstance;
@@ -150,14 +170,15 @@ function createWithMaterialization<TSchema extends ATS.AnyTypeSchema, TInstance>
   return policySuccess(policy, new construct(materialized, INTERNAL_CONSTRUCT, true)) as TInstance;
 }
 
-function createWithFailFastValidation<TSchema extends ATS.AnyTypeSchema, TInstance>(
+function constructWithFailFastValidation<TSchema extends ATS.AnyTypeSchema, TInstance>(
   context: RuntimeClassOperationContext<TSchema>,
   construct: new (input: unknown, token: symbol, validated?: boolean) => TInstance,
-  input: Input<TSchema>
+  input: unknown,
+  parse: (input: unknown) => unknown
 ): TInstance {
   const { policy } = context;
   try {
-    return policySuccess(policy, new construct(context.parse(input), INTERNAL_CONSTRUCT, true)) as TInstance;
+    return policySuccess(policy, new construct(parse(input), INTERNAL_CONSTRUCT, true)) as TInstance;
   } catch (error) {
     if (!(error instanceof JITValidationError)) throw error;
     return policyFailure(policy, policyError(policy, error.issues)) as TInstance;
@@ -177,41 +198,21 @@ function createWithDiagnosticValidation<TSchema extends ATS.AnyTypeSchema, TInst
   return policySuccess(policy, new construct(parsed.data, INTERNAL_CONSTRUCT, true)) as TInstance;
 }
 
-function createWithCustomFactory<TSchema extends ATS.AnyTypeSchema, TThis extends RuntimeClass<TSchema>>(
+function runCustomFactory<TSchema extends ATS.AnyTypeSchema, TThis extends RuntimeClass<TSchema>>(
   context: RuntimeClassOperationContext<TSchema>,
   receiver: TThis,
   construct: new (input: unknown, token: symbol, validated?: boolean) => InstanceType<TThis>,
-  input: Input<TSchema>,
-  factory: Function
+  input: unknown,
+  factory: Function,
+  options: CustomFactoryInputOptions<TSchema>
 ): InstanceType<TThis> {
   const { policy } = context;
-  const parsed =
-    policy.validationConfigured && policy.create
-      ? context.policySafeParse()(context.boundaryInput(input))
-      : policy.configured && !policy.create
-        ? { success: true as const, data: context.parse(input) }
-        : { success: true as const, data: context.materialize(input) };
-  if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
-  const assertionFailure = runAssertion(policy, parsed.data);
-  if (assertionFailure !== undefined) return policyFailure(policy, assertionFailure) as InstanceType<TThis>;
-  const result = factory.call(receiver, parsed.data, constructionContext(construct));
-  return finishCustomFactoryResult(context, receiver, construct, result);
-}
-
-function hydrateWithCustomFactory<TSchema extends ATS.AnyTypeSchema, TThis extends RuntimeClass<TSchema>>(
-  context: RuntimeClassOperationContext<TSchema>,
-  receiver: TThis,
-  construct: new (input: unknown, token: symbol, validated?: boolean) => InstanceType<TThis>,
-  input: Hydrate<TSchema>,
-  factory: Function
-): InstanceType<TThis> {
-  const { policy } = context;
-  const parsed =
-    policy.validationConfigured && policy.hydrate
-      ? context.policySafeHydrate()(context.boundaryInput(input))
-      : policy.configured && !policy.hydrate
-        ? { success: true as const, data: context.hydrateInput(input) }
-        : { success: true as const, data: context.materializeHydrated(input) };
+  const parsed = options.validationEnabled
+    ? options.safeParse()(context.boundaryInput(input))
+    : {
+        success: true as const,
+        data: policy.configured ? options.parse(input) : options.materialize(input),
+      };
   if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
   const assertionFailure = runAssertion(policy, parsed.data);
   if (assertionFailure !== undefined) return policyFailure(policy, assertionFailure) as InstanceType<TThis>;
@@ -249,39 +250,6 @@ function finishCustomFactoryResult<TSchema extends ATS.AnyTypeSchema, TThis exte
     instance = new construct(result, INTERNAL_CONSTRUCT, true);
   }
   return policy.configured ? (policySuccess(policy, instance) as InstanceType<TThis>) : instance;
-}
-
-function hydrateWithMaterialization<TSchema extends ATS.AnyTypeSchema, TInstance>(
-  context: RuntimeClassOperationContext<TSchema>,
-  construct: new (input: unknown, token: symbol, validated?: boolean) => TInstance,
-  input: Hydrate<TSchema>
-): TInstance {
-  const { policy } = context;
-  let materialized: unknown;
-  try {
-    materialized = context.materializeHydrated(input);
-  } catch (error) {
-    if (error instanceof JITValidationError)
-      return policyFailure(policy, policyError(policy, error.issues)) as TInstance;
-    throw error;
-  }
-  const assertionFailure = runAssertion(policy, materialized);
-  if (assertionFailure !== undefined) return policyFailure(policy, assertionFailure) as TInstance;
-  return policySuccess(policy, new construct(materialized, INTERNAL_CONSTRUCT, true)) as TInstance;
-}
-
-function hydrateWithFailFastValidation<TSchema extends ATS.AnyTypeSchema, TInstance>(
-  context: RuntimeClassOperationContext<TSchema>,
-  construct: new (input: unknown, token: symbol, validated?: boolean) => TInstance,
-  input: Hydrate<TSchema>
-): TInstance {
-  const { policy } = context;
-  try {
-    return policySuccess(policy, new construct(context.hydrateInput(input), INTERNAL_CONSTRUCT, true)) as TInstance;
-  } catch (error) {
-    if (!(error instanceof JITValidationError)) throw error;
-    return policyFailure(policy, policyError(policy, error.issues)) as TInstance;
-  }
 }
 
 function hydrateWithDiagnosticValidation<TSchema extends ATS.AnyTypeSchema, TInstance>(

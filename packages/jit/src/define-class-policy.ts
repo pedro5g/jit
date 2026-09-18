@@ -1,16 +1,10 @@
-import type { LifecycleDefinition } from "./classes/effective-schema.js";
+import { lifecycleArtifact as definedLifecycleMutation } from "./classes/lifecycle-artifact.js";
 import { type AssertionDescriptor, emitAssertionSource, resolveAssertionDescriptor } from "./compiler/assertion.js";
+import { resolveNestedFactoryPolicy } from "./compiler/factory-policy-resolution.js";
 import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
-import { schemaChildren } from "./compiler/schema-recursion.js";
 import type { QueryConditionNode } from "./core/ast/index.js";
 import type * as ATS from "./core/ats/index.js";
 import { createSchema, TypeName } from "./core/ats/index.js";
-import {
-  type FactoryPolicyCandidate,
-  type FactoryReturnMode,
-  type FactoryReturnModeInput,
-  selectFactoryPolicyCandidate,
-} from "./core/factory-policy.js";
 import type {
   DefinedClassAssertions,
   DefinedClassFieldPolicy,
@@ -24,36 +18,7 @@ export function definedPolicyBase(state: DefinedClassState): DefinedClassPolicy 
   return state.policy ?? { result: "throw", create: true, hydrate: true };
 }
 
-export function resolveDefinedNestedResultPolicy(schema: ATS.AnyTypeSchema): FactoryPolicyCandidate | undefined {
-  const candidates: FactoryPolicyCandidate[] = [];
-  const active = new Set<ATS.AnyTypeSchema>();
-  const visit = (current: ATS.AnyTypeSchema, depth: number): void => {
-    if (active.has(current)) return;
-    active.add(current);
-    if (current.type === TypeName.runtimeType) {
-      const traits = (current as ATS.RuntimeTypeSchema).def.traits.factoryPolicy;
-      if (traits.configured && (traits.resultModeExplicit || traits.resultModeInherited)) {
-        candidates.push({
-          mode: traits.resultMode as FactoryReturnMode,
-          priority: traits.priority,
-          explicitMode: traits.resultModeExplicit,
-          depth,
-          source: String(candidates.length),
-        });
-      }
-      active.delete(current);
-      return;
-    }
-    const children =
-      current.type === TypeName.object
-        ? Object.values((current as ATS.ObjectSchema).def.props)
-        : schemaChildren(current);
-    for (const child of children) visit(child, depth + 1);
-    active.delete(current);
-  };
-  visit(schema, 0);
-  return selectFactoryPolicyCandidate(candidates);
-}
+const resolveDefinedNestedResultPolicy = resolveNestedFactoryPolicy;
 
 export function resolveDefinedPolicy(state: DefinedClassState): DefinedClassPolicy | undefined {
   if (state.validationConfigured) return state.policy;
@@ -74,7 +39,7 @@ function clearInheritedDefinedPolicy(previous: DefinedClassPolicy | undefined): 
   return { ...previous, result: "throw", resultModeInherited: false };
 }
 
-export function definedAssertions(
+function definedAssertions(
   descriptors: readonly AssertionDescriptor[],
   maxIssues: number | undefined,
   errors: readonly (unknown | undefined)[]
@@ -127,40 +92,7 @@ export function defineClassAssertion(
   };
 }
 
-export function definedLifecycleMutation(lifecycle: LifecycleDefinition):
-  | {
-      readonly updatedAt?: string;
-      readonly touchAt?: string;
-      readonly version?: string;
-      readonly deletedAt?: string;
-      readonly touchMethod?: string;
-      readonly deleteMethod?: string;
-      readonly restoreMethod?: string;
-      readonly isDeletedMember?: string;
-      readonly timestampClock?: unknown;
-      readonly deletionClock?: unknown;
-    }
-  | undefined {
-  const timestamps = lifecycle.timestamps;
-  const deletion = lifecycle.softDelete;
-  const versioned = lifecycle.versioned;
-  if (timestamps === undefined && deletion === undefined && versioned === undefined) return undefined;
-  return {
-    ...(timestamps?.touch === "manual" || timestamps === undefined ? {} : { updatedAt: timestamps.updatedAt }),
-    ...(timestamps === undefined ? {} : { touchAt: timestamps.updatedAt, touchMethod: timestamps.touchMethod }),
-    ...(versioned === undefined ? {} : { version: versioned.field }),
-    ...(deletion === undefined
-      ? {}
-      : {
-          deletedAt: deletion.field,
-          deleteMethod: deletion.deleteMethod,
-          restoreMethod: deletion.restoreMethod,
-          isDeletedMember: deletion.isDeletedMember,
-        }),
-    ...(timestamps?.clock === undefined ? {} : { timestampClock: timestamps.clock }),
-    ...(deletion?.clock === undefined ? {} : { deletionClock: deletion.clock }),
-  };
-}
+export { definedLifecycleMutation };
 
 export function removeDefinedNoConstructorFields(
   schema: ATS.AnyTypeSchema,
@@ -183,5 +115,3 @@ export function removeDefinedNoConstructorFields(
     object.annotations
   );
 }
-
-export type DefinedPolicyReturnModeInput = FactoryReturnModeInput;

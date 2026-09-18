@@ -7,6 +7,15 @@ import { emptyDef } from "./empty-def.js";
 /**
  * Creates a `symbol` schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Token = JIT.symbol();
+ * JIT.validate.is(Token)(Symbol("token")); // true
+ * ```
+ *
+ * @param message Optional default message for failures in this schema.
  * @returns A builder wrapping a symbol schema.
  */
 export function symbol(message?: ValidationMessage): Builder<SymbolSchema> {

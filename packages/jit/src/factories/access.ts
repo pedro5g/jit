@@ -13,7 +13,17 @@ import { registerArtifact } from "../runtime/artifact-registry.js";
 
 type Field<TValue> = Extract<keyof TValue, string>;
 
-/** A reference to one of the actor's fields, resolved when the ability is built. */
+/**
+ * A reference to one of the actor's fields, resolved when the ability is built.
+ *
+ * @example
+ * ```ts
+ * const ability = JIT.access(Document)
+ *   .actor(Actor)
+ *   .can("read", (query, actor) => query.eq("ownerId", actor.field("id")))({ id: "ada" });
+ * ability.can("read", { ownerId: "ada" }); // true
+ * ```
+ */
 export interface ActorRef<TActor> {
   /** References an actor field for use in a subject condition. */
   field<TKey extends Field<TActor>>(key: TKey): { readonly kind: "param"; readonly name: TKey };
@@ -25,6 +35,11 @@ export interface ActorRef<TActor> {
  * This is the query condition builder: the same operators, the same AST. A rule
  * is a filter over one row, so there is no reason for it to be a different
  * language — and reusing it is what lets a rule be pushed into a query later.
+ *
+ * @example
+ * ```ts
+ * const ownsDocument = (query, actor) => query.eq("ownerId", actor.field("id"));
+ * ```
  */
 export interface AccessConditionBuilder<TSubject, TActor> {
   /** Requires a subject field to equal a literal or actor field. */
@@ -49,13 +64,32 @@ export interface AccessConditionBuilder<TSubject, TActor> {
 
 type AccessOperand<TValue, TActor> = TValue | { readonly kind: "param"; readonly name: Field<TActor> };
 
-/** Provides the JIT access predicate operation for the supplied input. */
+/**
+ * Builds the condition for an access rule.
+ *
+ * @example
+ * ```ts
+ * const ownsDocument: AccessPredicate<{ ownerId: string }, { id: string }> = (query, actor) =>
+ *   query.eq("ownerId", actor.field("id"));
+ * ```
+ */
 export type AccessPredicate<TSubject, TActor> = (
   query: AccessConditionBuilder<TSubject, TActor>,
   actor: ActorRef<TActor>
 ) => QueryConditionNode;
 
-/** A rule may narrow to some fields, add a condition, or both. */
+/**
+ * Optional field, condition and diagnostic metadata for one access rule.
+ *
+ * @example
+ * ```ts
+ * const rule: AccessRuleOptions<{ ownerId: string; title: string }, { id: string }> = {
+ *   fields: ["title"],
+ *   when: (query, actor) => query.eq("ownerId", actor.field("id")),
+ *   id: "document-owner",
+ * };
+ * ```
+ */
 export interface AccessRuleOptions<TSubject, TActor> {
   readonly fields?: readonly Field<TSubject>[];
   readonly when?: AccessPredicate<TSubject, TActor>;
@@ -63,7 +97,15 @@ export interface AccessRuleOptions<TSubject, TActor> {
   readonly reason?: string;
 }
 
-/** Provides the JIT access explanation operation for the supplied input. */
+/**
+ * The structured explanation returned by an authorization decision.
+ *
+ * @example
+ * ```ts
+ * const explanation: AccessExplanation<{ id: string }> = ability.explain("read", { id: "doc-1" });
+ * explanation.allowed; // true or false
+ * ```
+ */
 export interface AccessExplanation<TSubject> {
   readonly allowed: boolean;
   readonly field?: Field<TSubject>;
@@ -72,7 +114,16 @@ export interface AccessExplanation<TSubject> {
   readonly matchedProhibition?: boolean;
 }
 
-/** The compiled answer for one actor. */
+/**
+ * The compiled answer for one actor.
+ *
+ * @example
+ * ```ts
+ * const ability = plan({ id: "ada" });
+ * ability.can("read", { ownerId: "ada" }); // true
+ * ability.cannot("delete", { ownerId: "ada" }); // true when no delete rule exists
+ * ```
+ */
 export interface Ability<TSubject, TAction extends string> {
   /** Returns whether the actor may perform `action`. */
   can(action: TAction, subject?: TSubject, field?: Field<TSubject>): boolean;
@@ -86,7 +137,17 @@ export interface Ability<TSubject, TAction extends string> {
   fields(action: TAction, subject?: TSubject): readonly Field<TSubject>[];
 }
 
-/** Provides the JIT access plan operation for the supplied input. */
+/**
+ * A schema-bound, immutable authorization plan.
+ *
+ * @example
+ * ```ts
+ * const plan = JIT.access(Document)
+ *   .actor(Actor)
+ *   .can("read", (query, actor) => query.eq("ownerId", actor.field("id")));
+ * const ability = plan({ id: "ada" });
+ * ```
+ */
 export interface AccessPlan<TSubject, TActor, TAction extends string> {
   /** Builds an actor-bound ability. */
   (actor: TActor): Ability<TSubject, TAction>;
@@ -110,7 +171,16 @@ export interface AccessPlan<TSubject, TActor, TAction extends string> {
   fields(action: TAction): readonly Field<TSubject>[] | undefined;
 }
 
-/** Provides the JIT access builder operation for the supplied input. */
+/**
+ * Starts an authorization plan for a subject schema.
+ *
+ * @example
+ * ```ts
+ * const plan = JIT.access(Document)
+ *   .actor(Actor)
+ *   .can("read", (query, actor) => query.eq("ownerId", actor.field("id")));
+ * ```
+ */
 export interface AccessBuilder<TSubject> extends AccessPlan<TSubject, unknown, never> {
   /** Declares the actor's shape, which is what `actor.field()` is checked against. */
   actor<TActorSchema extends ATS.AnyTypeSchema>(
@@ -125,6 +195,16 @@ export interface AccessBuilder<TSubject> extends AccessPlan<TSubject, unknown, n
  * are a switch over string literals rather than a scan of a rule array. Nothing
  * is denied by omission alone: an action with no rule is refused, and a
  * `cannot` overrides a `can` that matched the same action and field.
+ *
+ * @example
+ * ```ts
+ * const Document = JIT.object({ ownerId: JIT.string() });
+ * const Actor = JIT.object({ id: JIT.string() });
+ * const ability = JIT.access(Document)
+ *   .actor(Actor)
+ *   .can("read", (query, actor) => query.eq("ownerId", actor.field("id")))({ id: "ada" });
+ * ability.can("read", { ownerId: "ada" }); // true
+ * ```
  */
 export function access<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>

@@ -24,6 +24,14 @@ import { type ValidationMessage, withValidationMessage } from "../validation-mes
 /**
  * Creates a literal schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Ready = JIT.literal("ready");
+ * JIT.validate.is(Ready)("ready"); // true
+ * ```
+ *
  * @template TValue - The literal value type.
  * @param value - The literal runtime value.
  * @returns A builder wrapping a literal schema.
@@ -34,6 +42,14 @@ export function literal<const TValue>(value: TValue, message?: ValidationMessage
 
 /**
  * Creates an enum schema builder from a native enum-like object.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Status = JIT.enum({ Draft: "draft", Published: "published" });
+ * JIT.validate.is(Status)("draft"); // true
+ * ```
  *
  * @template TValues - The enum object type.
  * @param values - An object whose values are strings or numbers.
@@ -46,11 +62,26 @@ function nativeEnum<const TValues extends EnumValuesInput>(
   return /* @__PURE__ */ createBuilder(createSchema(TypeName.enum, withValidationMessage({ values }, message)));
 }
 
-/** Provides the JIT enum operation for the supplied input. */
+/**
+ * Creates an enum schema from a string/number-valued object.
+ *
+ * @example
+ * ```ts
+ * const Status = JIT.enum({ Draft: "draft", Published: "published" });
+ * ```
+ */
 export { nativeEnum as enum };
 
 /**
  * Creates a lazy schema builder.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Numbers = JIT.lazy(() => JIT.array(JIT.number()));
+ * JIT.validate.is(Numbers)([1, 2]); // true
+ * ```
  *
  * @template TSchema - The schema returned by the lazy getter.
  * @param getter - A callback that returns the schema or builder when resolved.
@@ -67,6 +98,14 @@ export function lazy<TSchema extends AnyTypeSchema>(getter: () => SchemaInput<TS
 /**
  * Creates an instanceof schema builder.
  *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const ErrorValue = JIT.instanceOf(Error);
+ * JIT.validate.is(ErrorValue)(new Error("failed")); // true
+ * ```
+ *
  * @template TCtor - The constructor used for runtime instanceof checks.
  * @param ctor - The constructor accepted by the schema.
  * @returns A builder wrapping an instanceof schema.
@@ -78,7 +117,17 @@ export function instanceOf<TCtor extends abstract new (...args: any[]) => unknow
   return /* @__PURE__ */ createBuilder(createSchema(TypeName.instanceof, withValidationMessage({ ctor }, message)));
 }
 
-/** Creates a schema that accepts JSON-encodable values. Kept under `JIT.json.value()`. */
+/**
+ * Creates a schema that accepts JSON-encodable values. Kept under `JIT.json.value()`.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Json = JIT.json.value();
+ * JIT.validate.is(Json)({ ok: true, count: 2 }); // true
+ * ```
+ */
 export function jsonValue(message?: ValidationMessage): Builder<JsonSchema> {
   return /* @__PURE__ */ createBuilder(createSchema(TypeName.json, withValidationMessage({}, message)));
 }
@@ -86,6 +135,14 @@ export function jsonValue(message?: ValidationMessage): Builder<JsonSchema> {
 /**
  * Creates a custom schema backed by an external predicate. Omitting the
  * predicate intentionally accepts any value while preserving `TOutput`.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Port = JIT.custom((value): value is number => typeof value === "number" && value > 0);
+ * JIT.validate.is(Port)(8080); // true
+ * ```
  */
 export function custom<TOutput = unknown>(
   predicate?: ((value: unknown) => value is TOutput) | ((value: unknown) => boolean),
@@ -99,10 +156,27 @@ export function custom<TOutput = unknown>(
   );
 }
 
-/** Provides the JIT template literal factory part operation for the supplied input. */
+/**
+ * A literal or schema component accepted by `JIT.templateLiterals()`.
+ *
+ * @example
+ * ```ts
+ * const Path = JIT.templateLiterals(["/users/", JIT.int()]);
+ * ```
+ */
 export type TemplateLiteralFactoryPart = string | SchemaInput;
 
-/** Creates a template-literal string schema from literal and schema parts. */
+/**
+ * Creates a template-literal string schema from literal and schema parts.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const UserPath = JIT.templateLiterals(["/users/", JIT.int()]);
+ * JIT.validate.is(UserPath)("/users/42"); // true
+ * ```
+ */
 export function templateLiteral<const TParts extends readonly TemplateLiteralFactoryPart[]>(
   parts: TParts,
   message?: ValidationMessage
@@ -117,7 +191,19 @@ export function templateLiteral<const TParts extends readonly TemplateLiteralFac
   );
 }
 
-/** Provides the JIT function schema options operation for the supplied input. */
+/**
+ * Options for a function schema's argument and return-value boundaries.
+ *
+ * @example
+ * ```ts
+ * const NumberSchema = JIT.number();
+ * const StringSchema = JIT.string();
+ * const options: FunctionSchemaOptions<[typeof NumberSchema], typeof StringSchema> = {
+ *   input: [JIT.number()],
+ *   output: JIT.string(),
+ * };
+ * ```
+ */
 export interface FunctionSchemaOptions<
   TInput extends readonly SchemaInput[],
   TOutput extends SchemaInput | undefined = undefined,
@@ -136,7 +222,18 @@ type UnwrapFunctionInputs<TInput extends readonly SchemaInput[]> = {
 type UnwrapFunctionOutput<TOutput extends SchemaInput | undefined> =
   TOutput extends SchemaInput<infer TSchema> ? TSchema : undefined;
 
-/** Creates a function schema with input/output validation wrappers. */
+/**
+ * Creates a function schema with input/output validation wrappers.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Add = JIT.function({ input: [JIT.number(), JIT.number()], output: JIT.number() });
+ * const isAdd = JIT.validate.is(Add);
+ * isAdd((left: number, right: number) => left + right); // true
+ * ```
+ */
 function functionSchema<
   const TInput extends readonly SchemaInput[],
   TOutput extends SchemaInput | undefined = undefined,
@@ -160,7 +257,17 @@ function functionSchema<
   );
 }
 
-/** Provides the JIT function operation for the supplied input. */
+/**
+ * Creates function schemas with argument and return boundaries; the same
+ * module also exposes `templateLiterals` as the plural alias of
+ * `templateLiteral`.
+ *
+ * @example
+ * ```ts
+ * const Add = JIT.function({ input: [JIT.number(), JIT.number()], output: JIT.number() });
+ * const Path = JIT.templateLiterals(["/users/", JIT.int()]);
+ * ```
+ */
 export { functionSchema as function, templateLiteral as templateLiterals };
 
 function temporalSchema<TKind extends TemporalKind>(kind: TKind): Builder<TemporalSchema<TKind, []>> {
@@ -171,7 +278,15 @@ function temporalSchema<TKind extends TemporalKind>(kind: TKind): Builder<Tempor
   );
 }
 
-/** Provides the JIT temporal factories operation for the supplied input. */
+/**
+ * Temporal schema factories for native Temporal values.
+ *
+ * @example
+ * ```ts
+ * const Instant = JIT.temporal.instant();
+ * JIT.validate.is(Instant)(Temporal.Instant.from("2024-01-01T00:00:00Z"));
+ * ```
+ */
 export interface TemporalFactories {
   /** Builds an instant schema. */
   instant(): Builder<TemporalSchema<"instant", []>>;
@@ -191,7 +306,17 @@ export interface TemporalFactories {
   duration(): Builder<TemporalSchema<"duration", []>>;
 }
 
-/** Provides the JIT temporal operation for the supplied input. */
+/**
+ * Temporal schema factories for native Temporal values.
+ *
+ * @example
+ * ```ts
+ * import { JIT } from "@jit-compiler/jit";
+ *
+ * const Instant = JIT.temporal.instant();
+ * JIT.validate.is(Instant)(Temporal.Instant.from("2024-01-01T00:00:00Z")); // true
+ * ```
+ */
 export const temporal: TemporalFactories = {
   instant: () => temporalSchema("instant"),
   plainDate: () => temporalSchema("plainDate"),

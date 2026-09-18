@@ -1,7 +1,8 @@
 import type * as ATS from "../../core/ats/index.js";
 import type { CodeWriter } from "../emitter/code-writer.js";
 import { findRecursiveSchemas } from "../schema-recursion.js";
-import { type ValidatorBindings, ValidatorEmitter } from "./emit-validate.js";
+import type { ValidatorBindings } from "./emit-validate.js";
+import { ValidatorEmitter } from "./emit-validate.js";
 import { rootPath } from "./emit-validate-helpers.js";
 import { containsPromise, rootHasReadonly } from "./emit-validate-support.js";
 

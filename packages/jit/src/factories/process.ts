@@ -25,13 +25,30 @@ type ProcessExecute<TElement, TResult, TParams extends Readonly<Record<string, u
   ? (values: readonly TElement[], length?: number) => TResult
   : (values: readonly TElement[], params: TParams, length?: number) => TResult;
 
-/** Executes the JIT process builder operation for the supplied input. */
+/**
+ * Starts a binary process pipeline for row-oriented aggregation.
+ *
+ * @example
+ * ```ts
+ * const Row = JIT.object({ active: JIT.boolean(), amount: JIT.number() });
+ * const total = JIT.process(Row).binary().filter((query) => query.eq("active", true)).sum("amount").compile();
+ * total.execute([{ active: true, amount: 10 }]); // 10
+ * ```
+ */
 export interface ProcessBuilder<TElement> {
   /** Opens the binary process pipeline for this element schema. */
   binary(options?: BinaryRowSetOptions): BinaryProcessBuilder<TElement, TElement, TElement[]>;
 }
 
-/** Provides the JIT binary process compiled operation for the supplied input. */
+/**
+ * Compiled binary process handles for query, binary storage and execution.
+ *
+ * @example
+ * ```ts
+ * const compiled = JIT.process(Row).binary().count().compile();
+ * compiled.execute([{ active: true, amount: 10 }]); // 1
+ * ```
+ */
 export interface BinaryProcessCompiled<
   TElement,
   TResult,
@@ -44,7 +61,14 @@ export interface BinaryProcessCompiled<
   readonly execute: ProcessExecute<TElement, TResult, TParams>;
 }
 
-/** Provides the JIT binary process builder operation for the supplied input. */
+/**
+ * Fluent binary process pipeline.
+ *
+ * @example
+ * ```ts
+ * const compiled = JIT.process(Row).binary().select("amount").sum("amount").compile();
+ * ```
+ */
 export interface BinaryProcessBuilder<
   TElement,
   TOutput,
@@ -90,7 +114,16 @@ export interface BinaryProcessBuilder<
   compile(): BinaryProcessCompiled<TElement, TResult, TParams>;
 }
 
-/** Executes the JIT process operation for the supplied input. */
+/**
+ * Starts a process pipeline for an object row schema.
+ *
+ * @example
+ * ```ts
+ * const Row = JIT.object({ active: JIT.boolean(), amount: JIT.number() });
+ * const count = JIT.process(Row).binary().count().compile();
+ * count.execute([{ active: true, amount: 10 }]); // 1
+ * ```
+ */
 export function process<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): ProcessBuilder<ATS.TypeofSchema<TSchema>> {

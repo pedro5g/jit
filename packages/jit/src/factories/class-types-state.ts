@@ -9,20 +9,12 @@ import type {
   MethodsForExtension,
   MutableSurface,
   SchemaFieldKeys,
+  TransparentSchema,
 } from "./class-types-schema.js";
 
 type IsReadonlySchema<TSchema> = TSchema extends { readonly type: "readonly" }
   ? true
-  : TSchema extends
-        | ATS.OptionalSchema<infer TInner>
-        | ATS.NullableSchema<infer TInner>
-        | ATS.NullishSchema<infer TInner>
-        | ATS.DefaultSchema<infer TInner>
-        | ATS.BrandSchema<infer TInner>
-        | ATS.RefineSchema<infer TInner>
-        | ATS.CoerceSchema<infer TInner>
-        | ATS.PipeSchema<infer TInner>
-        | ATS.TransformSchema<infer TInner>
+  : TSchema extends TransparentSchema<infer TInner>
     ? IsReadonlySchema<TInner>
     : false;
 type SchemaReadonlyKeys<TSchema extends ATS.AnyTypeSchema> = TSchema extends {
@@ -103,17 +95,7 @@ type HasIdentifierMetadata<TSchema extends ATS.AnyTypeSchema> =
       : false
     : TSchema extends ATS.LazySchema<infer TInner>
       ? HasIdentifierMetadata<TInner>
-      : TSchema extends
-            | ATS.OptionalSchema<infer TInner>
-            | ATS.NullableSchema<infer TInner>
-            | ATS.NullishSchema<infer TInner>
-            | ATS.DefaultSchema<infer TInner>
-            | ATS.BrandSchema<infer TInner>
-            | ATS.ReadonlySchema<infer TInner>
-            | ATS.RefineSchema<infer TInner>
-            | ATS.CoerceSchema<infer TInner>
-            | ATS.PipeSchema<infer TInner>
-            | ATS.TransformSchema<infer TInner>
+      : TSchema extends TransparentSchema<infer TInner>
         ? HasIdentifierMetadata<TInner>
         : false;
 

@@ -11,6 +11,7 @@ import { installLifecycleMethods, lifecycleArtifact } from "./class-core-lifecyc
 import type { RuntimeClassBuild } from "./class-core-materialize.js";
 import type { ClassDefinitionState } from "./class-core-state.js";
 import {
+  assertConstructionConfiguration,
   definePrototype,
   installFactory,
   installMethodDefinition,
@@ -246,19 +247,7 @@ function configureConstruction(
   mode: ConstructionMode,
   materialize: RuntimeClassMaterializer
 ): RuntimeClass<ATS.AnyTypeSchema> {
-  if (state.constructionConfigured)
-    throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
-  if (state.factoriesConfigured)
-    throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
-  if (mode !== "constructor" && mode !== "factory") {
-    throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
-  }
-  if (state.isAbstract && mode === "constructor") {
-    throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
-  }
-  if (state.policy.configured) {
-    throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
-  }
+  assertConstructionConfiguration(state, mode);
   return materialize({
     ...state,
     construction: mode,
