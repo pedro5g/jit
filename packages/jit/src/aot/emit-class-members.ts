@@ -343,8 +343,11 @@ function emitEqualityMembers(
     const equal = context.internalIdentifier(`${binding}_equal`);
     const source = context.tryEmit(reportName, "class.equals", context.skipped, () => emitEqualSource(artifact.schema));
     if (!source) return undefined;
+    const typedSource = context.typescript
+      ? source.replace("function equal(l, r)", "function equal(l: __JitValue, r: __JitValue)")
+      : source;
     return {
-      helpers: [`const ${equal} = ${context.asExpression(source, "equal")};`],
+      helpers: [`const ${equal} = ${context.asExpression(typedSource, "equal")};`],
       methods: [`equals(other) { return other instanceof ${binding} && ${equal}(this.value, other.value); }`],
     };
   }

@@ -61,5 +61,7 @@ export * as Errors from "./errors/index.js";
 export * as JIT from "./factories/index.js";
 /** Runtime helpers referenced by generated (AOT) code (`getIndex`, hash primitives). */
 export * as Runtime from "./runtime/runtime.js";
+/** Transport-neutral agent tool contracts and artifact lookup operations. */
+export * as Tooling from "./tooling/index.js";
 /** Pure schema-to-schema transforms (`partial`, `pick`, `omit`, wrappers). */
 export * as Transform from "./transforms/index.js";

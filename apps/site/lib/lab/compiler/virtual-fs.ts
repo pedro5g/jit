@@ -39,6 +39,10 @@ export function readFileSync(path: string, _encoding: string): string {
   return readVirtualFile(path);
 }
 
+export function statSync(path: string): { readonly size: number } {
+  return { size: new TextEncoder().encode(readVirtualFile(path)).byteLength };
+}
+
 export function writeFileSync(path: string, content: string): void {
   files.set(normalize(path), content);
 }

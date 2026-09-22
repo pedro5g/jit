@@ -24,7 +24,9 @@ type PlanArtifactArguments<TFunction> = TFunction extends (
 export interface PlanArtifactEmitterContext
   extends ArtifactEmissionContext<
     "runtimeGetIndex" | "runtimeCachedIndex" | "hashHelpers" | "hashCache" | "jsonPatchHelpers"
-  > {}
+  > {
+  readonly ts: boolean;
+}
 
 export interface PlanArtifactEmitters {
   readonly emitSortPlanArtifact: (
@@ -278,16 +280,19 @@ function emitHashBinding(
   const source = context.tryEmit(reportName, "hash", context.skipped, () => emitHashSource(schema));
 
   if (!source) return undefined;
+  const typedSource = context.ts
+    ? source.split("function hash(value)").join("function hash(value: __JitValue)")
+    : source;
   context.mark("hashHelpers");
   if (!cache) {
-    context.js.push(`const ${binding} = ${context.asExpression(source, "hash")};`);
+    context.js.push(`const ${binding} = ${context.asExpression(typedSource, "hash")};`);
     return binding;
   }
   context.mark("hashCache");
   context.js.push(`const ${binding} = /*#__PURE__*/ (() => {`);
-  context.js.push(...context.indentBlock(`const compute = (${source});`));
+  context.js.push(...context.indentBlock(`const compute = (${typedSource});`));
   context.js.push(
-    "  return (value) => {",
+    `  return (value${context.ts ? ": __JitValue" : ""})${context.ts ? ": number" : ""} => {`,
     '    if ((typeof value === "object" && value !== null) || typeof value === "function") {',
     "      const cached = __hashCache.get(value);",
     "      if (cached !== undefined) return cached;",

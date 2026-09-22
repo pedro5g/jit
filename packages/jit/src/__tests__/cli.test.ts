@@ -123,6 +123,30 @@ describe("jit CLI", () => {
     expect(existsSync(join(projectDir, "generated", "plans"))).toBe(false);
   });
 
+  it("should expose hash and status metadata in JSON generation output", async () => {
+    const { runtime, stdout } = createRuntime();
+
+    writeDeclaration("user.jit.ts", [
+      "const userSchema = JIT.object({ id: JIT.number() });",
+      "export const isUser = JIT.validate.is(userSchema);",
+    ]);
+    writeConfig();
+
+    const code = await main(["generate", "--emit-manifest", "--json"], runtime);
+    const result = JSON.parse(stdout.join("")) as {
+      readonly status: string;
+      readonly artifactStatus: string;
+      readonly artifactDigest: string;
+      readonly manifestDigest: string;
+      readonly symbols: number;
+    };
+
+    expect(code).toBe(0);
+    expect(result).toMatchObject({ status: "success", artifactStatus: "clean", symbols: 1 });
+    expect(result.artifactDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.manifestDigest).toMatch(/^[a-f0-9]{64}$/);
+  });
+
   it("should generate an object of artifacts as one frozen object", async () => {
     const { runtime } = createRuntime();
 

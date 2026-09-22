@@ -40,6 +40,7 @@ export function createArtifactEmitter(context: ArtifactEmitterContext) {
 function createValidatorBinding(context: ArtifactEmitterContext) {
   return createValidatorBindingEmitter({
     js: context.js,
+    ts: context.ts,
     skipped: context.skipped,
     classBindings: context.classBindings,
     assertionBindings: context.assertionBindings,
@@ -53,6 +54,7 @@ function createValidatorBinding(context: ArtifactEmitterContext) {
 function createPlanEmitters(context: ArtifactEmitterContext) {
   return createPlanArtifactEmitters({
     js: context.js,
+    ts: context.ts,
     skipped: context.skipped,
     mark: context.mark,
     internalIdentifier: context.internalIdentifier,
@@ -103,6 +105,7 @@ function createValidatorEmitters(
 ) {
   return createValidatorArtifactEmitter({
     js: context.js,
+    typescript: context.ts,
     skipped: context.skipped,
     mark: context.mark,
     emitValidatorBinding,
@@ -116,6 +119,7 @@ function createExecutionEmitters(
 ) {
   return createExecutionArtifactEmitter({
     js: context.js,
+    ts: context.ts,
     skipped: context.skipped,
     classBindings: context.classBindings,
     classArtifacts: context.classArtifacts,

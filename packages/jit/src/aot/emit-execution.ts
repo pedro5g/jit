@@ -227,14 +227,20 @@ class ExecutionArtifactEmitter {
     if (stage.operation === "is") {
       if (hasJsonDecode || hasBinaryDecode)
         return this.#skipAndReturn("is", "is must receive a value source in AOT output");
-      this.#host.js.push(`${this.#declaration} /*#__PURE__*/ ((v) => v.is)(${validator});`);
+      this.#host.js.push(
+        this.#host.typescript
+          ? `${this.#declaration} (${validator}.is as ${this.#type});`
+          : `${this.#declaration} /*#__PURE__*/ ((v) => v.is)(${validator});`
+      );
     } else if (stage.operation === "safeParse") {
       if (hasJsonDecode || hasBinaryDecode)
         return this.#skipAndReturn("safeParse", "safeParse source composition is not an AOT sink");
       this.#host.js.push(
         fastParse
-          ? `${this.#declaration} (value) => ${validator}.is(value) ? { success: true, data: value } : ${validator}.safeParse(value);`
-          : `${this.#declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validator});`
+          ? `${this.#declaration} (value${this.#host.typescript ? ": unknown" : ""}) => ${validator}.is(value) ? { success: true, data: value } : ${validator}.safeParse(value);`
+          : this.#host.typescript
+            ? `${this.#declaration} (${validator}.safeParse as ${this.#type});`
+            : `${this.#declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validator});`
       );
     } else if (hasJsonDecode) {
       this.#emitJsonValidation(validator, fastParse, classBinding);
@@ -250,8 +256,8 @@ class ExecutionArtifactEmitter {
     this.#host.markValidationError();
     this.#host.js.push(
       fastParse
-        ? `${this.#declaration} (json) => { const value = JSON.parse(json); if (${validator}.is(value)) return value; const r = ${validator}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
-        : `${this.#declaration} (json) => { const r = ${validator}.safeParse(JSON.parse(json)); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); };`
+        ? `${this.#declaration} (json${this.#host.typescript ? ": string" : ""}) => { const value = JSON.parse(json); if (${validator}.is(value)) return value; const r = ${validator}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+        : `${this.#declaration} (json${this.#host.typescript ? ": string" : ""}) => { const r = ${validator}.safeParse(JSON.parse(json)); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); };`
     );
   }
 
@@ -271,8 +277,8 @@ class ExecutionArtifactEmitter {
     this.#host.markValidationError();
     this.#host.js.push(
       fastParse
-        ? `${this.#declaration} /*#__PURE__*/ ((codec, is, safeParse) => (bytes) => { const value = codec.decode(bytes); if (is(value)) return value; const r = safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
-        : `${this.#declaration} /*#__PURE__*/ ((codec, safeParse) => (bytes) => { const r = safeParse(codec.decode(bytes)); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); })((() => {`
+        ? `${this.#declaration} /*#__PURE__*/ ((codec, is, safeParse) => (bytes${this.#host.typescript ? ": Uint8Array" : ""}) => { const value = codec.decode(bytes); if (is(value)) return value; const r = safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
+        : `${this.#declaration} /*#__PURE__*/ ((codec, safeParse) => (bytes${this.#host.typescript ? ": Uint8Array" : ""}) => { const r = safeParse(codec.decode(bytes)); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); })((() => {`
     );
     this.#host.js.push(...bindings.map((line) => `  ${line}`));
     this.#host.js.push(...this.#host.indentBlock(codec.source));
@@ -286,8 +292,8 @@ class ExecutionArtifactEmitter {
     this.#host.markValidationError();
     this.#host.js.push(
       fastParse
-        ? `${this.#declaration} (value) => { if (${validator}.is(value)) return value; const r = ${validator}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
-        : `${this.#declaration} (value) => { const r = ${validator}.safeParse(value); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); };`
+        ? `${this.#declaration} (value${this.#host.typescript ? ": unknown" : ""}) => { if (${validator}.is(value)) return value; const r = ${validator}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+        : `${this.#declaration} (value${this.#host.typescript ? ": unknown" : ""}) => { const r = ${validator}.safeParse(value); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); };`
     );
   }
 

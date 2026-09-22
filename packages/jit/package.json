@@ -6,7 +6,7 @@
   "type": "module",
   "sideEffects": false,
   "scripts": {
-    "clean": "rm -rf ATS aot compiler core errors factories runtime shared transforms *.js *.cjs *.d.ts *.d.cts *.d.mts",
+    "clean": "rm -rf dist ATS aot compiler core errors factories runtime shared transforms *.js *.cjs *.d.ts *.d.cts *.d.mts",
     "build": "zshy --project tsconfig.build.json",
     "test:watch": "pnpm vitest",
     "test": "pnpm vitest run"
@@ -24,13 +24,10 @@
     "performance"
   ],
   "files": [
-    "**/*.js",
-    "**/*.mjs",
-    "**/*.cjs",
-    "**/*.d.ts",
-    "**/*.d.mts",
-    "**/*.d.cts",
-    "**/package.json"
+    "dist/**",
+    "package.json",
+    "README.md",
+    "LICENSE"
   ],
   "zshy": {
     "exports": {
@@ -46,9 +43,9 @@
       "@jit/source": "src"
     }
   },
-  "main": "./index.cjs",
-  "types": "./index.d.cts",
-  "module": "./index.js",
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.cts",
+  "module": "./dist/index.js",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pedro5g/jit.git",
@@ -76,44 +73,44 @@
     "./package.json": "./package.json",
     ".": {
       "@jit/source": "./src/index.ts",
-      "types": "./index.d.cts",
-      "import": "./index.js",
-      "require": "./index.cjs"
+      "types": "./dist/index.d.cts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     },
     "./cli": {
       "@jit/source": "./src/cli.ts",
-      "types": "./cli.d.cts",
-      "import": "./cli.js",
-      "require": "./cli.cjs"
+      "types": "./dist/cli.d.cts",
+      "import": "./dist/cli.js",
+      "require": "./dist/cli.cjs"
     },
     "./aot": {
       "@jit/source": "./src/aot/index.ts",
-      "types": "./aot/index.d.cts",
-      "import": "./aot/index.js",
-      "require": "./aot/index.cjs"
+      "types": "./dist/aot/index.d.cts",
+      "import": "./dist/aot/index.js",
+      "require": "./dist/aot/index.cjs"
     },
     "./runtime": {
       "@jit/source": "./src/runtime.ts",
-      "types": "./runtime.d.cts",
-      "import": "./runtime.js",
-      "require": "./runtime.cjs"
+      "types": "./dist/runtime.d.cts",
+      "import": "./dist/runtime.js",
+      "require": "./dist/runtime.cjs"
     },
     "./define": {
       "@jit/source": "./src/define.ts",
-      "types": "./define.d.cts",
-      "import": "./define.js",
-      "require": "./define.cjs"
+      "types": "./dist/define.d.cts",
+      "import": "./dist/define.js",
+      "require": "./dist/define.cjs"
     },
     "./mcp": {
       "@jit/source": "./src/mcp.ts",
-      "types": "./mcp.d.cts",
-      "import": "./mcp.js",
-      "require": "./mcp.cjs"
+      "types": "./dist/mcp.d.cts",
+      "import": "./dist/mcp.js",
+      "require": "./dist/mcp.cjs"
     }
   },
   "bin": {
-    "jit": "cli.js",
-    "jit-mcp": "mcp.js"
+    "jit": "dist/cli.js",
+    "jit-mcp": "dist/mcp.js"
   },
   "devDependencies": {
     "@types/node": "^26.1.0"

@@ -42,16 +42,16 @@ describe("public Typeof display", () => {
 
     expect(stableTypes).toMatchInlineSnapshot(`
       {
-        "DomainState": "Omit<{ id: number; name: string; email: string; role: "admin" | "member"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }, "id"> & Readonly<Pick<{ id: number; name: string; email: string; role: "admin" | "member"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }, "id">>",
+        "DomainState": "Omit<{ id: number; name: string; email: string; role: "member" | "admin"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }, "id"> & Readonly<Pick<{ id: number; name: string; email: string; role: "member" | "admin"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }, "id">>",
         "PublicUser": "{ id: number; name: string; email: string; }",
-        "User": "{ id: number; name: string; email: string; role: "admin" | "member"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }",
+        "User": "{ id: number; name: string; email: string; role: "member" | "admin"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }",
         "UserEvent": "{ readonly id: string; readonly type: "user.name-changed"; readonly version: 1; readonly occurredAt: Date; readonly payload: { oldName: string; newName: string; }; } & JIT.DomainEventBrand & { readonly "~event": JIT.StandardEvent; }",
-        "UserList": "{ id: number; name: string; email: string; role: "admin" | "member"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }[]",
+        "UserList": "{ id: number; name: string; email: string; role: "member" | "admin"; active: boolean; score: number; tags: string[]; profile: { bio: string | null; } | undefined; }[]",
       }
     `);
     for (const member of [
       "readonly email: string;",
-      'readonly role: "admin" | "member";',
+      'readonly role: "member" | "admin";',
       "readonly name: string;",
       "readonly id: number;",
       "readonly tags: string[];",

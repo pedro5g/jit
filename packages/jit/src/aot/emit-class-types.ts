@@ -30,6 +30,7 @@ interface ValidatorSelection {
 
 export interface ClassArtifactEmitContext {
   readonly js: string[];
+  readonly typescript: boolean;
   readonly skipped: SkippedOperation[];
   readonly mark: (flag: ClassArtifactFlag) => void;
   readonly internalIdentifier: (preferred: string) => string;

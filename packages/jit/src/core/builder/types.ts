@@ -142,7 +142,22 @@ type StringCheckPasses<TValue extends string, TCheck> =
                     ? TValue extends ""
                       ? false
                       : true
-                    : true;
+                    : TCheck extends SchemaCheck<"lowercase", unknown>
+                      ? TValue extends Lowercase<TValue>
+                        ? true
+                        : false
+                      : TCheck extends SchemaCheck<"uppercase", unknown>
+                        ? TValue extends Uppercase<TValue>
+                          ? true
+                          : false
+                        : TCheck extends
+                              | SchemaCheck<"camelCase", unknown>
+                              | SchemaCheck<"pascalCase", unknown>
+                              | SchemaCheck<"snakeCase", unknown>
+                              | SchemaCheck<"kebabCase", unknown>
+                              | SchemaCheck<"upperSnakeCase", unknown>
+                          ? true
+                          : true;
 
 type StringChecksPass<TValue extends string, TChecks extends readonly unknown[]> = TChecks extends readonly [
   infer THead,
@@ -751,13 +766,33 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
   /** Normalizes parsed output using the selected Unicode normalization form. */
   normalize(form?: StringNormalizationForm): Builder<TSchema>;
   /** Requires lowercase input without changing it. */
-  lowercase(): Builder<TSchema>;
-  /** Alias for `lowercase()`. */
-  toLowerCase(): Builder<TSchema>;
+  lowercase(message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"lowercase">>>;
   /** Requires uppercase input without changing it. */
-  uppercase(): Builder<TSchema>;
-  /** Alias for `uppercase()`. */
-  toUpperCase(): Builder<TSchema>;
+  uppercase(message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"uppercase">>>;
+  /** Requires canonical camelCase input without changing it. */
+  camelCase(message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"camelCase">>>;
+  /** Requires canonical PascalCase input without changing it. */
+  pascalCase(message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"pascalCase">>>;
+  /** Requires canonical snake_case input without changing it. */
+  snakeCase(message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"snakeCase">>>;
+  /** Requires canonical kebab-case input without changing it. */
+  kebabCase(message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"kebabCase">>>;
+  /** Requires canonical UPPER_SNAKE_CASE input without changing it. */
+  upperSnakeCase(message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"upperSnakeCase">>>;
+  /** Converts parsed output to lowercase. */
+  toLowerCase(): Builder<AppendStringCheck<TSchema, SchemaCheck<"toLowerCase">>>;
+  /** Converts parsed output to uppercase. */
+  toUpperCase(): Builder<AppendStringCheck<TSchema, SchemaCheck<"toUpperCase">>>;
+  /** Converts parsed output to camelCase. */
+  toCamelCase(): Builder<AppendStringCheck<TSchema, SchemaCheck<"toCamelCase">>>;
+  /** Converts parsed output to PascalCase. */
+  toPascalCase(): Builder<AppendStringCheck<TSchema, SchemaCheck<"toPascalCase">>>;
+  /** Converts parsed output to snake_case. */
+  toSnakeCase(): Builder<AppendStringCheck<TSchema, SchemaCheck<"toSnakeCase">>>;
+  /** Converts parsed output to kebab-case. */
+  toKebabCase(): Builder<AppendStringCheck<TSchema, SchemaCheck<"toKebabCase">>>;
+  /** Converts parsed output to UPPER_SNAKE_CASE. */
+  toUpperSnakeCase(): Builder<AppendStringCheck<TSchema, SchemaCheck<"toUpperSnakeCase">>>;
   /** Cleans strings through a source-emitted policy in parse and `JIT.security.sanitize`. */
   sanitize(options?: StringSanitizePreset | StringSanitizeSpec): Builder<TSchema>;
   /** Requires a GUID/UUID-shaped identifier. */

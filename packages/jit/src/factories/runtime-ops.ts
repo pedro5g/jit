@@ -30,7 +30,6 @@ import {
   mappedValue,
   operationArtifact,
   type SchemaArtifact,
-  type StandardArtifact,
   validationArtifact,
 } from "./execution.js";
 import type { MapperArgs } from "./mapper.js";
@@ -87,8 +86,9 @@ export interface AsyncValidateNamespace {
  * path — and `async` holds the awaited pair, so a call site never has to read
  * a suffix to know which one it is running.
  *
- * Every artifact it returns is a Standard Schema (`~standard`), so it can be
- * handed directly to any consumer in the ecosystem.
+ * Only parser artifacts implement Standard Schema. Boolean guards and
+ * SafeParse artifacts preserve their native callable contracts because their
+ * outputs are not `unknown -> validated value`.
  *
  * @example
  * ```ts
@@ -103,7 +103,7 @@ export interface ValidateNamespace {
   /** Compiles a boolean type guard for the schema. */
   is<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
-  ): StandardArtifact<(value: unknown) => value is ATS.TypeofSchema<TSchema>, ATS.TypeofSchema<TSchema>>;
+  ): CallableArtifact<(value: unknown) => value is ATS.TypeofSchema<TSchema>>;
   /** Compiles parsing for a schema or Runtime Class. */
   parse<TSchema extends ATS.AnyTypeSchema, TInstance>(
     schema: RuntimeClass<TSchema, TInstance>,
@@ -118,12 +118,12 @@ export interface ValidateNamespace {
   safeParse<TSchema extends ATS.AnyTypeSchema, TInstance>(
     schema: RuntimeClass<TSchema, TInstance>,
     options?: ValidationDiagnosticOptions
-  ): StandardArtifact<(value: unknown) => SafeParseResult<TInstance>, TInstance>;
+  ): CallableArtifact<(value: unknown) => SafeParseResult<TInstance>>;
   /** Validates a schema input and returns issues without throwing. */
   safeParse<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
     options?: ValidationDiagnosticOptions
-  ): StandardArtifact<(value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>, ATS.TypeofSchema<TSchema>>;
+  ): CallableArtifact<(value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>>;
   /** Compiles an iterator that yields every validation issue for a value. */
   issues<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
@@ -177,18 +177,14 @@ function safeParseAsync<TSchema extends ATS.AnyTypeSchema>(
  */
 export const validate: ValidateNamespace = Object.freeze({
   is<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationArtifact(schema, "is") as StandardArtifact<
-      (value: unknown) => value is ATS.TypeofSchema<TSchema>,
-      ATS.TypeofSchema<TSchema>
-    >;
+    return validationArtifact(schema, "is") as CallableArtifact<(value: unknown) => value is ATS.TypeofSchema<TSchema>>;
   },
   parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: ValidationDiagnosticOptions) {
     return validationArtifact(schema, "parse", options) as SchemaArtifact<unknown, TSchema>;
   },
   safeParse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: ValidationDiagnosticOptions) {
-    return validationArtifact(schema, "safeParse", options) as StandardArtifact<
-      (value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>,
-      ATS.TypeofSchema<TSchema>
+    return validationArtifact(schema, "safeParse", options) as CallableArtifact<
+      (value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>
     >;
   },
   issues<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
@@ -525,7 +521,7 @@ export function mock<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSch
  * ```ts
  * import { JIT } from "@jit-compiler/jit";
  *
- * const Code = JIT.string().trim().uppercase();
+ * const Code = JIT.string().trim().toUpperCase();
  * const formatCode = JIT.format(Code);
  * formatCode(" jit "); // "JIT"
  * ```

@@ -16,6 +16,7 @@ import type { SkippedOperation } from "./generate.js";
 
 export interface AotComposedExecutionHost {
   readonly js: string[];
+  readonly typescript: boolean;
   readonly skipped: SkippedOperation[];
   readonly classBindings: ReadonlyMap<unknown, string>;
   markValidationError(): void;
@@ -85,6 +86,7 @@ class ComposedExecutionEmitter {
         safeParse: true,
         safeParseAsync: false,
         materializeRuntimeTypes,
+        typescript: this.#host.typescript,
       })
     );
 

@@ -409,20 +409,60 @@ const baseBuilderPrototype = {
     return createBuilder(appendCheck(this.schema, { kind: "normalize", value }));
   },
 
-  lowercase(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "lowercase" }));
+  lowercase(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "lowercase", message }));
   },
 
   toLowerCase(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "lowercase" }));
+    return createBuilder(appendCheck(this.schema, { kind: "toLowerCase" }));
   },
 
-  uppercase(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "uppercase" }));
+  uppercase(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "uppercase", message }));
   },
 
   toUpperCase(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "uppercase" }));
+    return createBuilder(appendCheck(this.schema, { kind: "toUpperCase" }));
+  },
+
+  camelCase(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "camelCase", message }));
+  },
+
+  pascalCase(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "pascalCase", message }));
+  },
+
+  snakeCase(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "snakeCase", message }));
+  },
+
+  kebabCase(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "kebabCase", message }));
+  },
+
+  upperSnakeCase(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "upperSnakeCase", message }));
+  },
+
+  toCamelCase(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "toCamelCase" }));
+  },
+
+  toPascalCase(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "toPascalCase" }));
+  },
+
+  toSnakeCase(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "toSnakeCase" }));
+  },
+
+  toKebabCase(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "toKebabCase" }));
+  },
+
+  toUpperSnakeCase(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "toUpperSnakeCase" }));
   },
 
   positive(this: RuntimeBuilder, message?: string): AnyBuilder {

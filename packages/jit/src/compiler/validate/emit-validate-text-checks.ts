@@ -1,5 +1,12 @@
 import type * as ATS from "../../core/ats/index.js";
 import { Regexes } from "../../shared/index.js";
+import {
+  CASE_RUNTIME_SOURCE,
+  CASE_RUNTIME_TYPESCRIPT_SOURCE,
+  type CaseStyle,
+  caseTransformPlan,
+  emitCaseExpression,
+} from "../case-transform-plan.js";
 import { emitSanitizeChain } from "../sanitize.js";
 import { countFormatPlaceholders, emitFormatMaskExpression, emitStrictFormatCondition } from "../source/format-mask.js";
 import { emitLiteral } from "../source/literal.js";
@@ -17,8 +24,6 @@ export function emitStringMutations(
       const form = typeof check.value === "string" ? emitLiteral(check.value) : "";
       emitter.writer.line(`${value} = ${value}.normalize(${form});`);
     }
-    if (check.kind === "lowercase") emitter.writer.line(`${value} = ${value}.toLowerCase();`);
-    if (check.kind === "uppercase") emitter.writer.line(`${value} = ${value}.toUpperCase();`);
     if (check.kind === "sanitize") {
       emitter.writer.line(
         `${value} = ${emitSanitizeChain(value, check.value as ATS.StringSanitizeSpec | undefined, (pattern) => emitter.bind(pattern))};`
@@ -198,6 +203,11 @@ export function emitStringFormatChecks(
   path: PathRef
 ): void {
   for (const check of checks) {
+    const casePlan = caseTransformPlan(check.kind);
+    if (casePlan?.operation === "validate") {
+      emitCaseValidation(emitter, casePlan.style, value, path, check.message);
+      continue;
+    }
     const handler = STRING_FORMAT_CHECKS[check.kind];
     if (handler !== undefined) {
       handler(emitter, check, value, path);
@@ -211,6 +221,23 @@ export function emitStringFormatChecks(
       );
     }
   }
+}
+
+function emitCaseValidation(
+  emitter: ValidatorEmitter,
+  style: CaseStyle,
+  value: string,
+  path: PathRef,
+  message: string | undefined
+): void {
+  const expression = emitCaseExpression(value, style);
+  const runtimeSource = emitter.typescript ? CASE_RUNTIME_TYPESCRIPT_SOURCE : CASE_RUNTIME_SOURCE;
+  if (style !== "lower" && style !== "upper" && !emitter.helperSources.includes(runtimeSource)) {
+    emitter.helperSources.push(runtimeSource);
+  }
+  emitter.failIf(`${expression} !== ${value}`, path, "invalid_case", style, message ?? `expected ${style} case`, {
+    style,
+  });
 }
 
 function emitUrlCheck(emitter: ValidatorEmitter, check: SchemaCheckRecord, value: string, path: PathRef): void {
@@ -246,7 +273,16 @@ export function emitStringTransforms(
   checks: readonly SchemaCheckRecord[],
   value: string
 ): void {
+  const runtimeSource = emitter.typescript ? CASE_RUNTIME_TYPESCRIPT_SOURCE : CASE_RUNTIME_SOURCE;
   for (const check of checks) {
+    const casePlan = caseTransformPlan(check.kind);
+    if (casePlan?.operation === "transform") {
+      const expression = emitCaseExpression(value, casePlan.style);
+      if (casePlan.style !== "lower" && casePlan.style !== "upper" && !emitter.helperSources.includes(runtimeSource)) {
+        emitter.helperSources.push(runtimeSource);
+      }
+      emitter.writer.line(`${value} = ${expression};`);
+    }
     if (check.kind === "format") emitFormatTransform(emitter, check, value);
     if (check.kind === "phoneBR") emitPhoneTransform(emitter, value);
   }

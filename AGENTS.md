@@ -430,3 +430,16 @@ runtime compiler, or unrelated high-level dependency may remain.
 11. Inspect existing implementation patterns before creating a new abstraction.
 12. Resolve API challenge findings before treating a fluent API block as semantically complete.
 13. For every new fluent operation, answer what it repeats with, what it combines with, what it conflicts with, whether it is terminal, and whether the TypeScript surface should expose the next transition.
+
+## Sovereign Artifacts And Agent Tooling
+
+- Generated artifacts are products, not serialized compiler internals.
+- A standalone artifact may not depend on `@jit-compiler/*`; provenance comments are the only permitted JIT residue in generated source.
+- Protocol capabilities attach only when the artifact boundary implements that protocol.
+- Agent-facing answers use the manifest before generated source. Source retrieval is explicit and reserved for debugging or drift review.
+- A clean managed manifest is authoritative only while every declared file hash and the compilation receipt agree.
+- Never infer current behavior from a stale, modified, missing or detached manifest.
+- Source emission never discovers semantic dependencies after generation; imports come from `ArtifactModuleGraph`.
+- New generated exports must appear in `ArtifactManifestV1`, and every manifest symbol must resolve to an emitted export.
+- New agent operations must execute through the shared `AgentToolCore`.
+- MCP, WebMCP and Lab adapters contain no compiler business logic and preserve the read/preview/write safety boundary.

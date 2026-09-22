@@ -245,6 +245,18 @@ export type StringCheck =
   | SchemaCheck<"trim">
   | SchemaCheck<"lowercase">
   | SchemaCheck<"uppercase">
+  | SchemaCheck<"camelCase">
+  | SchemaCheck<"pascalCase">
+  | SchemaCheck<"snakeCase">
+  | SchemaCheck<"kebabCase">
+  | SchemaCheck<"upperSnakeCase">
+  | SchemaCheck<"toLowerCase">
+  | SchemaCheck<"toUpperCase">
+  | SchemaCheck<"toCamelCase">
+  | SchemaCheck<"toPascalCase">
+  | SchemaCheck<"toSnakeCase">
+  | SchemaCheck<"toKebabCase">
+  | SchemaCheck<"toUpperSnakeCase">
   | SchemaCheck<"normalize", StringNormalizationForm | undefined>
   | SchemaCheck<"sanitize", StringSanitizeSpec>
   | SchemaCheck<"stringFormat", { readonly name: string; readonly pattern: RegExp }>

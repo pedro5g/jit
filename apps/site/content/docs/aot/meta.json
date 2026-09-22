@@ -4,6 +4,8 @@
     "cli-and-config",
     "generation-and-tree-shaking",
     "purity",
-    "artifact-cli"
+    "artifact-cli",
+    "sovereign-artifacts",
+    "agent-project-model"
   ]
 }

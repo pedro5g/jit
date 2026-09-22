@@ -416,11 +416,10 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
     }
   });
 
-  // Every validation artifact is a Standard Schema, so it can be handed
-  // straight to any consumer in the ecosystem without a wrapper.
-  attachStandardSchema(artifact, unwrapped, plan);
-
   if (operation === "parse") {
+    // Only a parser has the Standard Schema boundary `unknown -> output`.
+    // Boolean guards and SafeParse results remain their own callable contracts.
+    attachStandardSchema(artifact, unwrapped, plan);
     return artifactForSchema(
       artifact as unknown as ExecutionArtifact<unknown, ATS.TypeofSchema<TSchema>>,
       unwrapped
@@ -431,13 +430,13 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
 }
 
 /**
- * Any artifact whose plan ends in validation is a Standard Schema.
+ * A parser artifact can expose Standard Schema for its accepted input.
  *
- * A plain `validate.*` artifact shares the schema's own cached adapter, so a
- * builder and the artifacts built from it are identical by reference and a
+ * A plain `validate.parse` artifact shares the schema's own cached adapter, so
+ * a builder and the parser built from it are identical by reference and a
  * consumer may cache on that. A composed pipeline (`json.parse(X).validate()`)
- * validates a different input than the schema does, so it gets an adapter
- * that runs the pipeline itself and reports its issues.
+ * validates a different input than the schema does, so it gets an adapter that
+ * runs the pipeline itself and reports its issues.
  */
 export function attachStandardSchema(target: object, schema: ATS.AnyTypeSchema, plan?: ExecutionPlan): void {
   const composed = plan !== undefined && !isPlainValidation(plan);

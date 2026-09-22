@@ -178,8 +178,7 @@ export function createArtifactDispatcher(context: ArtifactDispatchContext) {
     annotate: boolean
   ) => {
     const type = importedType ?? artifactType(context.artifactTypeContext, artifact);
-    const assertedClassType =
-      artifact.kind === "class" && artifact.aggregate && annotate && context.ts ? type : undefined;
+    const assertedClassType = artifact.kind === "class" && annotate && context.ts ? type : undefined;
     const declaration = `const ${binding}${annotate && context.ts && assertedClassType === undefined ? `: ${type}` : ""} =`;
     if (importedType?.startsWith("__JitCall<")) context.mark("callHelper");
     const args = { binding, artifact, reportName, importedType, annotate, declaration, type, assertedClassType };
@@ -452,6 +451,7 @@ function emitRules(context: ArtifactDispatchContext, args: ArtifactEmissionArgs)
     emitRulesSinkSource(artifact.descriptor, artifact.sink, {
       bindingNames,
       ...(artifact.ruleId === undefined ? {} : { ruleId: artifact.ruleId }),
+      typescript: context.ts,
     })
   );
   if (!source) return undefined;

@@ -19,12 +19,14 @@ function validateWith<TOutput>(schema: {
 }
 
 describe("Standard Schema interop", () => {
-  it("should expose the contract on compiled validation artifacts", () => {
-    for (const artifact of [JIT.validate.is(User), JIT.validate.parse(User), JIT.validate.safeParse(User)]) {
-      expect(artifact["~standard"].version).toBe(1);
-      expect(artifact["~standard"].vendor).toBe("jit");
-      expect(typeof artifact["~standard"].validate).toBe("function");
-    }
+  it("should expose the contract only on parser artifacts", () => {
+    const parse = JIT.validate.parse(User);
+
+    expect(parse["~standard"].version).toBe(1);
+    expect(parse["~standard"].vendor).toBe("jit");
+    expect(typeof parse["~standard"].validate).toBe("function");
+    expect("~standard" in JIT.validate.is(User)).toBe(false);
+    expect("~standard" in JIT.validate.safeParse(User)).toBe(false);
   });
 
   it("should report the parsed value and stable issues through the contract", () => {
@@ -36,11 +38,10 @@ describe("Standard Schema interop", () => {
     expect("issues" in rejected && rejected.issues.length).toBeGreaterThan(0);
   });
 
-  it("should share one adapter between a schema and every artifact built from it", () => {
+  it("should share one adapter between a schema and its parser", () => {
     // Consumers may cache by identity, and a builder and its compiled
     // artifacts describe the very same contract.
-    expect(JIT.validate.is(User)["~standard"]).toBe(User["~standard"]);
-    expect(JIT.validate.safeParse(User)["~standard"]).toBe(User["~standard"]);
+    expect(JIT.validate.parse(User)["~standard"]).toBe(User["~standard"]);
   });
 
   it("should validate synchronously for a synchronous schema", () => {

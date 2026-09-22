@@ -13,6 +13,8 @@ describe("Lab browser AOT compiler", () => {
     const file = result.files[0];
 
     expect(result.skipped).toEqual([]);
+    expect(result.manifest?.manifestVersion).toBe(1);
+    expect(result.receipt?.manifestDigest).toBe(result.manifest?.manifestDigest);
     expect(file?.path).toBe("user.generated.ts");
     expect(file?.source).toContain('export type User = { id: number; name: string; role: "admin" | "member" };');
     expect(file?.source).toContain("const isUser: (value: unknown) => value is User =");

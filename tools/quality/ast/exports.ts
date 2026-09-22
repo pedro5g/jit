@@ -10,6 +10,7 @@ export interface PublicSymbol {
   readonly line: number;
   readonly kind: string;
   readonly documented: boolean;
+  readonly apiPath?: string;
 }
 
 export function collectPublicSymbols(context: QualityContext): PublicSymbol[] {
@@ -83,6 +84,7 @@ function collectReExport(
       line: targetSymbol?.line ?? source.getLineAndCharacterOfPosition(element.getStart(source)).line + 1,
       kind: "export",
       documented: targetSymbol?.documented ?? false,
+      apiPath: element.name.text,
     });
   }
   return true;

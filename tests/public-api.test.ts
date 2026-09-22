@@ -146,6 +146,7 @@ describe("public API manifest", () => {
           "JIT",
           "PipelineAST",
           "Runtime",
+          "Tooling",
           "Transform",
         ],
       }

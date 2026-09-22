@@ -55,6 +55,10 @@ function readVirtualFile(path) {
   if (value === void 0) throw new Error(`virtual file not found: ${path}`);
   return value;
 }
+function existsSync(path) {
+  const normalized = normalize(path);
+  return files.has(normalized) || [...files.keys()].some((file2) => file2.startsWith(`${normalized}/`));
+}
 function mkdirSync(_path, _options) {
   return void 0;
 }
@@ -71,6 +75,9 @@ function readdirSync(path) {
 }
 function readFileSync(path, _encoding) {
   return readVirtualFile(path);
+}
+function statSync(path) {
+  return { size: new TextEncoder().encode(readVirtualFile(path)).byteLength };
 }
 function writeFileSync(path, content) {
   files.set(normalize(path), content);
@@ -99,6 +106,16 @@ function normalize(path) {
 function basename(path) {
   const normalized = normalize2(path);
   return normalized.slice(normalized.lastIndexOf("/") + 1);
+}
+function dirname(path) {
+  const normalized = normalize2(path);
+  const slash = normalized.lastIndexOf("/");
+  if (slash < 0) return ".";
+  if (slash === 0) return "/";
+  return normalized.slice(0, slash);
+}
+function isAbsolute(path) {
+  return path.startsWith("/");
 }
 function join(...parts) {
   return normalize2(parts.filter(Boolean).join("/"));
@@ -3368,7 +3385,20 @@ function needsBuildString(schema) {
   const checks = schema.def.checks ?? [];
   if (schema.def.coerce === true) return true;
   return checks.some(
-    (check) => ["trim", "lowercase", "uppercase", "sanitize", "noEmpty", "format", "phoneBR"].includes(check.kind)
+    (check) => [
+      "trim",
+      "toLowerCase",
+      "toUpperCase",
+      "toCamelCase",
+      "toPascalCase",
+      "toSnakeCase",
+      "toKebabCase",
+      "toUpperSnakeCase",
+      "sanitize",
+      "noEmpty",
+      "format",
+      "phoneBR"
+    ].includes(check.kind)
   );
 }
 function needsBuildCoerce(schema) {
@@ -4710,6 +4740,86 @@ function truncateFailure(_emitter, value, unit, target) {
   return `${microsecond} !== 0 || ${nanosecond} !== 0`;
 }
 
+// ../../packages/jit/src/compiler/case-transform-plan.ts
+var CASE_PLANS = {
+  lowercase: { kind: "lowercase", operation: "validate", style: "lower" },
+  uppercase: { kind: "uppercase", operation: "validate", style: "upper" },
+  camelCase: { kind: "camelCase", operation: "validate", style: "camel" },
+  pascalCase: { kind: "pascalCase", operation: "validate", style: "pascal" },
+  snakeCase: { kind: "snakeCase", operation: "validate", style: "snake" },
+  kebabCase: { kind: "kebabCase", operation: "validate", style: "kebab" },
+  upperSnakeCase: { kind: "upperSnakeCase", operation: "validate", style: "upper-snake" },
+  toLowerCase: { kind: "toLowerCase", operation: "transform", style: "lower" },
+  toUpperCase: { kind: "toUpperCase", operation: "transform", style: "upper" },
+  toCamelCase: { kind: "toCamelCase", operation: "transform", style: "camel" },
+  toPascalCase: { kind: "toPascalCase", operation: "transform", style: "pascal" },
+  toSnakeCase: { kind: "toSnakeCase", operation: "transform", style: "snake" },
+  toKebabCase: { kind: "toKebabCase", operation: "transform", style: "kebab" },
+  toUpperSnakeCase: { kind: "toUpperSnakeCase", operation: "transform", style: "upper-snake" }
+};
+var CASE_RUNTIME_SOURCE = `function __caseTransform(value, style) {
+  const words = value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((word) => word.toLowerCase());
+  if (style === "lower") return value.toLowerCase();
+  if (style === "upper") return value.toUpperCase();
+  if (style === "camel") return words.length === 0 ? "" : words[0] + words.slice(1).map(__capitalizeCaseWord).join("");
+  if (style === "pascal") return words.map(__capitalizeCaseWord).join("");
+  if (style === "snake") return words.join("_");
+  if (style === "kebab") return words.join("-");
+  return words.join("_").toUpperCase();
+}
+function __capitalizeCaseWord(word) {
+  return word.length === 0 ? word : word[0].toUpperCase() + word.slice(1);
+}`;
+var CASE_RUNTIME_TYPESCRIPT_SOURCE = `function __caseTransform(value: __JitValue, style: string): string {
+  const words = value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((word: string) => word.toLowerCase());
+  if (style === "lower") return value.toLowerCase();
+  if (style === "upper") return value.toUpperCase();
+  if (style === "camel") return words.length === 0 ? "" : words[0] + words.slice(1).map(__capitalizeCaseWord).join("");
+  if (style === "pascal") return words.map(__capitalizeCaseWord).join("");
+  if (style === "snake") return words.join("_");
+  if (style === "kebab") return words.join("-");
+  return words.join("_").toUpperCase();
+}
+function __capitalizeCaseWord(word: string): string {
+  return word.length === 0 ? word : word[0].toUpperCase() + word.slice(1);
+}`;
+function caseTransformPlan(kind) {
+  return CASE_PLANS[kind];
+}
+function casePattern(style) {
+  switch (style) {
+    case "lower":
+      return "^[^A-Z]*$";
+    case "upper":
+      return "^[^a-z]*$";
+    case "camel":
+      return "^[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)*$";
+    case "pascal":
+      return "^[A-Z][a-z0-9]*(?:[A-Z][a-z0-9]*)*$";
+    case "snake":
+      return "^[a-z0-9]+(?:_[a-z0-9]+)*$";
+    case "kebab":
+      return "^[a-z0-9]+(?:-[a-z0-9]+)*$";
+    case "upper-snake":
+      return "^[A-Z0-9]+(?:_[A-Z0-9]+)*$";
+  }
+}
+function emitCaseExpression(value, style) {
+  if (style === "lower") return `${value}.toLowerCase()`;
+  if (style === "upper") return `${value}.toUpperCase()`;
+  return `__caseTransform(${value}, ${JSON.stringify(style)})`;
+}
+
 // ../../packages/jit/src/compiler/security/emit-scrub.ts
 function emitScrub(schema, selector) {
   const writer = new CodeWriter();
@@ -5040,8 +5150,6 @@ function emitStringMutations(emitter2, checks, value, path) {
       const form = typeof check.value === "string" ? emitLiteral(check.value) : "";
       emitter2.writer.line(`${value} = ${value}.normalize(${form});`);
     }
-    if (check.kind === "lowercase") emitter2.writer.line(`${value} = ${value}.toLowerCase();`);
-    if (check.kind === "uppercase") emitter2.writer.line(`${value} = ${value}.toUpperCase();`);
     if (check.kind === "sanitize") {
       emitter2.writer.line(
         `${value} = ${emitSanitizeChain(value, check.value, (pattern) => emitter2.bind(pattern))};`
@@ -5186,6 +5294,11 @@ var STRING_FORMAT_CHECKS = {
 var UUID_REGEX = /* @__PURE__ */ regexes_exports.uuid();
 function emitStringFormatChecks(emitter2, checks, value, path) {
   for (const check of checks) {
+    const casePlan = caseTransformPlan(check.kind);
+    if (casePlan?.operation === "validate") {
+      emitCaseValidation(emitter2, casePlan.style, value, path, check.message);
+      continue;
+    }
     const handler = STRING_FORMAT_CHECKS[check.kind];
     if (handler !== void 0) {
       handler(emitter2, check, value, path);
@@ -5199,6 +5312,16 @@ function emitStringFormatChecks(emitter2, checks, value, path) {
       );
     }
   }
+}
+function emitCaseValidation(emitter2, style, value, path, message) {
+  const expression = emitCaseExpression(value, style);
+  const runtimeSource = emitter2.typescript ? CASE_RUNTIME_TYPESCRIPT_SOURCE : CASE_RUNTIME_SOURCE;
+  if (style !== "lower" && style !== "upper" && !emitter2.helperSources.includes(runtimeSource)) {
+    emitter2.helperSources.push(runtimeSource);
+  }
+  emitter2.failIf(`${expression} !== ${value}`, path, "invalid_case", style, message ?? `expected ${style} case`, {
+    style
+  });
 }
 function emitUrlCheck(emitter2, check, value, path) {
   const holder = emitter2.nextVar("u");
@@ -5226,7 +5349,16 @@ function emitNamedFormatCheck(emitter2, check, value, path) {
   );
 }
 function emitStringTransforms(emitter2, checks, value) {
+  const runtimeSource = emitter2.typescript ? CASE_RUNTIME_TYPESCRIPT_SOURCE : CASE_RUNTIME_SOURCE;
   for (const check of checks) {
+    const casePlan = caseTransformPlan(check.kind);
+    if (casePlan?.operation === "transform") {
+      const expression = emitCaseExpression(value, casePlan.style);
+      if (casePlan.style !== "lower" && casePlan.style !== "upper" && !emitter2.helperSources.includes(runtimeSource)) {
+        emitter2.helperSources.push(runtimeSource);
+      }
+      emitter2.writer.line(`${value} = ${expression};`);
+    }
     if (check.kind === "format") emitFormatTransform(emitter2, check, value);
     if (check.kind === "phoneBR") emitPhoneTransform(emitter2, value);
   }
@@ -5391,10 +5523,11 @@ function emitCheckParams(params) {
   return `{ ${entries.join(", ")} }`;
 }
 var ValidatorEmitter = class {
-  constructor(mode, awaited = false, resolveDefaults = true, materializeRuntimeTypes = true, maxIssues = void 0, validationEnabled = true) {
+  constructor(mode, awaited = false, resolveDefaults = true, materializeRuntimeTypes = true, maxIssues = void 0, validationEnabled = true, typescript = false) {
     this.resolveDefaults = resolveDefaults;
     this.materializeRuntimeTypes = materializeRuntimeTypes;
     this.maxIssues = maxIssues;
+    this.typescript = typescript;
     this.writer = new CodeWriter();
     this.bindingNames = [];
     this.bindingValues = [];
@@ -5584,14 +5717,16 @@ var ValidatorEmitter = class {
     const savedWriter = this.writer;
     this.writer = new CodeWriter();
     if (this.mode === "is") {
-      this.writer.line(`function ${name}(value) {`);
+      this.writer.line(`function ${name}(value${this.typescript ? ": __JitValue" : ""}) {`);
       this.writer.indent(() => {
         this.emitInline(schema, "value", rootPath());
         this.writer.line("return true;");
       });
       this.writer.line("}");
     } else {
-      this.writer.line(`${this.awaited ? "async " : ""}function ${name}(value, issues, path) {`);
+      this.writer.line(
+        `${this.awaited ? "async " : ""}function ${name}(value${this.typescript ? ": __JitValue" : ""}, issues${this.typescript ? ": __JitValidationIssue[]" : ""}, path${this.typescript ? ": readonly PropertyKey[]" : ""})${this.typescript ? ": __JitValue" : ""} {`
+      );
       this.writer.indent(() => {
         const output = this.emitInline(schema, "value", {
           kind: "dynamic",
@@ -5949,7 +6084,8 @@ function resolveValidatorSettings(options) {
     resolveDefaults: options.resolveDefaults ?? true,
     materializeRuntimeTypes: options.materializeRuntimeTypes ?? true,
     validateChecks: options.validateChecks ?? true,
-    maxIssues: options.maxIssues
+    maxIssues: options.maxIssues,
+    typescript: options.typescript ?? false
   };
 }
 function createParseEmitter(schema, recursive, settings) {
@@ -5959,7 +6095,8 @@ function createParseEmitter(schema, recursive, settings) {
       recursive,
       settings.resolveDefaults,
       settings.materializeRuntimeTypes,
-      settings.validateChecks
+      settings.validateChecks,
+      settings.typescript
     );
   if (!settings.emitSafeParse) return void 0;
   return emitDiagnosticEmitter(
@@ -5969,7 +6106,10 @@ function createParseEmitter(schema, recursive, settings) {
     settings.materializeRuntimeTypes,
     settings.validateChecks,
     settings.maxIssues,
-    rootHasReadonly(schema)
+    rootHasReadonly(schema),
+    void 0,
+    false,
+    settings.typescript
   );
 }
 function createAsyncEmitter(schema, recursive, settings, parseEmitter) {
@@ -5983,7 +6123,8 @@ function createAsyncEmitter(schema, recursive, settings, parseEmitter) {
     settings.maxIssues,
     rootHasReadonly(schema),
     parseEmitter,
-    true
+    true,
+    settings.typescript
   );
 }
 function createIsEmitter(schema, recursive, settings, sourceEmitter) {
@@ -5994,11 +6135,12 @@ function createIsEmitter(schema, recursive, settings, sourceEmitter) {
     settings.resolveDefaults,
     settings.materializeRuntimeTypes,
     void 0,
-    settings.validateChecks
+    settings.validateChecks,
+    settings.typescript
   );
   emitter2.markRecursive(recursive);
   for (const value of sourceEmitter?.bindings().values ?? []) emitter2.bind(value);
-  emitter2.writer.line("function is(value) {");
+  emitter2.writer.line(`function is(value${settings.typescript ? ": __JitValue" : ""}) {`);
   emitter2.writer.indent(() => {
     emitter2.emitNode(schema, "value", rootPath());
     emitter2.writer.line("return true;");
@@ -6011,7 +6153,7 @@ function assembleValidator(isEmitter, parseEmitter, asyncEmitter, emitFastParse,
     (emitter2) => Boolean(emitter2)
   );
   const bindings = (isEmitter ?? asyncEmitter ?? parseEmitter)?.bindings() ?? { names: [], values: [] };
-  const helperBlocks = emitters.flatMap((emitter2) => emitter2.helpers());
+  const helperBlocks = [...new Set(emitters.flatMap((emitter2) => emitter2.helpers()))];
   const helperSource = helperBlocks.length > 0 ? `${helperBlocks.join("\n")}
 ` : "";
   const functionSource = emitters.map((emitter2) => emitter2.writer.toString()).join("\n");
@@ -6027,17 +6169,18 @@ function assembleValidator(isEmitter, parseEmitter, asyncEmitter, emitFastParse,
     bindings
   };
 }
-function emitParseEmitter(schema, recursive, resolveDefaults, materializeRuntimeTypes, validateChecks) {
+function emitParseEmitter(schema, recursive, resolveDefaults, materializeRuntimeTypes, validateChecks, typescript) {
   const emitter2 = new ValidatorEmitter(
     "fast",
     false,
     resolveDefaults,
     materializeRuntimeTypes,
     void 0,
-    validateChecks
+    validateChecks,
+    typescript
   );
   emitter2.markRecursive(recursive);
-  emitter2.writer.line("function parse(value) {");
+  emitter2.writer.line(`function parse(value${typescript ? ": __JitValue" : ""})${typescript ? ": __JitValue" : ""} {`);
   emitter2.writer.indent(() => {
     const output = emitter2.emitNode(schema, "value", rootPath());
     emitter2.writer.line(`return ${output};`);
@@ -6045,20 +6188,25 @@ function emitParseEmitter(schema, recursive, resolveDefaults, materializeRuntime
   emitter2.writer.line("}");
   return emitter2;
 }
-function emitDiagnosticEmitter(schema, recursive, resolveDefaults, materializeRuntimeTypes, validateChecks, maxIssues, freezesOutput, sourceEmitter, awaited = false) {
+function emitDiagnosticEmitter(schema, recursive, resolveDefaults, materializeRuntimeTypes, validateChecks, maxIssues, freezesOutput, sourceEmitter, awaited = false, typescript = false) {
   const emitter2 = new ValidatorEmitter(
     "parse",
     awaited,
     resolveDefaults,
     materializeRuntimeTypes,
     maxIssues,
-    validateChecks
+    validateChecks,
+    typescript
   );
   emitter2.markRecursive(recursive);
   if (sourceEmitter) for (const value of sourceEmitter.bindings().values) emitter2.bind(value);
-  emitter2.writer.line(`${awaited ? "async " : ""}function ${awaited ? "safeParseAsync" : "safeParse"}(value) {`);
+  emitter2.writer.line(
+    `${awaited ? "async " : ""}function ${awaited ? "safeParseAsync" : "safeParse"}(value${typescript ? ": __JitValue" : ""})${typescript ? ": __JitSafeParse<__JitValue>" : ""} {`
+  );
   emitter2.writer.indent(() => {
-    emitter2.writer.line(recursive.size === 0 ? "let issues;" : "let issues = [];");
+    emitter2.writer.line(
+      recursive.size === 0 ? typescript ? "let issues: __JitValidationIssue[] | undefined;" : "let issues;" : typescript ? "let issues: __JitValidationIssue[] = [];" : "let issues = [];"
+    );
     if (maxIssues !== void 0) emitter2.writer.line("try {");
     const emitBody2 = () => {
       const output = emitter2.emitNode(schema, "value", rootPath());
@@ -6644,17 +6792,47 @@ var baseBuilderPrototype = {
   normalize(value) {
     return createBuilder(appendCheck(this.schema, { kind: "normalize", value }));
   },
-  lowercase() {
-    return createBuilder(appendCheck(this.schema, { kind: "lowercase" }));
+  lowercase(message) {
+    return createBuilder(appendCheck(this.schema, { kind: "lowercase", message }));
   },
   toLowerCase() {
-    return createBuilder(appendCheck(this.schema, { kind: "lowercase" }));
+    return createBuilder(appendCheck(this.schema, { kind: "toLowerCase" }));
   },
-  uppercase() {
-    return createBuilder(appendCheck(this.schema, { kind: "uppercase" }));
+  uppercase(message) {
+    return createBuilder(appendCheck(this.schema, { kind: "uppercase", message }));
   },
   toUpperCase() {
-    return createBuilder(appendCheck(this.schema, { kind: "uppercase" }));
+    return createBuilder(appendCheck(this.schema, { kind: "toUpperCase" }));
+  },
+  camelCase(message) {
+    return createBuilder(appendCheck(this.schema, { kind: "camelCase", message }));
+  },
+  pascalCase(message) {
+    return createBuilder(appendCheck(this.schema, { kind: "pascalCase", message }));
+  },
+  snakeCase(message) {
+    return createBuilder(appendCheck(this.schema, { kind: "snakeCase", message }));
+  },
+  kebabCase(message) {
+    return createBuilder(appendCheck(this.schema, { kind: "kebabCase", message }));
+  },
+  upperSnakeCase(message) {
+    return createBuilder(appendCheck(this.schema, { kind: "upperSnakeCase", message }));
+  },
+  toCamelCase() {
+    return createBuilder(appendCheck(this.schema, { kind: "toCamelCase" }));
+  },
+  toPascalCase() {
+    return createBuilder(appendCheck(this.schema, { kind: "toPascalCase" }));
+  },
+  toSnakeCase() {
+    return createBuilder(appendCheck(this.schema, { kind: "toSnakeCase" }));
+  },
+  toKebabCase() {
+    return createBuilder(appendCheck(this.schema, { kind: "toKebabCase" }));
+  },
+  toUpperSnakeCase() {
+    return createBuilder(appendCheck(this.schema, { kind: "toUpperSnakeCase" }));
   },
   positive(message) {
     return createBuilder(appendCheck(this.schema, { kind: "positive", message }));
@@ -7051,6 +7229,658 @@ function createBuilder(schema) {
   const builder2 = Object.create(prototype);
   builder2.schema = schema;
   return builder2;
+}
+
+// ../../packages/jit/src/aot/artifact-json.ts
+function stableJson(value) {
+  return JSON.stringify(canonicalValue(value));
+}
+function canonicalValue(value, seen = /* @__PURE__ */ new Set()) {
+  if (value === null || typeof value !== "object") {
+    if (typeof value === "bigint") return `${value}n`;
+    if (typeof value === "function") return `[Function ${value.name || "anonymous"}]`;
+    return value;
+  }
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((item) => canonicalValue(item, seen));
+    const record2 = value;
+    return Object.fromEntries(
+      Object.keys(record2).sort().map((key) => [key, canonicalValue(record2[key], seen)])
+    );
+  } finally {
+    seen.delete(value);
+  }
+}
+
+// ../../packages/jit/src/aot/hash.ts
+function sha256(value) {
+  const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
+  const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64 | 0;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(bytes);
+  padded[bytes.length] = 128;
+  const view = new DataView(padded.buffer);
+  const bitLength = bytes.length * 8;
+  view.setUint32(paddedLength - 8, Math.floor(bitLength / 4294967296));
+  view.setUint32(paddedLength - 4, bitLength >>> 0);
+  let h0 = 1779033703;
+  let h1 = 3144134277;
+  let h2 = 1013904242;
+  let h3 = 2773480762;
+  let h4 = 1359893119;
+  let h5 = 2600822924;
+  let h6 = 528734635;
+  let h7 = 1541459225;
+  const words = new Uint32Array(64);
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    for (let index2 = 0; index2 < 16; index2++) words[index2] = view.getUint32(offset + index2 * 4);
+    for (let index2 = 16; index2 < 64; index2++) {
+      const value0 = words[index2 - 15];
+      const value1 = words[index2 - 2];
+      const sigma0 = (value0 >>> 7 | value0 << 25) ^ (value0 >>> 18 | value0 << 14) ^ value0 >>> 3;
+      const sigma1 = (value1 >>> 17 | value1 << 15) ^ (value1 >>> 19 | value1 << 13) ^ value1 >>> 10;
+      words[index2] = words[index2 - 16] + sigma0 + words[index2 - 7] + sigma1 >>> 0;
+    }
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+    let f = h5;
+    let g = h6;
+    let h = h7;
+    for (let index2 = 0; index2 < 64; index2++) {
+      const sigma1 = (e >>> 6 | e << 26) ^ (e >>> 11 | e << 21) ^ (e >>> 25 | e << 7);
+      const choose = e & f ^ ~e & g;
+      const temporary1 = h + sigma1 + choose + SHA256_CONSTANTS[index2] + words[index2] >>> 0;
+      const sigma0 = (a >>> 2 | a << 30) ^ (a >>> 13 | a << 19) ^ (a >>> 22 | a << 10);
+      const majority = a & b ^ a & c ^ b & c;
+      const temporary2 = sigma0 + majority >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = d + temporary1 >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = temporary1 + temporary2 >>> 0;
+    }
+    h0 = h0 + a >>> 0;
+    h1 = h1 + b >>> 0;
+    h2 = h2 + c >>> 0;
+    h3 = h3 + d >>> 0;
+    h4 = h4 + e >>> 0;
+    h5 = h5 + f >>> 0;
+    h6 = h6 + g >>> 0;
+    h7 = h7 + h >>> 0;
+  }
+  return [h0, h1, h2, h3, h4, h5, h6, h7].map((word) => word.toString(16).padStart(8, "0")).join("");
+}
+var SHA256_CONSTANTS = [
+  1116352408,
+  1899447441,
+  3049323471,
+  3921009573,
+  961987163,
+  1508970993,
+  2453635748,
+  2870763221,
+  3624381080,
+  310598401,
+  607225278,
+  1426881987,
+  1925078388,
+  2162078206,
+  2614888103,
+  3248222580,
+  3835390401,
+  4022224774,
+  264347078,
+  604807628,
+  770255983,
+  1249150122,
+  1555081692,
+  1996064986,
+  2554220882,
+  2821834349,
+  2952996808,
+  3210313671,
+  3336571891,
+  3584528711,
+  113926993,
+  338241895,
+  666307205,
+  773529912,
+  1294757372,
+  1396182291,
+  1695183700,
+  1986661051,
+  2177026350,
+  2456956037,
+  2730485921,
+  2820302411,
+  3259730800,
+  3345764771,
+  3516065817,
+  3600352804,
+  4094571909,
+  275423344,
+  430227734,
+  506948616,
+  659060556,
+  883997877,
+  958139571,
+  1322822218,
+  1537002063,
+  1747873779,
+  1955562222,
+  2024104815,
+  2227730452,
+  2361852424,
+  2428436474,
+  2756734187,
+  3204031479,
+  3329325298
+];
+
+// ../../packages/jit/src/aot/artifact-manifest-validation.ts
+function isArtifactManifest(value) {
+  if (!isRecord(value)) return false;
+  const structural = isManifestIdentity(value) && isArrayOf(value.files, isManifestFile) && isArrayOf(value.symbols, isManifestSymbol) && isArrayOf(value.types, isManifestType) && isArrayOf(value.protocols, isManifestProtocol) && isSemanticMap(value.semanticMap);
+  return structural && isManifestComplete(value);
+}
+function isManifestComplete(value) {
+  const files2 = value.files;
+  const symbols = value.symbols;
+  const symbolIds = new Set(symbols.map((symbol2) => symbol2.id));
+  const filePaths = new Set(files2.map((file2) => file2.path));
+  const protocols = value.protocols;
+  const semanticMap = value.semanticMap;
+  return symbolIds.size === symbols.length && filesReferenceSymbols(files2, symbolIds) && filesReferenceImportedSymbols(files2, symbolIds) && symbolsReferenceFiles(symbols, filePaths) && protocolsReferenceSymbols(protocols, symbolIds) && semanticMapReferencesSymbols(semanticMap, symbolIds);
+}
+function filesReferenceSymbols(files2, symbolIds) {
+  return files2.every((file2) => file2.exports.every((symbol2) => symbolIds.has(symbol2)));
+}
+function filesReferenceImportedSymbols(files2, symbolIds) {
+  return files2.every(
+    (file2) => file2.imports.every((dependency) => dependency.symbols.every((symbol2) => symbolIds.has(symbol2)))
+  );
+}
+function symbolsReferenceFiles(symbols, filePaths) {
+  return symbols.every((symbol2) => filePaths.has(symbol2.file));
+}
+function protocolsReferenceSymbols(protocols, symbolIds) {
+  return protocols.every((protocol) => protocol.symbols.every((symbol2) => symbolIds.has(symbol2)));
+}
+function semanticMapReferencesSymbols(semanticMap, symbolIds) {
+  return semanticMap.declarations.every((entry) => entry.symbols.every((symbol2) => symbolIds.has(symbol2)));
+}
+function isManifestIdentity(value) {
+  if (value.manifestVersion !== 1 || !isRecord(value.compiler)) return false;
+  if (!isString(value.compiler.name) || !isString(value.compiler.version)) return false;
+  if (!isDigest(value.declarationDigest) || !isDigest(value.programDigest)) return false;
+  if (!isDigest(value.artifactDigest) || !isDigest(value.manifestDigest)) return false;
+  if (value.ownership !== "managed" && value.ownership !== "detached") return false;
+  if (!isRecord(value.emission)) return false;
+  return (value.emission.format === "ts" || value.emission.format === "js") && (value.emission.naming === "compact" || value.emission.naming === "semantic");
+}
+function isCompilationReceipt(value) {
+  if (!isRecord(value)) return false;
+  return isString(value.compilerVersion) && isDigest(value.declarationDigest) && isDigest(value.programDigest) && isDigest(value.manifestDigest) && isDigest(value.artifactDigest) && Number.isInteger(value.files) && Number.isInteger(value.symbols) && isArrayOf(value.checks, isCompilationCheck);
+}
+function isManifestFile(value) {
+  if (!isRecord(value) || !isString(value.path) || !isDigest(value.hash) || !Number.isInteger(value.bytes))
+    return false;
+  return isArrayOf(value.exports, isString) && isArrayOf(
+    value.imports,
+    (item) => isRecord(item) && isString(item.module) && isArrayOf(item.symbols, isString)
+  );
+}
+function isManifestSymbol(value) {
+  return isRecord(value) && isManifestSymbolIdentity(value) && isManifestSymbolShape(value);
+}
+function isManifestSymbolIdentity(value) {
+  return isString(value.id) && isString(value.name) && isString(value.module) && isString(value.file) && isString(value.exportName) && isString(value.declaration);
+}
+function isManifestSymbolShape(value) {
+  return isValidClassMetadata(value) && isManifestSymbolCollections(value);
+}
+function isValidClassMetadata(value) {
+  return (value.construction === void 0 || value.construction === "constructor" || value.construction === "factory") && (value.factories === void 0 || isFactories(value.factories)) && (value.event === void 0 || isEvent(value.event));
+}
+function isManifestSymbolCollections(value) {
+  return isString(value.kind) && isArrayOf(value.capabilities, isString) && isArrayOf(value.protocols, isString) && isArrayOf(value.dependencies, isString) && isArrayOf(value.effects, isManifestEffect);
+}
+function isManifestEffect(value) {
+  return isRecord(value) && isString(value.kind) && (value.target === void 0 || isString(value.target));
+}
+function isFactories(value) {
+  return isRecord(value) && (typeof value.create === "string" || value.create === false) && (typeof value.hydrate === "string" || value.hydrate === false);
+}
+function isEvent(value) {
+  return isRecord(value) && isString(value.type) && Number.isInteger(value.version);
+}
+function isManifestType(value) {
+  return isRecord(value) && isString(value.name) && isString(value.file) && isString(value.exportName) && isString(value.declaration);
+}
+function isManifestProtocol(value) {
+  return isRecord(value) && isString(value.protocol) && Number.isInteger(value.version) && isString(value.input) && isString(value.output) && isArrayOf(value.symbols, isString);
+}
+function isSemanticMap(value) {
+  return isRecord(value) && isArrayOf(
+    value.declarations,
+    (item) => isRecord(item) && isString(item.declaration) && isArrayOf(item.symbols, isString)
+  );
+}
+function isCompilationCheck(value) {
+  return isRecord(value) && isString(value.name) && (value.status === "passed" || value.status === "warning" || value.status === "skipped") && (value.detail === void 0 || isString(value.detail));
+}
+function isArrayOf(value, guard) {
+  return Array.isArray(value) && value.every(guard);
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isString(value) {
+  return typeof value === "string";
+}
+function isDigest(value) {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+// ../../packages/jit/src/aot/artifact-status.ts
+function inspectArtifactStatus(outputDir, manifestName = "jit.manifest.json", receiptName = "jit.receipt.json") {
+  const manifestResult = readManifest(outputDir, manifestName);
+  if (manifestResult.result) return manifestResult.result;
+  const manifest = manifestResult.value;
+  if (manifest.ownership === "detached") return detachedStatus(manifest);
+  const receiptResult = readReceipt(outputDir, receiptName, manifest);
+  if (receiptResult.result) return receiptResult.result;
+  const receipt = receiptResult.value;
+  return verifyManagedArtifact(outputDir, manifest, receipt);
+}
+function readManifest(outputDir, name) {
+  try {
+    const path = safePath(outputDir, name);
+    if (!existsSync(path)) return { value: void 0, result: { status: "missing", reason: "manifest is missing" } };
+    const value = readJson(path);
+    if (!isArtifactManifest(value)) throw new Error("manifest shape is invalid");
+    return { value, result: void 0 };
+  } catch (error) {
+    return { value: void 0, result: { status: "stale", reason: `manifest is invalid: ${errorMessage(error)}` } };
+  }
+}
+function readReceipt(outputDir, name, manifest) {
+  try {
+    const path = safePath(outputDir, name);
+    if (!existsSync(path))
+      return { value: void 0, result: { status: "stale", manifest, reason: "receipt is missing" } };
+    const value = readJson(path);
+    if (!isCompilationReceipt(value)) throw new Error("receipt shape is invalid");
+    return { value, result: void 0 };
+  } catch (error) {
+    return {
+      value: void 0,
+      result: { status: "stale", manifest, reason: `receipt is invalid: ${errorMessage(error)}` }
+    };
+  }
+}
+function detachedStatus(manifest) {
+  return { status: "detached", manifest, files: manifest.files.map((file2) => file2.path) };
+}
+function verifyManagedArtifact(outputDir, manifest, receipt) {
+  try {
+    const fileResult = verifyFiles(outputDir, manifest, receipt);
+    if (fileResult) return fileResult;
+    const digestResult = verifyManifestDigests(manifest, receipt);
+    if (digestResult) return digestResult;
+  } catch (error) {
+    return { status: "stale", manifest, receipt, reason: `artifact metadata is invalid: ${errorMessage(error)}` };
+  }
+  return { status: "clean", manifest, receipt, files: manifest.files.map((file2) => file2.path) };
+}
+function verifyFiles(outputDir, manifest, receipt) {
+  const changed3 = [];
+  for (const file2 of manifest.files) {
+    const path = safePath(outputDir, file2.path);
+    if (!existsSync(path))
+      return { status: "missing", manifest, receipt, files: [file2.path], reason: "declared file is missing" };
+    if (statSync(path).size !== file2.bytes || sha256(readFileSync(path)) !== file2.hash) changed3.push(file2.path);
+  }
+  const generatedFiles = new Set(manifest.files.map((file2) => file2.path));
+  const extras = findGeneratedExtras(outputDir, "", generatedFiles);
+  const files2 = [...changed3, ...extras].sort(compareText);
+  return files2.length > 0 ? {
+    status: "modified",
+    manifest,
+    receipt,
+    files: files2,
+    reason: extras.length > 0 ? "generated file is not declared in the manifest" : "declared file hash changed"
+  } : void 0;
+}
+function findGeneratedExtras(directory, relativeDirectory, declared) {
+  let entries;
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const extras = [];
+  for (const entry of entries) {
+    const path = resolve(directory, entry.name);
+    const relativePath = relativeDirectory.length === 0 ? entry.name : `${relativeDirectory}/${entry.name}`;
+    if (entry.isDirectory()) {
+      extras.push(...findGeneratedExtras(path, relativePath, declared));
+    } else if (!declared.has(relativePath) && isGeneratedSource(path)) {
+      extras.push(relativePath);
+    }
+  }
+  return extras;
+}
+function isGeneratedSource(path) {
+  try {
+    return readFileSync(path, "utf8").startsWith("// Generated by jit \u2014 do not edit.");
+  } catch {
+    return false;
+  }
+}
+function verifyManifestDigests(manifest, receipt) {
+  const artifactDigest = sha256(stableJson(manifest.files.map(({ path, hash: hash4, bytes }) => ({ path, hash: hash4, bytes }))));
+  const manifestDigest = sha256(stableJson({ ...manifest, manifestDigest: "" }));
+  if (artifactDigest !== manifest.artifactDigest || manifestDigest !== manifest.manifestDigest)
+    return { status: "stale", manifest, receipt, reason: "manifest digest does not match its contents" };
+  if (!receiptMatchesManifest(receipt, manifest))
+    return { status: "stale", manifest, receipt, reason: "receipt does not match the manifest" };
+  return void 0;
+}
+function receiptMatchesManifest(receipt, manifest) {
+  return receipt.compilerVersion === manifest.compiler.version && receipt.declarationDigest === manifest.declarationDigest && receipt.manifestDigest === manifest.manifestDigest && receipt.artifactDigest === manifest.artifactDigest && receipt.programDigest === manifest.programDigest && receipt.files === manifest.files.length && receipt.symbols === manifest.symbols.length;
+}
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+function compareText(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+function safePath(root, path) {
+  if (isAbsolute(path)) throw new Error(`Artifact path must be relative: ${path}`);
+  const resolved = resolve(root, path);
+  const rel = relative(resolve(root), resolved);
+  if (rel === ".." || rel.startsWith("..\\") || rel.startsWith("../"))
+    throw new Error(`Artifact path escapes output directory: ${path}`);
+  return resolved;
+}
+function readJson(path) {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+// ../../packages/jit/src/aot/artifact-manifest.ts
+var ARTIFACT_MANIFEST_VERSION = 1;
+function declarationDigest(input) {
+  return sha256(stableJson(input));
+}
+function createArtifactManifest(input) {
+  const files2 = [...input.fileHashes].sort((left, right) => compareText2(left.path, right.path));
+  const artifactDigest = sha256(stableJson(files2.map(({ path, hash: hash4, bytes }) => ({ path, hash: hash4, bytes }))));
+  const base = {
+    manifestVersion: ARTIFACT_MANIFEST_VERSION,
+    compiler: input.compiler,
+    declarationDigest: input.declarationDigest,
+    programDigest: sha256(stableJson(input.program)),
+    artifactDigest,
+    manifestDigest: "",
+    ownership: input.ownership,
+    emission: { format: input.format, naming: input.naming },
+    files: files2,
+    symbols: [...input.program.symbols].map((symbol2) => ({
+      ...symbol2,
+      file: input.program.modules.find((module) => module.id === symbol2.module)?.path ?? symbol2.module
+    })).sort((left, right) => compareText2(left.name, right.name) || compareText2(left.id, right.id)),
+    types: collectTypes(input.program),
+    protocols: collectProtocols(input.program),
+    semanticMap: collectSemanticMap(input.program)
+  };
+  const manifest = { ...base, manifestDigest: sha256(stableJson(base)) };
+  return Object.freeze(manifest);
+}
+function createCompilationReceipt(manifest, compilerVersion, checks = []) {
+  return Object.freeze({
+    compilerVersion,
+    declarationDigest: manifest.declarationDigest,
+    programDigest: manifest.programDigest,
+    manifestDigest: manifest.manifestDigest,
+    artifactDigest: manifest.artifactDigest,
+    files: manifest.files.length,
+    symbols: manifest.symbols.length,
+    checks: Object.freeze([...checks])
+  });
+}
+function hashArtifactFile(outputDir, module) {
+  const path = safePath2(outputDir, module.path);
+  const bytes = statSync(path).size;
+  return {
+    path: module.path,
+    hash: sha256(readFileSync(path)),
+    bytes,
+    exports: module.exports.map((item) => item.symbolId).sort(),
+    imports: module.dependencies.map((dependency) => ({
+      module: dependency.module,
+      symbols: [...dependency.symbols].sort()
+    }))
+  };
+}
+function collectTypes(program) {
+  return program.symbols.filter((symbol2) => symbol2.kind === "type").map((symbol2) => ({
+    name: symbol2.name,
+    file: modulePath(program, symbol2.module),
+    exportName: symbol2.exportName,
+    declaration: symbol2.declaration
+  })).sort((left, right) => compareText2(left.name, right.name));
+}
+function collectProtocols(program) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const binding of program.protocols) {
+    const key = `${binding.protocol}:${binding.version}:${binding.input}:${binding.output}`;
+    const capability2 = {
+      protocol: binding.protocol,
+      version: binding.version,
+      input: binding.input,
+      output: binding.output
+    };
+    const group = groups.get(key) ?? { capability: capability2, symbols: /* @__PURE__ */ new Set() };
+    group.symbols.add(binding.symbolId);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map(({ capability: capability2, symbols }) => ({ ...capability2, symbols: [...symbols].sort() })).sort((left, right) => compareText2(`${left.protocol}:${left.version}`, `${right.protocol}:${right.version}`));
+}
+function collectSemanticMap(program) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const symbol2 of program.symbols) {
+    const symbols = groups.get(symbol2.declaration) ?? /* @__PURE__ */ new Set();
+    symbols.add(symbol2.id);
+    groups.set(symbol2.declaration, symbols);
+  }
+  return {
+    declarations: [...groups.entries()].map(([declaration, symbols]) => ({ declaration, symbols: [...symbols].sort() })).sort((left, right) => compareText2(left.declaration, right.declaration))
+  };
+}
+function modulePath(program, id) {
+  return program.modules.find((module) => module.id === id)?.path ?? id;
+}
+function compareText2(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+function safePath2(root, path) {
+  if (isAbsolute(path)) throw new Error(`Artifact path must be relative: ${path}`);
+  const resolved = resolve(root, path);
+  const rel = relative(resolve(root), resolved);
+  if (rel === ".." || rel.startsWith("..\\") || rel.startsWith("../"))
+    throw new Error(`Artifact path escapes output directory: ${path}`);
+  return resolved;
+}
+
+// ../../packages/jit/src/aot/artifact-program.ts
+function createArtifactProgram(input) {
+  const modules = input.modules.map((module) => normalizeModule(module)).sort((left, right) => compareText3(left.id, right.id));
+  const moduleIds = new Set(modules.map((module) => module.id));
+  validateModuleIds(modules, moduleIds);
+  validateModuleDependencies(modules, moduleIds);
+  const symbols = input.symbols.map((symbol2) => normalizeSymbol(symbol2)).sort((left, right) => compareText3(left.id, right.id));
+  const symbolIds = /* @__PURE__ */ new Set();
+  validateSymbols(symbols, symbolIds, moduleIds);
+  validateSymbolDependencies(symbols, symbolIds);
+  validateExports(modules, symbolIds);
+  const protocols = [...input.protocols ?? []].sort((left, right) => {
+    const protocol = compareText3(left.protocol, right.protocol);
+    return protocol !== 0 ? protocol : compareText3(left.symbolId, right.symbolId);
+  });
+  validateProtocols(protocols, symbolIds);
+  validateDependencySymbols(modules, symbolIds);
+  const program = {
+    modules: Object.freeze(modules),
+    symbols: Object.freeze(symbols),
+    protocols: Object.freeze(protocols)
+  };
+  detectModuleCycles(program.modules);
+  return Object.freeze(program);
+}
+function validateModuleIds(modules, moduleIds) {
+  if (moduleIds.size !== modules.length) throw new Error("ArtifactProgram contains duplicate module ids.");
+}
+function validateModuleDependencies(modules, moduleIds) {
+  for (const module of modules) {
+    for (const dependency of module.dependencies) {
+      if (!moduleIds.has(dependency.module)) {
+        throw new Error(
+          `ArtifactProgram module ${JSON.stringify(module.id)} depends on missing module ${JSON.stringify(dependency.module)}.`
+        );
+      }
+    }
+  }
+}
+function validateSymbols(symbols, symbolIds, moduleIds) {
+  for (const symbol2 of symbols) {
+    if (symbolIds.has(symbol2.id))
+      throw new Error(`ArtifactProgram contains duplicate symbol id ${JSON.stringify(symbol2.id)}.`);
+    if (!moduleIds.has(symbol2.module))
+      throw new Error(`ArtifactProgram symbol ${JSON.stringify(symbol2.id)} references a missing module.`);
+    symbolIds.add(symbol2.id);
+  }
+}
+function validateSymbolDependencies(symbols, symbolIds) {
+  for (const symbol2 of symbols) {
+    for (const dependency of symbol2.dependencies) {
+      if (!symbolIds.has(dependency)) {
+        throw new Error(
+          `ArtifactProgram symbol ${JSON.stringify(symbol2.id)} depends on missing symbol ${JSON.stringify(dependency)}.`
+        );
+      }
+    }
+  }
+}
+function validateExports(modules, symbolIds) {
+  for (const module of modules) {
+    for (const exported of module.exports) {
+      if (!symbolIds.has(exported.symbolId)) {
+        throw new Error(`ArtifactProgram export ${JSON.stringify(exported.name)} references a missing symbol.`);
+      }
+    }
+  }
+}
+function validateProtocols(protocols, symbolIds) {
+  for (const binding of protocols) {
+    if (!symbolIds.has(binding.symbolId)) {
+      throw new Error(`Protocol ${JSON.stringify(binding.protocol)} references a missing symbol.`);
+    }
+  }
+}
+function validateDependencySymbols(modules, symbolIds) {
+  for (const module of modules) {
+    for (const dependency of module.dependencies) {
+      for (const symbol2 of dependency.symbols) {
+        if (!symbolIds.has(symbol2)) {
+          throw new Error(
+            `ArtifactProgram module ${JSON.stringify(module.id)} depends on missing symbol ${JSON.stringify(symbol2)}.`
+          );
+        }
+      }
+    }
+  }
+}
+function topologicalModuleOrder(program) {
+  const byId = new Map(program.modules.map((module) => [module.id, module]));
+  const visiting = /* @__PURE__ */ new Set();
+  const visited = /* @__PURE__ */ new Set();
+  const ordered = [];
+  const visit = (id) => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) throw new Error(`ArtifactProgram module cycle includes ${JSON.stringify(id)}.`);
+    const module = byId.get(id);
+    if (!module) throw new Error(`ArtifactProgram references missing module ${JSON.stringify(id)}.`);
+    visiting.add(id);
+    for (const dependency of [...module.dependencies].sort((left, right) => compareText3(left.module, right.module))) {
+      visit(dependency.module);
+    }
+    visiting.delete(id);
+    visited.add(id);
+    ordered.push(module);
+  };
+  for (const module of program.modules) visit(module.id);
+  return Object.freeze(ordered);
+}
+function relativeModuleImport(fromPath, toPath) {
+  const value = relative(dirname(fromPath), toPath).replace(/\\/g, "/");
+  return value.startsWith(".") ? value : `./${value}`;
+}
+function normalizeModule(module) {
+  return {
+    id: module.id,
+    path: module.path,
+    dependencies: Object.freeze(
+      [...module.dependencies].map((dependency) => ({
+        module: dependency.module,
+        symbols: Object.freeze([...dependency.symbols].sort())
+      })).sort((left, right) => compareText3(left.module, right.module))
+    ),
+    declarations: Object.freeze(
+      [...module.declarations].sort((left, right) => compareText3(left.symbolId, right.symbolId))
+    ),
+    exports: Object.freeze([...module.exports].sort((left, right) => compareText3(left.name, right.name)))
+  };
+}
+function normalizeSymbol(symbol2) {
+  return {
+    ...symbol2,
+    capabilities: Object.freeze([...symbol2.capabilities].sort()),
+    protocols: Object.freeze([...symbol2.protocols].sort()),
+    dependencies: Object.freeze([...symbol2.dependencies].sort()),
+    effects: Object.freeze(
+      [...symbol2.effects].sort(
+        (left, right) => compareText3(`${left.kind}:${left.target ?? ""}`, `${right.kind}:${right.target ?? ""}`)
+      )
+    )
+  };
+}
+function compareText3(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+function detectModuleCycles(modules) {
+  const byId = new Map(modules.map((module) => [module.id, module]));
+  const visiting = /* @__PURE__ */ new Set();
+  const visited = /* @__PURE__ */ new Set();
+  const visit = (id) => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) throw new Error(`ArtifactProgram module cycle includes ${JSON.stringify(id)}.`);
+    const module = byId.get(id);
+    if (!module) return;
+    visiting.add(id);
+    for (const dependency of module.dependencies) visit(dependency.module);
+    visiting.delete(id);
+    visited.add(id);
+  };
+  for (const module of modules) visit(module.id);
 }
 
 // ../../packages/jit/src/aot/emit-type.ts
@@ -7532,6 +8362,278 @@ function executionPlanType(plan, typeNames) {
     return `(value: ${inputType}) => ${valueType}`;
   }
   return "unknown";
+}
+
+// ../../packages/jit/src/aot/build-artifact-program.ts
+function buildArtifactProgram(options) {
+  const symbols = [];
+  const bindings = [];
+  const schemaOwners = createSchemaOwners(options.modules);
+  const modules = options.modules.map(
+    (input) => buildModule(input, schemaOwners, symbols, bindings, options.protocols)
+  );
+  if (options.includeBarrel) modules.push(createBarrelModule(options, symbols));
+  const protocolNames = /* @__PURE__ */ new Map();
+  for (const binding of bindings) {
+    const names = protocolNames.get(binding.symbolId) ?? [];
+    const protocolName = binding.protocol.endsWith(`/v${binding.version}`) ? binding.protocol : `${binding.protocol}/v${binding.version}`;
+    names.push(protocolName);
+    protocolNames.set(binding.symbolId, names);
+  }
+  const finalizedSymbols = symbols.map((symbol2) => ({
+    ...symbol2,
+    protocols: Object.freeze([...protocolNames.get(symbol2.id) ?? []].sort(compareText4))
+  }));
+  return createArtifactProgram({ modules, symbols: finalizedSymbols, protocols: bindings });
+}
+function createSchemaOwners(inputs) {
+  const owners = /* @__PURE__ */ new WeakMap();
+  for (const input of inputs) {
+    registerTypeOwners(input, owners);
+    registerClassOwners(input, owners);
+  }
+  return owners;
+}
+function registerTypeOwners(input, owners) {
+  for (const name of input.types) {
+    const schema = input.schemas[name];
+    if (schema !== void 0) owners.set(unwrapSchema(schema), symbolIdFor(input, name, true));
+  }
+}
+function registerClassOwners(input, owners) {
+  for (const [name, value] of Object.entries(input.artifacts)) {
+    const artifact = getArtifact(value);
+    if (artifact?.kind !== "class") continue;
+    const symbolId = symbolIdFor(input, name, false);
+    owners.set(artifact.schema, symbolId);
+    if (artifact.declaredSchema !== void 0) owners.set(artifact.declaredSchema, symbolId);
+  }
+}
+function buildModule(input, schemaOwners, symbols, bindings, protocols) {
+  const declarations = [];
+  const exports = [];
+  for (const name of input.exports) {
+    const symbolId = symbolIdFor(input, name, false);
+    const symbol2 = createSymbol(input, name, symbolId, false, schemaOwners);
+    symbols.push(symbol2);
+    declarations.push({ name, kind: symbol2.kind, symbolId });
+    exports.push({ name, symbolId, typeOnly: false });
+    addProtocolBindings(bindings, input.name, name, symbolId, protocols);
+  }
+  for (const name of input.types) {
+    const symbolId = symbolIdFor(input, name, true);
+    const symbol2 = createSymbol(input, name, symbolId, true, schemaOwners);
+    symbols.push(symbol2);
+    declarations.push({ name, kind: "type", symbolId });
+    exports.push({ name, symbolId, typeOnly: true });
+  }
+  return {
+    id: input.name,
+    path: input.path,
+    dependencies: moduleDependencies(input.name, symbols),
+    declarations,
+    exports
+  };
+}
+function createBarrelModule(options, symbols) {
+  return {
+    id: "index",
+    path: options.barrelPath ?? "index.ts",
+    dependencies: options.modules.map((module) => ({
+      module: module.name,
+      symbols: symbols.filter((symbol2) => symbol2.module === module.name).map((symbol2) => symbol2.id)
+    })),
+    declarations: [],
+    exports: symbols.map((symbol2) => ({
+      name: symbol2.exportName,
+      symbolId: symbol2.id,
+      typeOnly: symbol2.kind === "type"
+    }))
+  };
+}
+function symbolIdFor(input, name, typeOnly) {
+  const valueExists = input.artifacts[name] !== void 0 || input.groups[name] !== void 0;
+  return `${input.name}:${name}${typeOnly && valueExists ? ":type" : ""}`;
+}
+function declarationRevisionDigest(options) {
+  const declarations = options.modules.map((module) => ({
+    name: module.name,
+    artifacts: Object.fromEntries(
+      Object.entries(module.artifacts).sort(([left], [right]) => compareText4(left, right)).map(([name, value]) => [name, declarationFingerprint(value)])
+    ),
+    groups: Object.fromEntries(
+      Object.entries(module.groups).sort(([left], [right]) => compareText4(left, right)).map(([name, group]) => [
+        name,
+        Object.fromEntries(
+          Object.entries(group).sort(([left], [right]) => compareText4(left, right)).map(([member, value]) => [member, declarationFingerprint(value)])
+        )
+      ])
+    ),
+    schemas: Object.fromEntries(
+      Object.entries(module.schemas).sort(([left], [right]) => compareText4(left, right)).map(([name, schema]) => [name, declarationFingerprint(schema)])
+    )
+  }));
+  return declarationDigest({ declarations });
+}
+function createSymbol(input, name, symbolId, typeOnly, schemaOwners) {
+  if (typeOnly) {
+    const schema = input.schemas[name];
+    return {
+      id: symbolId,
+      name,
+      kind: "type",
+      module: input.name,
+      exportName: name,
+      declaration: name,
+      output: name,
+      capabilities: ["type"],
+      protocols: [],
+      dependencies: schema === void 0 ? [] : schemaDependencies(input.name, schema, schemaOwners),
+      effects: []
+    };
+  }
+  const value = input.artifacts[name] ?? input.groups[name];
+  const artifact = getArtifact(value);
+  const group = input.groups[name];
+  const kind = group ? "constant" : artifactKind(artifact);
+  const capabilities = group ? Object.keys(group).sort() : artifactCapabilities(artifact);
+  const errors = artifactErrorContracts(artifact);
+  const inputType = artifactInput(artifact);
+  const outputType = artifactOutput(name, artifact);
+  const classMetadata = artifact?.kind === "class" ? artifactClassMetadata(artifact) : void 0;
+  return {
+    id: symbolId,
+    name,
+    kind,
+    module: input.name,
+    exportName: name,
+    declaration: name,
+    ...inputType === void 0 ? {} : { input: inputType },
+    ...outputType === void 0 ? {} : { output: outputType },
+    ...classMetadata ?? {},
+    ...errors.length > 0 ? { errors } : {},
+    capabilities,
+    protocols: [],
+    dependencies: schemaDependenciesForSymbol(input, name, artifact, schemaOwners),
+    effects: artifactEffects(artifact)
+  };
+}
+function artifactClassMetadata(artifact) {
+  return {
+    construction: artifact.construction,
+    factories: artifact.factories,
+    ...artifact.domainEvent === void 0 ? {} : { event: artifact.domainEvent }
+  };
+}
+function schemaDependenciesForSymbol(input, name, artifact, owners) {
+  const dependencies = new Set(schemaDependencies(input.name, artifactSchema(artifact), owners));
+  const group = input.groups[name];
+  if (group !== void 0) {
+    for (const member of Object.values(group)) {
+      const memberArtifact = getArtifact(member);
+      for (const dependency of schemaDependencies(input.name, artifactSchema(memberArtifact), owners))
+        dependencies.add(dependency);
+    }
+  }
+  return [...dependencies].sort(compareText4);
+}
+function artifactSchema(artifact) {
+  if (artifact === void 0 || !("schema" in artifact)) return void 0;
+  return artifact.schema;
+}
+function schemaDependencies(_module, input, owners) {
+  if (input === void 0) return [];
+  const dependencies = /* @__PURE__ */ new Set();
+  const seen = /* @__PURE__ */ new WeakSet();
+  const walk = (schema, root = false) => {
+    const current = resolveLazySchema(schema);
+    if (seen.has(current)) return;
+    seen.add(current);
+    const owner = owners.get(current);
+    if (!root && owner !== void 0) dependencies.add(owner);
+    for (const child of schemaChildren(current)) walk(child);
+  };
+  walk(unwrapSchema(input), true);
+  return [...dependencies].sort(compareText4);
+}
+function moduleDependencies(module, symbols) {
+  const byModule = /* @__PURE__ */ new Map();
+  for (const symbol2 of symbols.filter((candidate) => candidate.module === module)) {
+    for (const dependency of symbol2.dependencies) {
+      const separator = dependency.indexOf(":");
+      if (separator < 0) continue;
+      const targetModule = dependency.slice(0, separator);
+      if (targetModule === module) continue;
+      const names = byModule.get(targetModule) ?? /* @__PURE__ */ new Set();
+      names.add(dependency);
+      byModule.set(targetModule, names);
+    }
+  }
+  return [...byModule.entries()].sort(([left], [right]) => compareText4(left, right)).map(([targetModule, names]) => ({ module: targetModule, symbols: [...names].sort(compareText4) }));
+}
+function addProtocolBindings(bindings, module, name, symbolId, protocols) {
+  for (const capability2 of protocols?.[name] ?? protocols?.[`${module}:${name}`] ?? []) {
+    bindings.push({ ...capability2, symbolId });
+  }
+}
+function artifactKind(artifact) {
+  if (!artifact) return "function";
+  if (artifact.kind === "class") return artifact.domainEvent ? "event" : "class";
+  if (artifact.kind === "operation" && artifact.op === "jsonSchema") return "constant";
+  return "function";
+}
+function artifactCapabilities(artifact) {
+  if (!artifact) return [];
+  if ("op" in artifact) return [artifact.op];
+  if (artifact.kind === "execution")
+    return artifact.plan.stages.map(
+      (stage) => stage.kind === "validate" || stage.kind === "operation" ? stage.operation : stage.kind
+    );
+  if (artifact.kind === "class") return [...artifact.capabilities].sort();
+  return [artifact.kind];
+}
+function artifactInput(artifact) {
+  if (!artifact) return void 0;
+  if (artifact.kind === "validator") return "unknown";
+  if (artifact.kind === "class") return artifact.construction === "factory" ? "Input" : "constructor-input";
+  return "unknown";
+}
+function artifactOutput(name, artifact) {
+  if (!artifact) return void 0;
+  if (artifact.kind === "validator" && (artifact.op === "parse" || artifact.op === "parseAsync")) return name;
+  if (artifact.kind === "class") return name;
+  return void 0;
+}
+function artifactErrorContracts(artifact) {
+  if (artifact?.kind === "validator" && artifact.op !== "is")
+    return [{ code: "VALIDATION_FAILED", type: "ValidationError" }];
+  if (artifact?.kind === "class" && artifact.policy?.result === "throw")
+    return [{ code: "VALIDATION_FAILED", type: "ValidationError" }];
+  return [];
+}
+function artifactEffects(artifact) {
+  if (!artifact) return [];
+  if (artifact.kind === "validator") return [{ kind: "validate" }];
+  if (artifact.kind === "operation" && artifact.op === "update") return [{ kind: "write" }];
+  if (artifact.kind === "class" && artifact.aggregate) return [{ kind: "emit-event" }];
+  return [];
+}
+function declarationFingerprint(value) {
+  const artifact = getArtifact(value);
+  if (!artifact) return value;
+  const descriptor2 = { kind: artifact.kind };
+  if ("op" in artifact) descriptor2.op = artifact.op;
+  if ("schema" in artifact) descriptor2.schema = artifact.schema;
+  if (artifact.kind === "class") {
+    descriptor2.capabilities = artifact.capabilities;
+    descriptor2.construction = artifact.construction;
+    descriptor2.factories = artifact.factories;
+    descriptor2.domainEvent = artifact.domainEvent;
+  }
+  return stableJson(descriptor2);
+}
+function compareText4(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 // ../../packages/jit/src/compiler/source/query-condition.ts
@@ -10454,10 +11556,20 @@ function freezeCondition(condition) {
 }
 var SUBJECT = "subject";
 var INPUTS = "inputs";
-function paramList(descriptor2, head, tail) {
-  const parts = [head];
-  if (descriptor2.inputs !== void 0) parts[parts.length] = INPUTS;
-  if (tail !== void 0) parts[parts.length] = tail;
+function parameterSource(name, typescript, many) {
+  if (!typescript) return name;
+  if (name === "consume") {
+    return many ? "consume: (rule: __JitValue, outcome: __JitValue, index: number) => void" : "consume: (rule: __JitValue, outcome: __JitValue) => void";
+  }
+  return `${name}: __JitValue`;
+}
+function paramList(descriptor2, head, tail, options = {}) {
+  const many = head === "list";
+  const parts = head.split(", ").map((name) => parameterSource(name, options.typescript === true, many));
+  if (descriptor2.inputs !== void 0) {
+    parts[parts.length] = parameterSource(INPUTS, options.typescript === true, many);
+  }
+  if (tail !== void 0) parts[parts.length] = parameterSource(tail, options.typescript === true, many);
   return parts.join(", ");
 }
 function orderedRules(descriptor2) {
@@ -10589,9 +11701,9 @@ function emitOutcome(rule, plan, options) {
 function emitBindings(writer, bindings) {
   for (const binding of bindings) writer.line(`const ${binding.local} = ${binding.source};`);
 }
-function emitRulesTestSource(descriptor2) {
+function emitRulesTestSource(descriptor2, options = {}) {
   const writer = new CodeWriter();
-  writer.line(`function rulesTest(${paramList(descriptor2, "rule, subject")}) {`);
+  writer.line(`function rulesTest(${paramList(descriptor2, "rule, subject", void 0, options)}) {`);
   writer.indent(() => {
     writer.line("switch (rule) {");
     writer.indent(() => {
@@ -10607,28 +11719,28 @@ function emitRulesTestSource(descriptor2) {
   writer.line("}");
   return writer.toString();
 }
-function emitRulesPredicateSource(descriptor2, ruleId) {
+function emitRulesPredicateSource(descriptor2, ruleId, options = {}) {
   const rule = descriptor2.rules.find((candidate) => candidate.id === ruleId);
   if (rule === void 0) {
     throw new JITError("INVALID_OPERATION", `unknown rule ${JSON.stringify(ruleId)}`);
   }
-  return `function rulesPredicate(${paramList(descriptor2, SUBJECT)}) {
+  return `function rulesPredicate(${paramList(descriptor2, SUBJECT, void 0, options)}) {
   return ${emitCondition3(rule, EMPTY_PLAN)};
 }
 `;
 }
-function emitRulesSomeSource(descriptor2) {
+function emitRulesSomeSource(descriptor2, options = {}) {
   const rules2 = descriptor2.rules.filter((rule) => rule.constant !== false);
   const always = rules2.some((rule) => rule.constant === true);
   const expression = always ? "true" : rules2.length === 0 ? "false" : rules2.map((rule) => `(${emitCondition3(rule, EMPTY_PLAN)})`).join(" || ");
-  return `function rulesSome(${paramList(descriptor2, SUBJECT)}) {
+  return `function rulesSome(${paramList(descriptor2, SUBJECT, void 0, options)}) {
   return ${expression};
 }
 `;
 }
-function emitRulesFirstSource(descriptor2) {
+function emitRulesFirstSource(descriptor2, options = {}) {
   const writer = new CodeWriter();
-  writer.line(`function rulesFirst(${paramList(descriptor2, SUBJECT)}) {`);
+  writer.line(`function rulesFirst(${paramList(descriptor2, SUBJECT, void 0, options)}) {`);
   writer.indent(() => {
     for (const rule of orderedRules(descriptor2)) {
       if (rule.constant === true) {
@@ -10642,15 +11754,15 @@ function emitRulesFirstSource(descriptor2) {
   writer.line("}");
   return writer.toString();
 }
-function emitRulesMatchSource(descriptor2) {
+function emitRulesMatchSource(descriptor2, options = {}) {
   const rules2 = orderedRules(descriptor2);
   const plan = planShared(rules2);
   const writer = new CodeWriter();
-  writer.line(`function rulesMatch(${paramList(descriptor2, SUBJECT)}) {`);
+  writer.line(`function rulesMatch(${paramList(descriptor2, SUBJECT, void 0, options)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
-    writer.line("const out = [];");
+    writer.line(options.typescript === true ? "const out: __JitValue[] = [];" : "const out = [];");
     writer.line("let j = 0;");
     for (const rule of rules2) {
       const id = JSON.stringify(rule.id);
@@ -10669,11 +11781,11 @@ function emitRulesRunSource(descriptor2, options = {}) {
   const rules2 = outcomeRules(descriptor2);
   const plan = planShared(rules2);
   const writer = new CodeWriter();
-  writer.line(`function rulesRun(${paramList(descriptor2, SUBJECT)}) {`);
+  writer.line(`function rulesRun(${paramList(descriptor2, SUBJECT, void 0, options)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
-    writer.line("const out = [];");
+    writer.line(options.typescript === true ? "const out: __JitValue[] = [];" : "const out = [];");
     writer.line("let j = 0;");
     for (const rule of rules2) {
       const outcome = emitOutcome(rule, plan, options);
@@ -10689,7 +11801,7 @@ function emitRulesVisitorSource(descriptor2, options = {}) {
   const rules2 = orderedRules(descriptor2);
   const plan = planShared(rules2);
   const writer = new CodeWriter();
-  writer.line(`function rulesVisit(${paramList(descriptor2, SUBJECT, "consume")}) {`);
+  writer.line(`function rulesVisit(${paramList(descriptor2, SUBJECT, "consume", options)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
@@ -10708,7 +11820,7 @@ function emitRulesIteratorSource(descriptor2, options = {}) {
   const rules2 = outcomeRules(descriptor2);
   const plan = planShared(rules2);
   const writer = new CodeWriter();
-  writer.line(`function* rulesIterate(${paramList(descriptor2, SUBJECT)}) {`);
+  writer.line(`function* rulesIterate(${paramList(descriptor2, SUBJECT, void 0, options)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
@@ -10740,9 +11852,9 @@ function emitRulesManySource(descriptor2, options = {}) {
   const rules2 = outcomeRules(descriptor2);
   const plan = planShared(rules2, true);
   const writer = new CodeWriter();
-  writer.line(`function rulesMany(${paramList(descriptor2, "list")}) {`);
+  writer.line(`function rulesMany(${paramList(descriptor2, "list", void 0, options)}) {`);
   writer.indent(() => {
-    writer.line("const out = [];");
+    writer.line(options.typescript === true ? "const out: __JitValue[] = [];" : "const out = [];");
     writer.line("let j = 0;");
     emitManyBody(writer, rules2, plan, options, (_rule, outcome) => `out[j++] = ${outcome};`);
     writer.line("return out;");
@@ -10754,7 +11866,7 @@ function emitRulesManyVisitorSource(descriptor2, options = {}) {
   const rules2 = orderedRules(descriptor2);
   const plan = planShared(rules2, true);
   const writer = new CodeWriter();
-  writer.line(`function rulesManyVisit(${paramList(descriptor2, "list", "consume")}) {`);
+  writer.line(`function rulesManyVisit(${paramList(descriptor2, "list", "consume", options)}) {`);
   writer.indent(() => {
     writer.line("let n = 0;");
     emitManyBody(
@@ -10773,29 +11885,31 @@ function emitRulesManyIteratorSource(descriptor2, options = {}) {
   const rules2 = outcomeRules(descriptor2);
   const plan = planShared(rules2, true);
   const writer = new CodeWriter();
-  writer.line(`function* rulesManyIterate(${paramList(descriptor2, "list")}) {`);
+  writer.line(`function* rulesManyIterate(${paramList(descriptor2, "list", void 0, options)}) {`);
   writer.indent(() => {
     emitManyBody(writer, rules2, plan, options, (_rule, outcome) => `yield ${outcome};`);
   });
   writer.line("}");
   return writer.toString();
 }
-function emitRulesExplainSource(descriptor2) {
+function emitRulesExplainSource(descriptor2, options = {}) {
   const rules2 = orderedRules(descriptor2);
   const plan = planShared(rules2);
   const writer = new CodeWriter();
-  writer.line(`function rulesExplain(${paramList(descriptor2, SUBJECT)}) {`);
+  writer.line(`function rulesExplain(${paramList(descriptor2, SUBJECT, void 0, options)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
-    writer.line("const matched = [];");
+    writer.line(options.typescript === true ? "const matched: __JitValue[] = [];" : "const matched = [];");
     writer.line("let j = 0;");
     for (const rule of rules2) {
       const id = JSON.stringify(rule.id);
       if (rule.constant === true) writer.line(`matched[j++] = ${id};`);
       else writer.line(`if (${emitCondition3(rule, plan)}) matched[j++] = ${id};`);
     }
-    writer.line(`return { matched, evaluated: ${JSON.stringify(rules2.map((rule) => rule.id))} };`);
+    writer.line(
+      options.typescript === true ? `return { matched, evaluated: ${JSON.stringify(rules2.map((rule) => rule.id))} as readonly __JitValue[] };` : `return { matched, evaluated: ${JSON.stringify(rules2.map((rule) => rule.id))} };`
+    );
   });
   writer.line("}");
   return writer.toString();
@@ -10829,17 +11943,17 @@ function emitRulesPlanSource(descriptor2, options) {
   writer.line("(() => {");
   writer.indent(() => {
     for (const source of [
-      emitRulesTestSource(descriptor2),
-      emitRulesSomeSource(descriptor2),
-      emitRulesFirstSource(descriptor2),
-      emitRulesMatchSource(descriptor2),
+      emitRulesTestSource(descriptor2, options),
+      emitRulesSomeSource(descriptor2, options),
+      emitRulesFirstSource(descriptor2, options),
+      emitRulesMatchSource(descriptor2, options),
       emitRulesRunSource(descriptor2, options),
       emitRulesVisitorSource(descriptor2, options),
       emitRulesIteratorSource(descriptor2, options),
       emitRulesManySource(descriptor2, options),
       emitRulesManyVisitorSource(descriptor2, options),
       emitRulesManyIteratorSource(descriptor2, options),
-      emitRulesExplainSource(descriptor2),
+      emitRulesExplainSource(descriptor2, options),
       emitRulesInspectSource(descriptor2)
     ]) {
       for (const line of source.split("\n")) writer.line(line);
@@ -10852,10 +11966,12 @@ function emitRulesPlanSource(descriptor2, options) {
     writer.line("const predicates = Object.freeze({");
     writer.indent(() => {
       for (const rule of descriptor2.rules) {
-        writer.line(`${emitObjectKey(rule.id)}: ${emitRulesPredicateSource(descriptor2, rule.id).trim()},`);
+        writer.line(`${emitObjectKey(rule.id)}: ${emitRulesPredicateSource(descriptor2, rule.id, options).trim()},`);
       }
     });
-    writer.line("});");
+    writer.line(
+      options.typescript === true ? "}) as Readonly<Record<string, (...args: __JitValue[]) => boolean>>;" : "});"
+    );
     writer.line("return Object.freeze({");
     writer.indent(() => {
       writer.line("test: rulesTest,");
@@ -10865,10 +11981,14 @@ function emitRulesPlanSource(descriptor2, options) {
       writer.line("run: rulesRun,");
       writer.line("explain: rulesExplain,");
       writer.line("inspect: rulesInspect,");
-      writer.line("predicate: (rule) => predicates[rule],");
+      writer.line(
+        options.typescript === true ? "predicate: (rule: __JitValue) => predicates[rule]," : "predicate: (rule) => predicates[rule],"
+      );
       writer.line("many: () => many,");
       writer.line("to: Object.freeze({ visitor: () => rulesVisit, iterator: () => rulesIterate }),");
-      writer.line(`ids: Object.freeze(${JSON.stringify(descriptor2.ids)}),`);
+      writer.line(
+        options.typescript === true ? `ids: Object.freeze(${JSON.stringify(descriptor2.ids)}) as readonly __JitValue[],` : `ids: Object.freeze(${JSON.stringify(descriptor2.ids)}),`
+      );
     });
     writer.line("});");
   });
@@ -10878,13 +11998,13 @@ function emitRulesPlanSource(descriptor2, options) {
 function emitRulesSinkSource(descriptor2, sink, options = {}) {
   switch (sink) {
     case "test":
-      return emitRulesTestSource(descriptor2);
+      return emitRulesTestSource(descriptor2, options);
     case "some":
-      return emitRulesSomeSource(descriptor2);
+      return emitRulesSomeSource(descriptor2, options);
     case "first":
-      return emitRulesFirstSource(descriptor2);
+      return emitRulesFirstSource(descriptor2, options);
     case "match":
-      return emitRulesMatchSource(descriptor2);
+      return emitRulesMatchSource(descriptor2, options);
     case "run":
       return emitRulesRunSource(descriptor2, options);
     case "visitor":
@@ -10898,9 +12018,9 @@ function emitRulesSinkSource(descriptor2, sink, options = {}) {
     case "many-iterator":
       return emitRulesManyIteratorSource(descriptor2, options);
     case "explain":
-      return emitRulesExplainSource(descriptor2);
+      return emitRulesExplainSource(descriptor2, options);
     case "predicate":
-      return emitRulesPredicateSource(descriptor2, options.ruleId);
+      return emitRulesPredicateSource(descriptor2, options.ruleId, options);
     default:
       return emitRulesPlanSource(descriptor2, options);
   }
@@ -11484,8 +12604,9 @@ function classArtifactType(context, artifact) {
   const managedFields = new Set((artifact.managedFields ?? []).map((managed) => managed.field));
   const createInput = emitBoundaryType(artifact.schema, "create", context.typeNames, managedFields);
   const hydrateInput = emitBoundaryType(artifact.schema, "hydrate", context.typeNames);
+  const trustedInput = artifact.representation === "value" ? hydrateInput : value;
   const createParameters = acceptsMissingBoundary(artifact.schema, managedFields) ? `...args: [] | [input: ${createInput}]` : `input: ${createInput}`;
-  const factories = classFactories(artifact, createParameters, hydrateInput);
+  const factories = classFactories(artifact, createParameters, hydrateInput, trustedInput);
   const construct2 = artifact.construction === "factory" ? `(abstract new (state: ${value}) => ${instance})` : `(new (state: ${value}) => ${instance})`;
   return `${construct2} & { ${factories.join(" ")} }`;
 }
@@ -11552,8 +12673,9 @@ function addAggregateMixin(context, artifact, mixins) {
     mixins.push(`{ ${context.classMemberName(mutation.touchMethod ?? "touch")}(): void }`);
   }
 }
-function classFactories(artifact, createParameters, hydrateInput) {
+function classFactories(artifact, createParameters, hydrateInput, trustedInput) {
   return [
+    `["__jitMaterialize"]<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${trustedInput}): InstanceType<TThis>;`,
     artifact.factories.create === false ? "" : `${JSON.stringify(artifact.factories.create)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, ${createParameters}): InstanceType<TThis>;`,
     artifact.factories.hydrate === false ? "" : `${JSON.stringify(artifact.factories.hydrate)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${hydrateInput}): InstanceType<TThis>;`
   ].filter(Boolean);
@@ -11636,8 +12758,8 @@ function createClassConstructionPlan(_context, setup, storage, _members, _bindin
   const assertionCall = classAssertionCall(setup.artifact.policy);
   const create = classCreateSource(setup, storage, assertionCall);
   const hydrate = classHydrateSource(setup, storage, assertionCall);
-  const constructorSource = classConstructorSource(setup, storage, assignments);
-  const trustedMaterializer = classTrustedMaterializer(setup, storage, trustedAssignments);
+  const constructorSource = classConstructorSource(_context, setup, storage, assignments);
+  const trustedMaterializer = classTrustedMaterializer(_context, setup, storage, trustedAssignments);
   return { constructorSource, trustedMaterializer, create, hydrate };
 }
 function classAssignments(setup, storage) {
@@ -11727,15 +12849,15 @@ function classHydrateSource(setup, storage, assertionCall) {
   const policyHydrate = createPolicyHydrate(setup, storage, assertionCall);
   return policyHydrate ?? `const result = ${setup.hydrateBinding}.safeParse(${storage.hydrationInput}); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
 }
-function classConstructorSource(setup, storage, assignments) {
+function classConstructorSource(_context, setup, storage, assignments) {
   const guard = classConstructionGuard(setup.artifact);
   const events = classEvents(setup.artifact, storage);
   const freeze = classFreeze(setup.artifact);
   if (setup.artifact.domainEvent !== void 0)
-    return `constructor(state, token) { ${guard}${assignments}${events}${freeze} }`;
+    return `constructor(state${typescriptParameter(_context, "state")}, token${typescriptParameter(_context, "token")}) { ${guard}${assignments}${events}${freeze} }`;
   const state3 = classConstructorState(setup, storage);
   const attachState = classAttachState(setup, storage);
-  return `constructor(input, token, validated) { ${guard}const state = token === true || validated === true ? input : ${state3}; ${assignments}${attachState}${events}${freeze} }`;
+  return `constructor(input${typescriptParameter(_context, "input")}, token${typescriptParameter(_context, "token")}, validated${typescriptParameter(_context, "validated", true)}) { ${guard}const state = token === true || validated === true ? input : ${state3}; ${assignments}${attachState}${events}${freeze} }`;
 }
 function classConstructionGuard(artifact) {
   return artifact.construction === "factory" ? `if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); ` : "";
@@ -11756,13 +12878,16 @@ function classEvents(artifact, storage) {
 function classFreeze(artifact) {
   return artifact.frozen ? " Object.freeze(this);" : "";
 }
-function classTrustedMaterializer(setup, storage, trustedAssignments) {
+function classTrustedMaterializer(context, setup, storage, trustedAssignments) {
   if (storage.slots.size > 0)
-    return `static ["__jitMaterialize"](state) { return new this(state, __construct, true); }`;
+    return `static ["__jitMaterialize"](state${typescriptParameter(context, "state")}) { return new this(state, __construct, true); }`;
   const state3 = storage.domainStateKey === void 0 ? "" : ` instance[${storage.domainStateKey}] = state;`;
   const events = setup.artifact.aggregate ? ` Object.defineProperty(instance, ${storage.eventBufferKey}, { configurable: false, enumerable: false, value: [], writable: true });` : "";
   const freeze = setup.artifact.frozen ? " Object.freeze(instance);" : "";
-  return `static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); ${trustedAssignments}${state3}${events}${freeze} return instance; }`;
+  return `static ["__jitMaterialize"](state${typescriptParameter(context, "state")}) { const instance = Object.create(this.prototype); ${trustedAssignments}${state3}${events}${freeze} return instance; }`;
+}
+function typescriptParameter(context, _name, optional3 = false) {
+  return context.typescript ? `${optional3 ? "?" : ""}: __JitValue` : "";
 }
 function appendClassArtifactSource(context, setup, storage, members, construction, options) {
   const { artifact } = setup;
@@ -11781,16 +12906,19 @@ function appendClassArtifactSource(context, setup, storage, members, constructio
   if (policyLines.length > 0) context.js.push(...policyLines);
   if (members.helpers.length > 0) context.js.push(`  ${members.helpers.join("\n  ")}`);
   context.js.push(`  return class ${binding} {`);
-  context.js.push(...[...storage.slots.values()].map((slot) => `    ${slot};`));
+  if (context.typescript) context.js.push("    [key: string]: __JitValue;", "    [key: symbol]: __JitValue;");
+  context.js.push(
+    ...[...storage.slots.values()].map((slot) => `    ${slot}${context.typescript ? ": __JitValue" : ""};`)
+  );
   context.js.push(`    ${construction.constructorSource}`);
   context.js.push(`    ${construction.trustedMaterializer}`);
   if (artifact.factories.create !== false)
     context.js.push(
-      `    static ${context.classMemberName(artifact.factories.create)}(input) { ${abstractGuard(artifact, binding)}${construction.create} }`
+      `    static ${context.classMemberName(artifact.factories.create)}(input${typescriptParameter(context, "input")}) { ${abstractGuard(artifact, binding)}${construction.create} }`
     );
   if (artifact.factories.hydrate !== false)
     context.js.push(
-      `    static ${context.classMemberName(artifact.factories.hydrate)}(state) { ${abstractGuard(artifact, binding)}${construction.hydrate} }`
+      `    static ${context.classMemberName(artifact.factories.hydrate)}(state${typescriptParameter(context, "state")}) { ${abstractGuard(artifact, binding)}${construction.hydrate} }`
     );
   if (artifact.domainEvent)
     context.js.push(
@@ -11801,9 +12929,23 @@ function appendClassArtifactSource(context, setup, storage, members, constructio
     );
   if (setup.valueRepresentation) context.js.push("    toJSON() { return this.value; }");
   context.js.push(...members.accessorDefinitions.map((definition) => `    ${definition}`));
-  context.js.push(...members.methods.map((method) => `    ${method}`));
+  context.js.push(
+    ...members.methods.map((method) => `    ${context.typescript ? annotateClassMethod(method) : method}`)
+  );
   context.js.push("  };");
   context.js.push(`})()${assertedType === void 0 ? "" : ` as unknown as ${assertedType}`};`);
+}
+function annotateClassMethod(method) {
+  const match2 = /^(\s*(?:(?:static|async)\s+)?(?:(?:get|set)\s+)?(?:\[[^\]]+\]|[A-Za-z_$][A-Za-z0-9_$]*)\s*)\(([^)]*)\)/.exec(
+    method
+  );
+  if (!match2) return method;
+  const parameters = match2[2].split(",").map((parameter) => parameter.trim()).filter((parameter) => parameter.length > 0).map((parameter) => {
+    if (parameter.includes(":")) return parameter;
+    if (parameter.startsWith("...")) return `${parameter}: __JitValue[]`;
+    return `${parameter}: __JitValue`;
+  }).join(", ");
+  return `${match2[1]}(${parameters})${method.slice(match2[0].length)}`;
 }
 function abstractGuard(artifact, binding) {
   return artifact.abstract ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); ` : "";
@@ -14164,8 +15306,9 @@ function emitEqualityMembers(context, setup, capabilities, binding, reportName) 
     const equal3 = context.internalIdentifier(`${binding}_equal`);
     const source = context.tryEmit(reportName, "class.equals", context.skipped, () => emitEqualSource(artifact.schema));
     if (!source) return void 0;
+    const typedSource = context.typescript ? source.replace("function equal(l, r)", "function equal(l: __JitValue, r: __JitValue)") : source;
     return {
-      helpers: [`const ${equal3} = ${context.asExpression(source, "equal")};`],
+      helpers: [`const ${equal3} = ${context.asExpression(typedSource, "equal")};`],
       methods: [`equals(other) { return other instanceof ${binding} && ${equal3}(this.value, other.value); }`]
     };
   }
@@ -14709,7 +15852,7 @@ var ARTIFACT_EMITTERS = {
 function createArtifactDispatcher(context) {
   return (binding, artifact, reportName, importedType, annotate2) => {
     const type = importedType ?? artifactType(context.artifactTypeContext, artifact);
-    const assertedClassType = artifact.kind === "class" && artifact.aggregate && annotate2 && context.ts ? type : void 0;
+    const assertedClassType = artifact.kind === "class" && annotate2 && context.ts ? type : void 0;
     const declaration = `const ${binding}${annotate2 && context.ts && assertedClassType === void 0 ? `: ${type}` : ""} =`;
     if (importedType?.startsWith("__JitCall<")) context.mark("callHelper");
     const args = { binding, artifact, reportName, importedType, annotate: annotate2, declaration, type, assertedClassType };
@@ -14958,7 +16101,8 @@ function emitRules(context, args) {
     context.skipped,
     () => emitRulesSinkSource(artifact.descriptor, artifact.sink, {
       bindingNames,
-      ...artifact.ruleId === void 0 ? {} : { ruleId: artifact.ruleId }
+      ...artifact.ruleId === void 0 ? {} : { ruleId: artifact.ruleId },
+      typescript: context.ts
     })
   );
   if (!source) return void 0;
@@ -16031,19 +17175,19 @@ function compileMask(schema, options) {
 function selectPii(base) {
   const strategy = base.def.pii;
   if (strategy === void 0) return void 0;
-  const isString = base.type === TypeName.string;
+  const isString2 = base.type === TypeName.string;
   const isNumber = base.type === TypeName.number || base.type === TypeName.int;
-  if (!isString && !isNumber) {
+  if (!isString2 && !isNumber) {
     throw new JITError("UNSUPPORTED_SCHEMA", `pii masking supports string and number fields; found ${base.type}`);
   }
   switch (strategy) {
     case "redact":
-      return () => isString ? '"***"' : "0";
+      return () => isString2 ? '"***"' : "0";
     case "mask":
-      return (value) => isString ? `(${value}.length > 4 ? "***" + ${value}.slice(-4) : "***")` : "0";
+      return (value) => isString2 ? `(${value}.length > 4 ? "***" + ${value}.slice(-4) : "***")` : "0";
     case "hash":
       return (value, writer, nextVar4) => {
-        if (!isString) return `(Math.imul(2166136261 ^ ${value}, 16777619) >>> 0)`;
+        if (!isString2) return `(Math.imul(2166136261 ^ ${value}, 16777619) >>> 0)`;
         const hash4 = nextVar4("h");
         const index2 = nextVar4("i");
         writer.line(`let ${hash4} = 2166136261;`);
@@ -17377,7 +18521,8 @@ var ComposedExecutionEmitter = class {
         is: fastParse,
         safeParse: true,
         safeParseAsync: false,
-        materializeRuntimeTypes
+        materializeRuntimeTypes,
+        typescript: this.#host.typescript
       })
     );
     if (!validator) return void 0;
@@ -17910,12 +19055,14 @@ var ExecutionArtifactEmitter = class {
     if (stage.operation === "is") {
       if (hasJsonDecode || hasBinaryDecode)
         return this.#skipAndReturn("is", "is must receive a value source in AOT output");
-      this.#host.js.push(`${this.#declaration} /*#__PURE__*/ ((v) => v.is)(${validator});`);
+      this.#host.js.push(
+        this.#host.typescript ? `${this.#declaration} (${validator}.is as ${this.#type});` : `${this.#declaration} /*#__PURE__*/ ((v) => v.is)(${validator});`
+      );
     } else if (stage.operation === "safeParse") {
       if (hasJsonDecode || hasBinaryDecode)
         return this.#skipAndReturn("safeParse", "safeParse source composition is not an AOT sink");
       this.#host.js.push(
-        fastParse ? `${this.#declaration} (value) => ${validator}.is(value) ? { success: true, data: value } : ${validator}.safeParse(value);` : `${this.#declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validator});`
+        fastParse ? `${this.#declaration} (value${this.#host.typescript ? ": unknown" : ""}) => ${validator}.is(value) ? { success: true, data: value } : ${validator}.safeParse(value);` : this.#host.typescript ? `${this.#declaration} (${validator}.safeParse as ${this.#type});` : `${this.#declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validator});`
       );
     } else if (hasJsonDecode) {
       this.#emitJsonValidation(validator, fastParse, classBinding);
@@ -17929,7 +19076,7 @@ var ExecutionArtifactEmitter = class {
   #emitJsonValidation(validator, fastParse, classBinding) {
     this.#host.markValidationError();
     this.#host.js.push(
-      fastParse ? `${this.#declaration} (json) => { const value = JSON.parse(json); if (${validator}.is(value)) return value; const r = ${validator}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };` : `${this.#declaration} (json) => { const r = ${validator}.safeParse(JSON.parse(json)); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); };`
+      fastParse ? `${this.#declaration} (json${this.#host.typescript ? ": string" : ""}) => { const value = JSON.parse(json); if (${validator}.is(value)) return value; const r = ${validator}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };` : `${this.#declaration} (json${this.#host.typescript ? ": string" : ""}) => { const r = ${validator}.safeParse(JSON.parse(json)); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); };`
     );
   }
   #emitBinaryValidation(validator, fastParse, classBinding) {
@@ -17944,7 +19091,7 @@ var ExecutionArtifactEmitter = class {
     if (bindings === void 0) return this.#skipAndReturn("binary.decode", "codec bindings cannot be serialized");
     this.#host.markValidationError();
     this.#host.js.push(
-      fastParse ? `${this.#declaration} /*#__PURE__*/ ((codec, is, safeParse) => (bytes) => { const value = codec.decode(bytes); if (is(value)) return value; const r = safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {` : `${this.#declaration} /*#__PURE__*/ ((codec, safeParse) => (bytes) => { const r = safeParse(codec.decode(bytes)); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); })((() => {`
+      fastParse ? `${this.#declaration} /*#__PURE__*/ ((codec, is, safeParse) => (bytes${this.#host.typescript ? ": Uint8Array" : ""}) => { const value = codec.decode(bytes); if (is(value)) return value; const r = safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {` : `${this.#declaration} /*#__PURE__*/ ((codec, safeParse) => (bytes${this.#host.typescript ? ": Uint8Array" : ""}) => { const r = safeParse(codec.decode(bytes)); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); })((() => {`
     );
     this.#host.js.push(...bindings.map((line) => `  ${line}`));
     this.#host.js.push(...this.#host.indentBlock(codec2.source));
@@ -17956,7 +19103,7 @@ var ExecutionArtifactEmitter = class {
   #emitValueValidation(validator, fastParse, classBinding) {
     this.#host.markValidationError();
     this.#host.js.push(
-      fastParse ? `${this.#declaration} (value) => { if (${validator}.is(value)) return value; const r = ${validator}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };` : `${this.#declaration} (value) => { const r = ${validator}.safeParse(value); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); };`
+      fastParse ? `${this.#declaration} (value${this.#host.typescript ? ": unknown" : ""}) => { if (${validator}.is(value)) return value; const r = ${validator}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };` : `${this.#declaration} (value${this.#host.typescript ? ": unknown" : ""}) => { const r = ${validator}.safeParse(value); if (r.success) return ${classBinding ? `new ${classBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); };`
     );
   }
   #emitTerminalOperations() {
@@ -18044,6 +19191,7 @@ function createExecutionArtifactEmitter(context) {
     return emitExecutionArtifact(
       {
         js,
+        typescript: context.ts,
         skipped,
         classBindings,
         classArtifacts,
@@ -18824,6 +19972,11 @@ var JsonSchemaEmitter = class {
   stringConstraints(checks) {
     const out = {};
     for (const check of checks) {
+      const casePlan = caseTransformPlan(check.kind);
+      if (casePlan?.operation === "validate") {
+        out.pattern = casePattern(casePlan.style);
+        continue;
+      }
       switch (check.kind) {
         case "min":
           out.minLength = check.value;
@@ -19855,16 +21008,17 @@ function emitCacheKeyPlanArtifact(context, binding, declaration, artifact, type)
 function emitHashBinding(context, binding, schema, reportName, cache = true) {
   const source = context.tryEmit(reportName, "hash", context.skipped, () => emitHashSource(schema));
   if (!source) return void 0;
+  const typedSource = context.ts ? source.split("function hash(value)").join("function hash(value: __JitValue)") : source;
   context.mark("hashHelpers");
   if (!cache) {
-    context.js.push(`const ${binding} = ${context.asExpression(source, "hash")};`);
+    context.js.push(`const ${binding} = ${context.asExpression(typedSource, "hash")};`);
     return binding;
   }
   context.mark("hashCache");
   context.js.push(`const ${binding} = /*#__PURE__*/ (() => {`);
-  context.js.push(...context.indentBlock(`const compute = (${source});`));
+  context.js.push(...context.indentBlock(`const compute = (${typedSource});`));
   context.js.push(
-    "  return (value) => {",
+    `  return (value${context.ts ? ": __JitValue" : ""})${context.ts ? ": number" : ""} => {`,
     '    if ((typeof value === "object" && value !== null) || typeof value === "function") {',
     "      const cached = __hashCache.get(value);",
     "      if (cached !== undefined) return cached;",
@@ -21039,8 +22193,22 @@ function emitCqrsParserArtifact(context, binding, declaration, artifact, reportN
 }
 
 // ../../packages/jit/src/aot/emit-validator-artifact.ts
+function emitIsArtifact(declaration, validatorName, type, typescript) {
+  return typescript ? `${declaration} (${validatorName}.is as ${type});` : `${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`;
+}
+function emitSafeParseArtifact(declaration, validatorName, type, fastParse, typescript) {
+  if (fastParse) {
+    return `${declaration} (value${typescript ? ": unknown" : ""}) => ${validatorName}.is(value) ? { success: true, data: value } : ${validatorName}.safeParse(value);`;
+  }
+  return typescript ? `${declaration} (${validatorName}.safeParse as ${type});` : `${declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validatorName});`;
+}
+function emitParseArtifact(declaration, validatorName, fastParse, typescript) {
+  const parameter = `value${typescript ? ": unknown" : ""}`;
+  const body = fastParse ? `{ if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); }` : `{ const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); }`;
+  return `${declaration} (${parameter}) => ${body};`;
+}
 function createValidatorArtifactEmitter(context) {
-  const { js, skipped, mark, emitValidatorBinding: emitValidatorBinding2 } = context;
+  const { js, skipped, mark, emitValidatorBinding: emitValidatorBinding2, typescript } = context;
   function emitValidatorArtifact(binding, declaration, artifact, reportName, type) {
     if (artifact.op === "parseAsync" || artifact.op === "safeParseAsync") {
       skipped.push({
@@ -21058,16 +22226,12 @@ function createValidatorArtifactEmitter(context) {
     });
     if (!validatorName) return void 0;
     if (artifact.op === "is") {
-      js.push(`${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`);
+      js.push(emitIsArtifact(declaration, validatorName, type, typescript));
     } else if (artifact.op === "safeParse") {
-      js.push(
-        fastParse ? `${declaration} (value) => ${validatorName}.is(value) ? { success: true, data: value } : ${validatorName}.safeParse(value);` : `${declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validatorName});`
-      );
+      js.push(emitSafeParseArtifact(declaration, validatorName, type, fastParse, typescript));
     } else {
       mark("validationError");
-      js.push(
-        fastParse ? `${declaration} (value) => { if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };` : `${declaration} (value) => { const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
-      );
+      js.push(emitParseArtifact(declaration, validatorName, fastParse, typescript));
     }
     return { binding, type };
   }
@@ -21091,7 +22255,8 @@ function emitValidatorBinding(context, binding, schema, reportName, operation, s
       ...selection.resolveDefaults === void 0 ? {} : { resolveDefaults: selection.resolveDefaults },
       ...selection.materializeRuntimeTypes === void 0 ? {} : { materializeRuntimeTypes: selection.materializeRuntimeTypes },
       ...selection.maxIssues === void 0 ? {} : { maxIssues: selection.maxIssues },
-      ...selection.validateChecks === void 0 ? {} : { validateChecks: selection.validateChecks }
+      ...selection.validateChecks === void 0 ? {} : { validateChecks: selection.validateChecks },
+      typescript: selection.typescript ?? context.ts
     })
   );
   if (!validator) return void 0;
@@ -21160,6 +22325,7 @@ function createArtifactEmitter(context) {
 function createValidatorBinding(context) {
   return createValidatorBindingEmitter({
     js: context.js,
+    ts: context.ts,
     skipped: context.skipped,
     classBindings: context.classBindings,
     assertionBindings: context.assertionBindings,
@@ -21172,6 +22338,7 @@ function createValidatorBinding(context) {
 function createPlanEmitters(context) {
   return createPlanArtifactEmitters({
     js: context.js,
+    ts: context.ts,
     skipped: context.skipped,
     mark: context.mark,
     internalIdentifier: context.internalIdentifier,
@@ -21209,6 +22376,7 @@ function createOperationEmitters(context, planEmitters, emitValidatorBinding2) {
 function createValidatorEmitters(context, emitValidatorBinding2) {
   return createValidatorArtifactEmitter({
     js: context.js,
+    typescript: context.ts,
     skipped: context.skipped,
     mark: context.mark,
     emitValidatorBinding: emitValidatorBinding2
@@ -21217,6 +22385,7 @@ function createValidatorEmitters(context, emitValidatorBinding2) {
 function createExecutionEmitters(context, operationEmitters, emitValidatorBinding2) {
   return createExecutionArtifactEmitter({
     js: context.js,
+    ts: context.ts,
     skipped: context.skipped,
     classBindings: context.classBindings,
     classArtifacts: context.classArtifacts,
@@ -21239,6 +22408,96 @@ function createClassArtifactContext(context, planEmitters, emitValidatorBinding2
     emitValidatorBinding: emitValidatorBinding2,
     emitHashBinding: planEmitters.emitHashBinding
   };
+}
+
+// ../../packages/jit/src/aot/semantic-name.ts
+var RESERVED = /* @__PURE__ */ new Set([
+  "await",
+  "break",
+  "case",
+  "catch",
+  "class",
+  "const",
+  "continue",
+  "debugger",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "enum",
+  "export",
+  "extends",
+  "false",
+  "finally",
+  "for",
+  "function",
+  "if",
+  "import",
+  "in",
+  "instanceof",
+  "let",
+  "new",
+  "null",
+  "return",
+  "static",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+  "yield"
+]);
+var SemanticNameAllocator = class {
+  #profile;
+  #used = /* @__PURE__ */ new Map();
+  constructor(profile = "compact") {
+    this.#profile = profile;
+  }
+  /** Allocates the next name for a semantic request in its scope. */
+  allocate(request) {
+    const used = this.#used.get(request.scope) ?? /* @__PURE__ */ new Set();
+    this.#used.set(request.scope, used);
+    const base = this.#profile === "semantic" ? semanticBase(request) : compactBase(request);
+    let candidate = base;
+    let suffix = 1;
+    while (used.has(candidate) || RESERVED.has(candidate)) candidate = `${base}_${suffix++}`;
+    used.add(candidate);
+    return candidate;
+  }
+  /** Reserves a public name so internal allocations cannot shadow it. */
+  reserve(scope, name) {
+    const used = this.#used.get(scope) ?? /* @__PURE__ */ new Set();
+    used.add(name);
+    this.#used.set(scope, used);
+  }
+};
+function compactBase(request) {
+  const preferred = request.preferred ?? request.role;
+  return sanitize(preferred, request.role);
+}
+function semanticBase(request) {
+  const values = request.path && request.path.length > 0 ? request.path : [request.preferred ?? request.role];
+  const words = values.flatMap(tokenize);
+  const base = words.map((word, index2) => index2 === 0 ? word.toLowerCase() : capitalize(word)).join("");
+  return sanitize(base || request.role, request.role);
+}
+function tokenize(value) {
+  return value.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[^A-Za-z0-9_$]+/).flatMap((part) => part.length > 0 ? [part] : []);
+}
+function capitalize(value) {
+  return value.length === 0 ? value : `${value[0]?.toUpperCase() ?? ""}${value.slice(1).toLowerCase()}`;
+}
+function sanitize(value, fallback) {
+  const normalized = value.replace(/[^A-Za-z0-9_$]/g, "_");
+  const first = normalized[0];
+  const safe = first && /[A-Za-z_$]/.test(first) ? normalized : `_${normalized}`;
+  return safe.length > 0 ? safe : fallback;
 }
 
 // ../../packages/jit/src/aot/serialize-callback.ts
@@ -21533,35 +22792,94 @@ function normalizeMethodSource(source) {
 
 // ../../packages/jit/src/aot/generate.ts
 var GENERATED_BANNER = "// Generated by jit \u2014 do not edit.";
+var JIT_COMPILER_VERSION = "2.0.0";
 var CALL_HELPER = "type __JitCall<TFunction> = TFunction extends (...args: infer A) => infer R ? (...args: A) => R : never;";
 function generate(options) {
   const layout = resolveOutputLayout(assertOutputFormat(options.format ?? "js"));
+  const naming = options.naming ?? "compact";
   const skipped = [];
   const modules = [];
-  for (const plan of planModules(options)) {
-    const emitted = emitModule(plan, options, layout);
+  const plans = planModules(options);
+  const classIndex = indexClassArtifacts(plans);
+  if (options.emitManifest === true && options.ownership !== "detached" && options.overwriteModified !== true) {
+    const existing = inspectArtifactStatus(
+      options.outDir,
+      options.manifestPath ?? "jit.manifest.json",
+      options.receiptPath ?? "jit.receipt.json"
+    );
+    if (existing.status === "modified") {
+      throw new Error(
+        `Managed artifact tree has modified generated files: ${(existing.files ?? []).join(", ")}. Set overwriteModified=true to replace it.`
+      );
+    }
+  }
+  for (const plan of plans) {
+    const emitted = emitModule(plan, options, layout, classIndex);
     skipped.push(...emitted.skipped);
     if (emitted.exports.length > 0 || emitted.types.length > 0) modules.push(emitted);
   }
   if (modules.length === 0) return { files: [], skipped };
-  cleanGeneratedFiles(options.outDir);
+  const programModules = modules.map((module) => ({
+    name: module.name,
+    path: `${module.name}${layout.extension}`,
+    exports: module.exports,
+    types: module.types,
+    artifacts: module.plan.artifacts,
+    groups: module.plan.groups,
+    schemas: module.plan.schemas
+  }));
+  const program = buildArtifactProgram({
+    modules: programModules,
+    includeBarrel: options.perFile === true,
+    ...options.perFile === true ? { barrelPath: `index${layout.extension}` } : {},
+    ...options.protocols ? { protocols: options.protocols } : {}
+  });
+  const preservedGeneratedNames = /* @__PURE__ */ new Set([
+    ...modules.map((module) => `${module.name}${layout.extension}`),
+    ...options.perFile === true ? [`index${layout.extension}`] : []
+  ]);
+  cleanGeneratedFiles(options.outDir, preservedGeneratedNames);
   mkdirSync(options.outDir, { recursive: true });
   const files2 = modules.map((module) => writeFile(options.outDir, `${module.name}${layout.extension}`, module.source));
   if (options.perFile === true) {
-    files2.push(writeFile(options.outDir, `index${layout.extension}`, emitBarrel(modules, layout)));
+    files2.push(writeFile(options.outDir, `index${layout.extension}`, emitBarrel(modules, layout, program)));
   }
-  return { files: files2, skipped };
+  if (options.emitManifest !== true) return { files: files2, skipped, program };
+  const manifest = createArtifactManifest({
+    compiler: { name: "jit", version: JIT_COMPILER_VERSION },
+    declarationDigest: options.declarationDigest ?? declarationRevisionDigest({
+      modules: programModules,
+      includeBarrel: options.perFile === true,
+      ...options.perFile === true ? { barrelPath: `index${layout.extension}` } : {},
+      ...options.protocols ? { protocols: options.protocols } : {}
+    }),
+    program,
+    fileHashes: program.modules.map((module) => hashArtifactFile(options.outDir, module)),
+    ownership: options.ownership ?? "managed",
+    format: layout.format,
+    naming
+  });
+  const receipt = createCompilationReceipt(manifest, JIT_COMPILER_VERSION, [
+    { name: "artifact-program", status: "passed" },
+    { name: "manifest-symbols", status: "passed" },
+    { name: "file-hashes", status: "passed" }
+  ]);
+  const manifestFile = writeMetadata(options.outDir, options.manifestPath ?? "jit.manifest.json", manifest);
+  const receiptFile = writeMetadata(options.outDir, options.receiptPath ?? "jit.receipt.json", receipt);
+  return { files: [...files2, manifestFile, receiptFile], skipped, program, manifest, receipt };
 }
 function planModules(options) {
   const artifacts = options.artifacts ?? {};
   const groups = options.groups ?? {};
   const schemas = options.schemas ?? {};
   const sources = options.sources;
-  if (options.perFile !== true || !sources) return [{ name: "index", artifacts, groups, schemas }];
+  if (options.perFile !== true || !sources && !options.modulePaths)
+    return [{ name: "index", artifacts, groups, schemas }];
   const names = [...Object.keys(artifacts), ...Object.keys(groups), ...Object.keys(schemas)];
   const byFile = /* @__PURE__ */ new Map();
   for (const name of names) {
-    const file2 = sources.get(name);
+    const explicitModulePath = options.modulePaths?.[name];
+    const file2 = explicitModulePath ?? sources?.get(name);
     if (!file2) continue;
     const bucket = byFile.get(file2);
     if (bucket) bucket.push(name);
@@ -21570,20 +22888,72 @@ function planModules(options) {
   const used = /* @__PURE__ */ new Set();
   return [...byFile].map(([file2, declared]) => {
     const selected = new Set(declared);
+    const explicitModulePath = declared.map((name) => options.modulePaths?.[name]).find((path) => path !== void 0);
     return {
-      name: uniqueModuleName(moduleNameFromSource(file2), used),
+      name: uniqueModuleName(
+        explicitModulePath === void 0 ? moduleNameFromSource(file2) : normalizeModulePath(explicitModulePath),
+        used
+      ),
       artifacts: pick2(artifacts, selected),
       groups: pick2(groups, selected),
       schemas: pick2(schemas, selected)
     };
   });
 }
+function indexClassArtifacts(plans) {
+  const byValue = /* @__PURE__ */ new Map();
+  const bySchema = /* @__PURE__ */ new Map();
+  for (const plan of plans) {
+    for (const [name, value] of Object.entries(plan.artifacts)) {
+      const artifact = getArtifact(value);
+      if (!isValidIdentifier(name) || artifact?.kind !== "class") continue;
+      const location = { value, module: plan.name, name, artifact };
+      byValue.set(value, location);
+      bySchema.set(artifact.schema, location);
+      if (artifact.declaredSchema !== void 0) bySchema.set(artifact.declaredSchema, location);
+    }
+  }
+  return { byValue, bySchema };
+}
+function referencedClasses(plan, index2) {
+  const result = /* @__PURE__ */ new Map();
+  const seen = /* @__PURE__ */ new WeakSet();
+  const visit = (schema) => {
+    const current = resolveLazySchema(schema);
+    const location = index2.bySchema.get(current) ?? index2.bySchema.get(resolveWrappers(current).base);
+    if (location !== void 0) result.set(location.value, location);
+    if (seen.has(current)) return;
+    seen.add(current);
+    for (const child of schemaChildren(current)) visit(child);
+  };
+  const visitValue = (value) => {
+    const artifact = getArtifact(value);
+    if (artifact !== void 0 && "schema" in artifact) {
+      visit(artifact.schema);
+      return;
+    }
+    try {
+      visit(unwrapSchema(value));
+    } catch {
+    }
+  };
+  for (const value of Object.values(plan.artifacts)) visitValue(value);
+  for (const group of Object.values(plan.groups)) {
+    for (const value of Object.values(group)) visitValue(value);
+  }
+  for (const schema of Object.values(plan.schemas)) visitValue(schema);
+  return [...result.values()].sort(
+    (left, right) => compareText5(left.module, right.module) || compareText5(left.name, right.name)
+  );
+}
 function pick2(record2, selected) {
   return Object.fromEntries(Object.entries(record2).filter(([name]) => selected.has(name)));
 }
-function emitBarrel(modules, layout) {
+function emitBarrel(modules, layout, program) {
   const lines = [GENERATED_BANNER];
-  for (const module of modules) {
+  const byName = new Map(modules.map((module) => [module.name, module]));
+  const ordered = topologicalModuleOrder(program).filter((module) => module.id !== "index").map((module) => byName.get(module.id)).filter((module) => module !== void 0);
+  for (const module of ordered) {
     if (layout.format === "ts" && module.types.length > 0) {
       lines.push(`export type { ${module.types.join(", ")} } from "./${module.name}.js";`);
     }
@@ -21594,7 +22964,7 @@ function emitBarrel(modules, layout) {
   return `${lines.join("\n")}
 `;
 }
-function emitModule(plan, options, layout) {
+function emitModule(plan, options, layout, classIndex) {
   const ts = layout.format === "ts";
   const skipped = [];
   const js = [];
@@ -21603,10 +22973,13 @@ function emitModule(plan, options, layout) {
   const typeNames = /* @__PURE__ */ new Map();
   const classBindings = /* @__PURE__ */ new Map();
   const classArtifacts = /* @__PURE__ */ new Map();
+  const classImports = [];
+  const importedClasses = /* @__PURE__ */ new Set();
   const assertionBindings = /* @__PURE__ */ new Map();
   const assertionSources = [];
   const publicNames = /* @__PURE__ */ new Set([...Object.keys(plan.artifacts), ...Object.keys(plan.groups)]);
   const internalNames = /* @__PURE__ */ new Set();
+  const nameAllocator = new SemanticNameAllocator(options.naming ?? "compact");
   const exported = options.exported ?? /* @__PURE__ */ new Set();
   let needsRuntimeGetIndex = false;
   let needsRuntimeCachedIndex = false;
@@ -21620,6 +22993,25 @@ function emitModule(plan, options, layout) {
   let needsAggregateType = false;
   let needsDomainStateType = false;
   let needsDomainEventType = false;
+  for (const name of publicNames) nameAllocator.reserve("module", name);
+  for (const reference of referencedClasses(plan, classIndex)) {
+    if (reference.module === plan.name) continue;
+    const alias = nameAllocator.allocate({
+      role: "binding",
+      preferred: reference.name,
+      path: [reference.module, reference.name],
+      scope: "module"
+    });
+    const importKey = `${reference.module}\0${reference.name}\0${alias}`;
+    if (importedClasses.has(importKey)) continue;
+    importedClasses.add(importKey);
+    const modulePath2 = relativeModuleImport(`${plan.name}.js`, `${reference.module}.js`);
+    classImports.push(
+      alias === reference.name ? `import { ${reference.name} } from ${JSON.stringify(modulePath2)};` : `import { ${reference.name} as ${alias} } from ${JSON.stringify(modulePath2)};`
+    );
+    classBindings.set(reference.value, alias);
+    classArtifacts.set(reference.value, reference.artifact);
+  }
   for (const [name, value] of Object.entries(plan.artifacts)) {
     const artifact = getArtifact(value);
     if (isValidIdentifier(name) && artifact?.kind === "class") {
@@ -21672,7 +23064,14 @@ function emitModule(plan, options, layout) {
     return [name];
   });
   js.push(GENERATED_BANNER);
-  if (ts) js.push("// @ts-nocheck -- generated internals are typed at the public export boundary.");
+  if (classImports.length > 0) js.push(...classImports, "");
+  const typePrelude = ts ? [
+    "type __JitValue = any;",
+    "type __JitValidationIssue = { readonly path: readonly PropertyKey[]; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string; readonly params?: Readonly<Record<string, unknown>>; };",
+    "type __JitSafeParse<T> = { readonly success: true; readonly data: T } | { readonly success: false; readonly issues: readonly __JitValidationIssue[] };",
+    ""
+  ] : [];
+  js.push(...typePrelude);
   js.push(...assertionSources);
   if (assertionSources.length > 0) js.push("");
   const mark = (flag) => {
@@ -21717,6 +23116,7 @@ function emitModule(plan, options, layout) {
   };
   const classArtifactContext = {
     js,
+    typescript: ts,
     skipped,
     mark,
     internalIdentifier,
@@ -21784,7 +23184,17 @@ function emitModule(plan, options, layout) {
         memberType,
         false
       );
-      if (emitted) operations.push({ prop, ...emitted });
+      if (emitted) {
+        emitProtocolAdapters(
+          js,
+          emitted.binding,
+          artifact,
+          options.protocols?.[`${name}.${prop}`],
+          `${name}.${prop}`,
+          skipped
+        );
+        operations.push({ prop, ...emitted });
+      }
     }
     if (operations.length === 0) {
       skipped.push({
@@ -21826,9 +23236,16 @@ function emitModule(plan, options, layout) {
     }
     const sourceFile = options.sources?.get(name);
     const declaredType = exported.has(name) && sourceFile ? declarationImportType(options.outDir, sourceFile, name, artifact) : void 0;
-    if (emitArtifact(name, artifact, name, declaredType, ts)) exportNames.push(name);
+    const emitted = emitArtifact(name, artifact, name, declaredType, ts);
+    if (emitted) {
+      emitProtocolAdapters(js, emitted.binding, artifact, options.protocols?.[name], name, skipped);
+      exportNames.push(name);
+    }
   }
   function internalIdentifier(preferred) {
+    if (options.naming === "semantic") {
+      return nameAllocator.allocate({ role: "temporary", preferred, scope: "module" });
+    }
     let candidate = preferred;
     let suffix = 1;
     while (publicNames.has(candidate) || internalNames.has(candidate)) candidate = `${preferred}_${suffix++}`;
@@ -21858,7 +23275,14 @@ function emitModule(plan, options, layout) {
   if (needsAssertionError) {
     helpers.push(
       "class DomainAssertionError extends Error {",
-      "  constructor(message, details) {",
+      ...ts ? [
+        '  readonly code: "ASSERTION_FAILED";',
+        "  readonly rule: string | undefined;",
+        "  readonly field: string | undefined;",
+        "  readonly issues: readonly __JitValidationIssue[];",
+        "  readonly path: readonly PropertyKey[] | undefined;"
+      ] : [],
+      `  constructor(message${ts ? ": string" : ""}, details${ts ? ": { readonly rule?: string; readonly field?: string; readonly issues?: readonly __JitValidationIssue[] } | undefined" : ""}) {`,
       "    super(message);",
       '    this.name = "DomainAssertionError";',
       '    this.code = "ASSERTION_FAILED";',
@@ -21873,9 +23297,10 @@ function emitModule(plan, options, layout) {
   if (needsValidationError) {
     helpers.push(
       "class JITValidationError extends Error {",
-      "  constructor(issues) {",
+      ...ts ? ['  readonly code: "VALIDATION_FAILED";', "  readonly issues: readonly __JitValidationIssue[];"] : [],
+      `  constructor(issues${ts ? ": readonly __JitValidationIssue[]" : ""}) {`,
       "    const first = issues[0];",
-      '    const path = first ? first.path.map((segment, index) => typeof segment === "number" ? "[" + segment + "]" : (index === 0 ? "" : ".") + String(segment)).join("") : "";',
+      `    const path = first ? first.path.map((segment${ts ? ": PropertyKey" : ""}, index${ts ? ": number" : ""}) => typeof segment === "number" ? "[" + segment + "]" : (index === 0 ? "" : ".") + String(segment)).join("") : "";`,
       '    super(first ? (path === "" ? "" : path + ": ") + first.message : "validation failed");',
       '    this.name = "JITValidationError";',
       '    this.code = "VALIDATION_FAILED";',
@@ -21885,18 +23310,22 @@ function emitModule(plan, options, layout) {
     );
   }
   if (needsHashHelpers) {
+    const hashValue = ts ? "value: __JitValue" : "value";
+    const hashNumber2 = ts ? "value: __JitValue" : "value";
+    const hashResult = ts ? ": number" : "";
+    const hashPair = ts ? "left: __JitValue, right: __JitValue" : "left, right";
     helpers.push(
-      "function __hashNumber(value) { return value | 0; }",
-      "function __hashBoolean(value) { return value ? 1 : 0; }",
-      "function __hashBigInt(value) { return Number(value & 0xffffffffn) | 0; }",
-      "function __hashString(value) {",
+      `function __hashNumber(${hashNumber2})${hashResult} { return value | 0; }`,
+      `function __hashBoolean(${hashValue})${hashResult} { return value ? 1 : 0; }`,
+      `function __hashBigInt(${hashValue})${hashResult} { return Number(value & 0xffffffffn) | 0; }`,
+      `function __hashString(${hashValue})${hashResult} {`,
       "  let hash = 0;",
       "  for (let i = 0, len = value.length; i < len; i++) {",
       "    hash = (hash * 31 + value.charCodeAt(i)) | 0;",
       "  }",
       "  return hash;",
       "}",
-      "function __hashUnknown(value) {",
+      `function __hashUnknown(${hashValue})${ts ? ": __JitValue" : ""} {`,
       "  switch (typeof value) {",
       '    case "string": return __hashString(value);',
       '    case "number": return __hashNumber(value);',
@@ -21908,9 +23337,12 @@ function emitModule(plan, options, layout) {
       '    case "function": return __hashString("function");',
       "  }",
       "}",
-      "function __combineHash(left, right) { return ((left << 5) - left + right) | 0; }"
+      `function __combineHash(${hashPair})${hashResult} { return ((left << 5) - left + right) | 0; }`
     );
-    if (needsHashCache) helpers.unshift("const __hashCache = new WeakMap();");
+    if (needsHashCache)
+      helpers.unshift(
+        ts ? "const __hashCache: WeakMap<object, number> = new WeakMap();" : "const __hashCache = new WeakMap();"
+      );
   }
   if (needsJsonPatchHelpers) helpers.push(...JSON_PATCH_HELPERS.split("\n"), ...PATCH_EQUAL_HELPER.split("\n"));
   if (needsMockHelpers) helpers.push(...MOCK_HELPERS.split("\n"));
@@ -21941,7 +23373,8 @@ function emitModule(plan, options, layout) {
       "}"
     );
   }
-  const preludeIndex = ts ? 2 : 1;
+  const importPreludeLength = classImports.length > 0 ? classImports.length + 1 : 0;
+  const preludeIndex = 1 + importPreludeLength + typePrelude.length + assertionSources.length + (assertionSources.length > 0 ? 1 : 0);
   if (helpers.length > 0) js.splice(preludeIndex, 0, ...helpers);
   if (ts && tsTypes.length > 0) js.splice(preludeIndex, 0, ...tsTypes, "");
   if (ts && needsDomainStateType) {
@@ -21973,13 +23406,56 @@ export { ${exportNames.join(", ")} };
 ` : `${js.join("\n")}
 export {};
 `;
+  const portableSource = options.portableErrors !== false ? source.split("JITValidationError").join("ValidationError") : source;
   return {
     name: plan.name,
-    source,
+    plan,
+    source: portableSource,
     exports: exportNames,
     types: ts ? typeExports : [],
     skipped
   };
+}
+function emitProtocolAdapters(js, binding, artifact, capabilities, reportName, skipped) {
+  for (const capability2 of capabilities ?? []) {
+    const protocol = capability2.protocol;
+    if (protocol === "standard-schema" || protocol === "standard-schema/v1") {
+      if (!isStandardSchemaBoundary(artifact) || capability2.version !== 1 || capability2.input !== "unknown") {
+        skipped.push({
+          schema: reportName,
+          operation: protocol,
+          reason: "protocol input/output does not match a parser boundary"
+        });
+        continue;
+      }
+      js.push(
+        `Object.defineProperty(${binding}, "~standard", { enumerable: false, configurable: false, value: Object.freeze({ version: 1, vendor: "jit", validate(value) { try { return { value: ${binding}(value) }; } catch (error) { const issues = error && typeof error === "object" ? error.issues : undefined; if (!issues) throw error; return { issues: issues.map((issue) => ({ message: issue.message, ...(issue.path && issue.path.length > 0 ? { path: issue.path } : {}) })) }; } } }) });`
+      );
+      continue;
+    }
+    if (protocol === "standard-json-schema" || protocol === "standard-json-schema/v1") {
+      if (artifact.kind !== "operation" || artifact.op !== "jsonSchema" || capability2.version !== 1 || capability2.input !== "schema" || capability2.output !== "json-schema") {
+        skipped.push({
+          schema: reportName,
+          operation: protocol,
+          reason: "protocol input/output does not match a JSON Schema document boundary"
+        });
+        continue;
+      }
+      continue;
+    }
+    skipped.push({
+      schema: reportName,
+      operation: protocol,
+      reason: "protocol capability is not supported by this AOT emitter"
+    });
+  }
+}
+function isStandardSchemaBoundary(artifact) {
+  if (artifact.kind === "validator") return artifact.op === "parse";
+  if (artifact.kind !== "execution") return false;
+  const stage = artifact.plan.stages[artifact.plan.stages.length - 1];
+  return stage?.kind === "validate" && stage.operation === "parse";
 }
 function moduleNameFromSource(sourceFile) {
   const rawName = basename(sourceFile).replace(/\.jit\.(ts|mts|cts|js|mjs|cjs)$/, "").replace(/\.(ts|mts|cts|js|mjs|cjs)$/, "");
@@ -22132,6 +23608,9 @@ function assertOutputFormat(value) {
   if (value === "ts" || value === "js") return value;
   throw new Error(`unknown AOT output format ${JSON.stringify(value)}; expected "ts" or "js"`);
 }
+function compareText5(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
 function indentBlock(source) {
   return source.split("\n").map((line) => line.length > 0 ? `  ${line}` : line);
 }
@@ -22141,15 +23620,45 @@ function writeFile(dir, name, content) {
     dir,
     name
   );
-  writeFileSync(path, content);
+  mkdirSync(dirname(path), { recursive: true });
+  try {
+    if (readFileSync(path, "utf8") !== content) writeFileSync(path, content);
+  } catch {
+    writeFileSync(path, content);
+  }
   return path;
 }
-function cleanGeneratedFiles(dir) {
+function writeMetadata(dir, name, value) {
+  if (isAbsolute(name)) throw new Error(`Artifact metadata path must be relative to outDir: ${name}`);
+  const path = join(
+    /* turbopackIgnore: true */
+    dir,
+    name
+  );
+  const escaped = relative(resolve(dir), resolve(path));
+  if (escaped === ".." || escaped.startsWith("../") || escaped.startsWith("..\\")) {
+    throw new Error(`Artifact metadata path escapes outDir: ${name}`);
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  const content = `${JSON.stringify(value, null, 2)}
+`;
+  try {
+    if (readFileSync(path, "utf8") !== content) writeFileSync(path, content);
+  } catch {
+    writeFileSync(path, content);
+  }
+  return path;
+}
+function cleanGeneratedFiles(dir, preservedNames = /* @__PURE__ */ new Set()) {
+  cleanGeneratedDirectory(dir, "", preservedNames);
+}
+function cleanGeneratedDirectory(dir, relativeDir, preservedNames) {
   let entries;
   try {
     entries = readdirSync(
       /* turbopackIgnore: true */
-      dir
+      dir,
+      { withFileTypes: true }
     );
   } catch {
     return;
@@ -22158,21 +23667,26 @@ function cleanGeneratedFiles(dir) {
     const path = join(
       /* turbopackIgnore: true */
       dir,
-      entry
+      entry.name
     );
-    if (entry === "plans") {
-      rmSync(path, { recursive: true, force: true });
+    const relativeName = relativeDir.length === 0 ? entry.name : `${relativeDir}/${entry.name}`;
+    if (preservedNames.has(relativeName)) continue;
+    if (entry.isDirectory()) {
+      if (entry.name === "plans") {
+        rmSync(path, { recursive: true, force: true });
+        continue;
+      }
+      cleanGeneratedDirectory(path, relativeName, preservedNames);
       continue;
     }
-    if (entry === "manifest.json" || entry === "package.json") {
+    if (entry.name === "manifest.json" || entry.name === "package.json" || entry.name === "jit.manifest.json" || entry.name === "jit.receipt.json") {
       if (isGeneratedJson(path)) rmSync(path, { force: true });
       continue;
     }
-    if (!/\.(?:m|c)?[jt]s$/.test(entry)) continue;
-    if (isGeneratedSource(path)) rmSync(path, { force: true });
+    if (/\.(?:m|c)?[jt]s$/.test(entry.name) && isGeneratedSource2(path)) rmSync(path, { force: true });
   }
 }
-function isGeneratedSource(path) {
+function isGeneratedSource2(path) {
   try {
     return readFileSync(path, "utf8").startsWith(GENERATED_BANNER);
   } catch {
@@ -22182,10 +23696,18 @@ function isGeneratedSource(path) {
 function isGeneratedJson(path) {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8"));
-    return parsed.version === 2 || parsed.version === "0.0.0" || parsed.sideEffects === false;
+    return parsed.version === 2 || parsed.version === "0.0.0" || parsed.sideEffects === false || parsed.manifestVersion === 1 || typeof parsed.artifactDigest === "string" && typeof parsed.manifestDigest === "string";
   } catch {
     return false;
   }
+}
+function normalizeModulePath(value) {
+  const withoutExtension = value.replace(/\.(?:m|c)?[jt]s$/, "").replace(/\\/g, "/");
+  const segments = withoutExtension.split("/");
+  if (withoutExtension.length === 0 || segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    throw new Error(`Invalid artifact module path ${JSON.stringify(value)}.`);
+  }
+  return segments.map((segment) => segment.replace(/[^A-Za-z0-9_$-]/g, "-").replace(/^-+|-+$/g, "") || "module").join("/");
 }
 
 // ../../packages/jit/src/compiler/change-layout.ts
@@ -31189,8 +32711,8 @@ function validationArtifact(schema, operation, options) {
       }
     }
   });
-  attachStandardSchema(artifact, unwrapped, plan);
   if (operation === "parse") {
+    attachStandardSchema(artifact, unwrapped, plan);
     return artifactForSchema(
       artifact,
       unwrapped
@@ -31883,11 +33405,11 @@ function format(schema) {
 function mask(schema) {
   return operationArtifact(schema, "mask", "value", "value", compileMask);
 }
-function sanitize(schema) {
+function sanitize2(schema) {
   return operationArtifact(schema, "sanitize", "value", "value", compileSanitize);
 }
 var compare2 = Object.freeze({ equal, diff, hash: hash2, changed });
-var security = Object.freeze({ mask, sanitize });
+var security = Object.freeze({ mask, sanitize: sanitize2 });
 function mapCapability(source, target, ...overrides) {
   const sourceSchema = unwrapSchema(source);
   return mappedValue(
@@ -33487,7 +35009,7 @@ function mock2(schema) {
 function mask2(schema) {
   return operationStub(schema, "mask", "value");
 }
-function sanitize2(schema) {
+function sanitize3(schema) {
   return operationStub(schema, "sanitize", "value");
 }
 function defineSort(schema) {
@@ -34307,7 +35829,7 @@ var JIT = {
   cqrs: cqrs2,
   state: state2,
   compare: Object.freeze({ equal: equal2, diff: diff2, hash: hash3, changed: changed2 }),
-  security: Object.freeze({ mask: mask2, sanitize: sanitize2 })
+  security: Object.freeze({ mask: mask2, sanitize: sanitize3 })
 };
 
 // lib/lab/compiler/entry.ts
@@ -34316,14 +35838,26 @@ function compileBindings(bindings, options) {
   const result = generate({
     ...classifyDeclarations(bindings),
     outDir: "/jit-lab",
-    format: options.format
+    format: options.format,
+    emitManifest: true,
+    ownership: "managed",
+    portableErrors: true
   });
+  if (!result.manifest || !result.receipt) {
+    return {
+      files: [],
+      skipped: result.skipped
+    };
+  }
+  const metadataPaths = /* @__PURE__ */ new Set(["jit.manifest.json", "jit.receipt.json"]);
   return {
-    files: result.files.map((path) => ({
+    files: result.files.filter((path) => !metadataPaths.has(basename(path))).map((path) => ({
       path: outputName(basename(path), options.fileName),
       source: readVirtualFile(path)
     })),
-    skipped: result.skipped
+    skipped: result.skipped,
+    manifest: result.manifest,
+    receipt: result.receipt
   };
 }
 function outputName(generated, requested) {

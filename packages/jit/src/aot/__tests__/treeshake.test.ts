@@ -83,7 +83,7 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
 
     expect(generated).toContain("const User_parse");
     expect(generated).toContain("const User_stringify");
-    expect(generated).toContain("class JITValidationError extends Error");
+    expect(generated).toContain("class ValidationError extends Error");
     expect(bundled).toContain("User_is");
     expect(bundled).not.toContain("User_parse");
     expect(bundled).not.toContain("User_stringify");

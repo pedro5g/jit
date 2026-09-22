@@ -186,7 +186,7 @@ it("keeps validation opt-in in generated DDD factories", async () => {
     expect(unvalidatedSource).not.toContain("JITValidationError");
     expect(validatedSource).toContain("invalid_format");
     expect(validatedSource).toContain("too_small");
-    expect(validatedSource).toContain("JITValidationError");
+    expect(validatedSource).toContain("ValidationError");
   } finally {
     rmSync(unvalidatedDir, { recursive: true, force: true });
     rmSync(validatedDir, { recursive: true, force: true });

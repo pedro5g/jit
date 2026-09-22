@@ -16,6 +16,7 @@ interface ValidatorSelection {
 
 export interface ValidatorArtifactEmitterContext {
   readonly js: string[];
+  readonly typescript: boolean;
   readonly skipped: SkippedOperation[];
   readonly mark: (flag: "validationError") => void;
   readonly emitValidatorBinding: (
@@ -27,9 +28,43 @@ export interface ValidatorArtifactEmitterContext {
   ) => string | undefined;
 }
 
+function emitIsArtifact(declaration: string, validatorName: string, type: string, typescript: boolean): string {
+  return typescript
+    ? `${declaration} (${validatorName}.is as ${type});`
+    : `${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`;
+}
+
+function emitSafeParseArtifact(
+  declaration: string,
+  validatorName: string,
+  type: string,
+  fastParse: boolean,
+  typescript: boolean
+): string {
+  if (fastParse) {
+    return `${declaration} (value${typescript ? ": unknown" : ""}) => ${validatorName}.is(value) ? { success: true, data: value } : ${validatorName}.safeParse(value);`;
+  }
+  return typescript
+    ? `${declaration} (${validatorName}.safeParse as ${type});`
+    : `${declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validatorName});`;
+}
+
+function emitParseArtifact(
+  declaration: string,
+  validatorName: string,
+  fastParse: boolean,
+  typescript: boolean
+): string {
+  const parameter = `value${typescript ? ": unknown" : ""}`;
+  const body = fastParse
+    ? `{ if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); }`
+    : `{ const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); }`;
+  return `${declaration} (${parameter}) => ${body};`;
+}
+
 /** Creates the AOT wrapper for standalone validation artifacts. */
 export function createValidatorArtifactEmitter(context: ValidatorArtifactEmitterContext) {
-  const { js, skipped, mark, emitValidatorBinding } = context;
+  const { js, skipped, mark, emitValidatorBinding, typescript } = context;
 
   function emitValidatorArtifact(
     binding: string,
@@ -60,20 +95,12 @@ export function createValidatorArtifactEmitter(context: ValidatorArtifactEmitter
     if (!validatorName) return undefined;
 
     if (artifact.op === "is") {
-      js.push(`${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`);
+      js.push(emitIsArtifact(declaration, validatorName, type, typescript));
     } else if (artifact.op === "safeParse") {
-      js.push(
-        fastParse
-          ? `${declaration} (value) => ${validatorName}.is(value) ? { success: true, data: value } : ${validatorName}.safeParse(value);`
-          : `${declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validatorName});`
-      );
+      js.push(emitSafeParseArtifact(declaration, validatorName, type, fastParse, typescript));
     } else {
       mark("validationError");
-      js.push(
-        fastParse
-          ? `${declaration} (value) => { if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
-          : `${declaration} (value) => { const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
-      );
+      js.push(emitParseArtifact(declaration, validatorName, fastParse, typescript));
     }
 
     return { binding, type };

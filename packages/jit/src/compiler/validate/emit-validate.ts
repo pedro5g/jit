@@ -141,7 +141,8 @@ export class ValidatorEmitter {
     readonly resolveDefaults = true,
     readonly materializeRuntimeTypes = true,
     readonly maxIssues: number | undefined = undefined,
-    validationEnabled = true
+    validationEnabled = true,
+    readonly typescript = false
   ) {
     this.mode = mode;
     this.awaited = awaited;
@@ -373,14 +374,16 @@ export class ValidatorEmitter {
 
     this.writer = new CodeWriter();
     if (this.mode === "is") {
-      this.writer.line(`function ${name}(value) {`);
+      this.writer.line(`function ${name}(value${this.typescript ? ": __JitValue" : ""}) {`);
       this.writer.indent(() => {
         this.emitInline(schema, "value", rootPath());
         this.writer.line("return true;");
       });
       this.writer.line("}");
     } else {
-      this.writer.line(`${this.awaited ? "async " : ""}function ${name}(value, issues, path) {`);
+      this.writer.line(
+        `${this.awaited ? "async " : ""}function ${name}(value${this.typescript ? ": __JitValue" : ""}, issues${this.typescript ? ": __JitValidationIssue[]" : ""}, path${this.typescript ? ": readonly PropertyKey[]" : ""})${this.typescript ? ": __JitValue" : ""} {`
+      );
       this.writer.indent(() => {
         const output = this.emitInline(schema, "value", {
           kind: "dynamic",

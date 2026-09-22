@@ -315,7 +315,7 @@ it("reconstructs nested assertion guards without a runtime callback binding", as
     throw new Error("expected nested assertion failure");
   } catch (error) {
     expect(error).toMatchObject({
-      name: "JITValidationError",
+      name: "ValidationError",
       code: "VALIDATION_FAILED",
     });
     expect(

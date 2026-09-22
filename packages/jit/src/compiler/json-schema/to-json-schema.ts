@@ -2,6 +2,7 @@ import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
 import { JITError } from "../../errors/index.js";
 import { registerArtifact } from "../../runtime/artifact-registry.js";
+import { casePattern, caseTransformPlan } from "../case-transform-plan.js";
 import { type JsonSchemaDialect, resolveDialect } from "./dialects.js";
 import type {
   JsonSchemaDocument,
@@ -423,6 +424,11 @@ class JsonSchemaEmitter {
     const out: Record<string, unknown> = {};
 
     for (const check of checks) {
+      const casePlan = caseTransformPlan(check.kind);
+      if (casePlan?.operation === "validate") {
+        out.pattern = casePattern(casePlan.style);
+        continue;
+      }
       switch (check.kind) {
         case "min":
           out.minLength = check.value;

@@ -151,7 +151,7 @@ describe("JIT streaming validation", () => {
 
     it("should apply parse transforms on end", () => {
       const Signup = JIT.object({
-        email: JIT.string().trim().lowercase().email(),
+        email: JIT.string().trim().toLowerCase().email(),
       });
       const stream = JIT.stream(Signup);
 

@@ -3,6 +3,18 @@ export function basename(path: string): string {
   return normalized.slice(normalized.lastIndexOf("/") + 1);
 }
 
+export function dirname(path: string): string {
+  const normalized = normalize(path);
+  const slash = normalized.lastIndexOf("/");
+  if (slash < 0) return ".";
+  if (slash === 0) return "/";
+  return normalized.slice(0, slash);
+}
+
+export function isAbsolute(path: string): boolean {
+  return path.startsWith("/");
+}
+
 export function join(...parts: readonly string[]): string {
   return normalize(parts.filter(Boolean).join("/"));
 }

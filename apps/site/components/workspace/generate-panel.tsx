@@ -5,6 +5,7 @@ import { useCallback, useRef, useState } from "react";
 import { CopyButton } from "@/components/code/copy-button";
 import { Select } from "@/components/ui/select";
 import type { LabCompilerRequest, LabCompilerResponse, LabCompilerResult } from "@/lib/lab/compiler/worker-types";
+import { createLabBundleMetadata, metadataFiles } from "@/lib/lab/registry/bundle-metadata";
 import { type PublishedArtifact, publishArtifact } from "@/lib/lab/registry/client";
 import { bundleUnits, topLevelNames } from "@/lib/workspace/bundle";
 import { compilationOrder, parentOf, type WorkspaceProject } from "@/lib/workspace/project";
@@ -59,6 +60,12 @@ export function GeneratePanel({ project, editor }: { project: WorkspaceProject; 
 
       const files: GeneratedFile[] = [];
       const skips: LabCompilerResult["skipped"][number][] = [];
+      const metadataUnits: {
+        readonly key: string;
+        readonly manifest: NonNullable<LabCompilerResult["manifest"]>;
+        readonly receipt: NonNullable<LabCompilerResult["receipt"]>;
+        readonly fileMap: Readonly<Record<string, string>>;
+      }[] = [];
 
       for (const file of project.files) {
         setMessage(`Type-checking ${file.path}`);
@@ -85,24 +92,46 @@ export function GeneratePanel({ project, editor }: { project: WorkspaceProject; 
 
         for (const output of result.files) files.push({ ...output, from: file.path });
         skips.push(...result.skipped);
+        if (result.manifest && result.receipt) {
+          metadataUnits.push({
+            key: file.path,
+            manifest: result.manifest,
+            receipt: result.receipt,
+            fileMap: Object.fromEntries(
+              result.manifest.files.map((manifestFile, index) => [
+                manifestFile.path,
+                result.files[index]?.path ?? manifestFile.path,
+              ])
+            ),
+          });
+        }
       }
 
       if (files.length === 0) {
         throw new Error(skips[0]?.reason ?? "No compiled functions were found in this project");
       }
 
-      setMessage("Signing the artifact");
-      const artifact = await publishArtifact(
-        files.map((file) => ({ path: file.path, source: file.source })),
-        outputRoot
+      const sourceFiles = files.map((file) => ({ path: file.path, source: file.source }));
+      const bundleMetadata = createLabBundleMetadata(
+        metadataUnits.map((unit) => ({ key: unit.key, result: unit, fileMap: unit.fileMap })),
+        sourceFiles,
+        format
       );
+      const metadata = metadataFiles(bundleMetadata);
+      const publishedFiles = [...sourceFiles, ...metadata];
+      const generatedFiles = [...files, ...metadata.map((file) => ({ ...file, from: "artifact metadata" }))];
 
-      setGenerated(files);
+      setMessage("Signing the artifact");
+      const artifact = await publishArtifact(publishedFiles, outputRoot);
+
+      setGenerated(generatedFiles);
       setSkipped(skips);
-      setSelected(files[0]?.path ?? "");
+      setSelected(generatedFiles[0]?.path ?? "");
       setPublished(artifact);
       setStatus("ready");
-      setMessage(`${files.length} file${files.length === 1 ? "" : "s"} in ${directoryCount(files)} directories`);
+      setMessage(
+        `${publishedFiles.length} file${publishedFiles.length === 1 ? "" : "s"} in ${directoryCount(generatedFiles)} directories`
+      );
     } catch (error) {
       setStatus("error");
       setMessage(error instanceof Error ? error.message : "Generation failed");

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { ArtifactOwnership } from "./aot/artifact-manifest.js";
 import {
   collectDeclarations,
   DEFAULT_SCHEMA_PATTERNS,
@@ -12,6 +13,7 @@ import {
   loadModule,
 } from "./aot/discover.js";
 import { type AotOutputFormat, generate } from "./aot/generate.js";
+import type { NamingProfile } from "./aot/semantic-name.js";
 import { getArtifact } from "./runtime/artifact-registry.js";
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -31,6 +33,10 @@ interface ResolvedAotProject {
   readonly patterns: readonly string[];
   readonly format: AotOutputFormat;
   readonly perFile: boolean;
+  readonly emitManifest: boolean;
+  readonly ownership: ArtifactOwnership;
+  readonly naming: NamingProfile;
+  readonly portableErrors: boolean;
 }
 
 const DEFAULT_OUT_DIR = "generated";
@@ -125,6 +131,10 @@ export async function previewAot(args: Readonly<Record<string, unknown>>, worksp
       outDir: tempDir,
       format: resolved.format,
       perFile: resolved.perFile,
+      emitManifest: resolved.emitManifest,
+      ownership: resolved.ownership,
+      naming: resolved.naming,
+      portableErrors: resolved.portableErrors,
     });
     const selected = selectPreviewFile(result.files, stage, target);
     const content = selected ? readLimitedFile(selected) : undefined;
@@ -161,12 +171,20 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
     outDir: resolved.outDir,
     format: resolved.format,
     perFile: resolved.perFile,
+    emitManifest: resolved.emitManifest,
+    ownership: resolved.ownership,
+    naming: resolved.naming,
+    portableErrors: resolved.portableErrors,
   });
   const files = result.files.map((file) => relativePath(resolved.root, file));
   const data = {
     outDir: relativePath(resolved.root, resolved.outDir),
     format: resolved.format,
     perFile: resolved.perFile,
+    emitManifest: resolved.emitManifest,
+    ownership: resolved.ownership,
+    naming: resolved.naming,
+    portableErrors: resolved.portableErrors,
     files,
     skipped: jsonSkipped(result.skipped),
   } as JsonValue;
@@ -380,6 +398,10 @@ function outputDescriptor(resolved: ResolvedAotProject): JsonValue {
     directory: relativePath(resolved.root, resolved.outDir) ?? resolved.outDir,
     format: resolved.format,
     perFile: resolved.perFile,
+    emitManifest: resolved.emitManifest,
+    ownership: resolved.ownership,
+    naming: resolved.naming,
+    portableErrors: resolved.portableErrors,
   };
 }
 
@@ -424,6 +446,10 @@ async function resolveAotProject(
     : resolveInside(configDir, configuredOut, "AOT output directory", root);
   const format = readEnum(args, "format", ["ts", "js"] as const) ?? validateOutputFormat(output?.format ?? "ts");
   const perFile = readOptionalBoolean(args, "perFile") ?? output?.perFile ?? false;
+  const emitManifest = readOptionalBoolean(args, "emitManifest") ?? output?.emitManifest ?? false;
+  const naming = readEnum(args, "naming", ["compact", "semantic"] as const) ?? output?.naming ?? "compact";
+  const portableErrors = readOptionalBoolean(args, "portableErrors") ?? output?.portableErrors ?? true;
+  const ownership = output?.ownership ?? "managed";
 
   return {
     root,
@@ -433,6 +459,10 @@ async function resolveAotProject(
     outDir,
     format,
     perFile,
+    emitManifest,
+    ownership,
+    naming,
+    portableErrors,
     patterns: patterns ?? DEFAULT_SCHEMA_PATTERNS,
   };
 }

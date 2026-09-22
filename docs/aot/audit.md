@@ -1,6 +1,6 @@
 # Dual JIT + AOT API Audit
 
-Updated: 2026-08-29
+Updated: 2026-09-20
 
 The continuous public guarantee is specified in
 [Runtime / Define / AOT API Parity](./api-parity.md). This document remains the
@@ -142,6 +142,23 @@ Skipped with a reason rather than emitted wrongly: a declared patch value, an
 access rule value, a collection mutation binding, a configured error factory or
 an assertion error factory that cannot be serialized ahead of time. The skip
 names the operation and the reason.
+
+## Sovereign artifact audit
+
+The current artifact gate covers the import-free generated tree, strict
+TypeScript checking, portable error selection, module/program determinism and
+manifest file/receipt integrity. Protocol ownership is boundary-specific:
+schema and parser artifacts may expose Standard Schema, while `is` and
+`safeParse` do not. Standard JSON Schema is tracked as a separate capability.
+
+The completed audit work includes the compact-versus-semantic naming
+benchmark, manifest semantic diffs for richer Declaration Protocol changes,
+and a measured source-driven versus manifest-driven agent evaluation. These
+are tooling/reporting extensions and do not add runtime registries or
+generated helper imports.
+
+The remaining audit work is intentionally outside the hot path and is listed
+below as structural follow-up rather than as a runtime requirement.
 
 Still structural/future work from the plan:
 

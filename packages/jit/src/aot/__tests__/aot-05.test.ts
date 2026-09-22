@@ -195,11 +195,11 @@ it("should generate validator flat exports with inlined regex bindings", () => {
   expect(source).toContain("const User_is_validator = /*#__PURE__*/ (() => {");
   expect(source).toContain("const User_parse_validator = /*#__PURE__*/ (() => {");
   expect(source).toContain("const User_safeParse_validator = /*#__PURE__*/ (() => {");
-  expect(source).toContain("function is(value)");
-  expect(source).toContain("function safeParse(value)");
-  expect(source).toContain("class JITValidationError extends Error");
+  expect(source).toContain("function is(value: __JitValue)");
+  expect(source).toContain("function safeParse(value: __JitValue)");
+  expect(source).toContain("class ValidationError extends Error");
   expect(source).not.toContain("import ");
-  expect(source).toContain("= /*#__PURE__*/ ((v) => v.is)(User_is_validator);");
+  expect(source).toContain("(User_is_validator.is as (value: unknown) => value is");
   expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
 
   expect(source).not.toContain("export type User =");

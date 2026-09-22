@@ -1,0 +1,42 @@
+---
+title: Agent project model
+description: Revisioned declarations and manifest queries for MCP, WebMCP and Lab hosts.
+related: /docs/aot/sovereign-artifacts, /docs/guides/mcp-server
+---
+
+The agent-facing project model is structured data for declarations, modules and
+configuration. It lowers through the same schema and semantic compiler as the
+fluent TypeScript API; it does not expose ATS, `ExecutionPlan` or compiler IR.
+
+Reads return a deterministic revision. Writes include `baseRevision`; if the
+project changed, the operation returns `REVISION_CONFLICT` and applies nothing.
+
+```json
+{
+  "version": 1,
+  "baseRevision": "R8",
+  "operations": [
+    {
+      "op": "create",
+      "name": "User",
+      "declaration": {
+        "kind": "schema",
+        "schema": {
+          "type": "object",
+          "fields": {
+            "name": { "type": "string", "checks": [{ "kind": "min", "value": 2 }] }
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+The shared `AgentToolCore` powers MCP, WebMCP and Lab adapters. Its normal
+workflow is model read/apply, compile-plan, compile, status, and exact manifest
+lookups. `jit_source_read` is separate and opt-in for debugging; semantic
+answers do not include generated source.
+
+Managed artifacts are authoritative for agent lookups only while their status
+is `clean`. Modified, missing or stale output must be regenerated or inspected.

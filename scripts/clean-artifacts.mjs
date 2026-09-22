@@ -4,6 +4,7 @@ import { join } from "node:path";
 const root = process.cwd();
 const generatedDirectories = [
   "target",
+  "packages/jit/dist",
   "packages/jit/ATS",
   "packages/jit/aot",
   "packages/jit/compiler",

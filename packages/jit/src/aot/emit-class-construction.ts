@@ -26,8 +26,8 @@ export function createClassConstructionPlan(
   const assertionCall = classAssertionCall(setup.artifact.policy);
   const create = classCreateSource(setup, storage, assertionCall);
   const hydrate = classHydrateSource(setup, storage, assertionCall);
-  const constructorSource = classConstructorSource(setup, storage, assignments);
-  const trustedMaterializer = classTrustedMaterializer(setup, storage, trustedAssignments);
+  const constructorSource = classConstructorSource(_context, setup, storage, assignments);
+  const trustedMaterializer = classTrustedMaterializer(_context, setup, storage, trustedAssignments);
   return { constructorSource, trustedMaterializer, create, hydrate };
 }
 
@@ -181,15 +181,20 @@ function classHydrateSource(
   );
 }
 
-function classConstructorSource(setup: ClassArtifactSetup, storage: ClassArtifactStorage, assignments: string): string {
+function classConstructorSource(
+  _context: ClassArtifactEmitContext,
+  setup: ClassArtifactSetup,
+  storage: ClassArtifactStorage,
+  assignments: string
+): string {
   const guard = classConstructionGuard(setup.artifact);
   const events = classEvents(setup.artifact, storage);
   const freeze = classFreeze(setup.artifact);
   if (setup.artifact.domainEvent !== undefined)
-    return `constructor(state, token) { ${guard}${assignments}${events}${freeze} }`;
+    return `constructor(state${typescriptParameter(_context, "state")}, token${typescriptParameter(_context, "token")}) { ${guard}${assignments}${events}${freeze} }`;
   const state = classConstructorState(setup, storage);
   const attachState = classAttachState(setup, storage);
-  return `constructor(input, token, validated) { ${guard}const state = token === true || validated === true ? input : ${state}; ${assignments}${attachState}${events}${freeze} }`;
+  return `constructor(input${typescriptParameter(_context, "input")}, token${typescriptParameter(_context, "token")}, validated${typescriptParameter(_context, "validated", true)}) { ${guard}const state = token === true || validated === true ? input : ${state}; ${assignments}${attachState}${events}${freeze} }`;
 }
 
 function classConstructionGuard(artifact: ClassArtifact): string {
@@ -221,18 +226,23 @@ function classFreeze(artifact: ClassArtifact): string {
 }
 
 function classTrustedMaterializer(
+  context: ClassArtifactEmitContext,
   setup: ClassArtifactSetup,
   storage: ClassArtifactStorage,
   trustedAssignments: string
 ): string {
   if (storage.slots.size > 0)
-    return `static ["__jitMaterialize"](state) { return new this(state, __construct, true); }`;
+    return `static ["__jitMaterialize"](state${typescriptParameter(context, "state")}) { return new this(state, __construct, true); }`;
   const state = storage.domainStateKey === undefined ? "" : ` instance[${storage.domainStateKey}] = state;`;
   const events = setup.artifact.aggregate
     ? ` Object.defineProperty(instance, ${storage.eventBufferKey}, { configurable: false, enumerable: false, value: [], writable: true });`
     : "";
   const freeze = setup.artifact.frozen ? " Object.freeze(instance);" : "";
-  return `static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); ${trustedAssignments}${state}${events}${freeze} return instance; }`;
+  return `static ["__jitMaterialize"](state${typescriptParameter(context, "state")}) { const instance = Object.create(this.prototype); ${trustedAssignments}${state}${events}${freeze} return instance; }`;
+}
+
+function typescriptParameter(context: ClassArtifactEmitContext, _name: string, optional = false): string {
+  return context.typescript ? `${optional ? "?" : ""}: __JitValue` : "";
 }
 
 /** Appends one complete import-free class artifact to the generated module. */
@@ -267,16 +277,19 @@ export function appendClassArtifactSource(
   if (policyLines.length > 0) context.js.push(...policyLines);
   if (members.helpers.length > 0) context.js.push(`  ${members.helpers.join("\n  ")}`);
   context.js.push(`  return class ${binding} {`);
-  context.js.push(...[...storage.slots.values()].map((slot) => `    ${slot};`));
+  if (context.typescript) context.js.push("    [key: string]: __JitValue;", "    [key: symbol]: __JitValue;");
+  context.js.push(
+    ...[...storage.slots.values()].map((slot) => `    ${slot}${context.typescript ? ": __JitValue" : ""};`)
+  );
   context.js.push(`    ${construction.constructorSource}`);
   context.js.push(`    ${construction.trustedMaterializer}`);
   if (artifact.factories.create !== false)
     context.js.push(
-      `    static ${context.classMemberName(artifact.factories.create)}(input) { ${abstractGuard(artifact, binding)}${construction.create} }`
+      `    static ${context.classMemberName(artifact.factories.create)}(input${typescriptParameter(context, "input")}) { ${abstractGuard(artifact, binding)}${construction.create} }`
     );
   if (artifact.factories.hydrate !== false)
     context.js.push(
-      `    static ${context.classMemberName(artifact.factories.hydrate)}(state) { ${abstractGuard(artifact, binding)}${construction.hydrate} }`
+      `    static ${context.classMemberName(artifact.factories.hydrate)}(state${typescriptParameter(context, "state")}) { ${abstractGuard(artifact, binding)}${construction.hydrate} }`
     );
   if (artifact.domainEvent)
     context.js.push(
@@ -287,9 +300,30 @@ export function appendClassArtifactSource(
     );
   if (setup.valueRepresentation) context.js.push("    toJSON() { return this.value; }");
   context.js.push(...members.accessorDefinitions.map((definition) => `    ${definition}`));
-  context.js.push(...members.methods.map((method) => `    ${method}`));
+  context.js.push(
+    ...members.methods.map((method) => `    ${context.typescript ? annotateClassMethod(method) : method}`)
+  );
   context.js.push("  };");
   context.js.push(`})()${assertedType === undefined ? "" : ` as unknown as ${assertedType}`};`);
+}
+
+function annotateClassMethod(method: string): string {
+  const match =
+    /^(\s*(?:(?:static|async)\s+)?(?:(?:get|set)\s+)?(?:\[[^\]]+\]|[A-Za-z_$][A-Za-z0-9_$]*)\s*)\(([^)]*)\)/.exec(
+      method
+    );
+  if (!match) return method;
+  const parameters = match[2]
+    .split(",")
+    .map((parameter) => parameter.trim())
+    .filter((parameter) => parameter.length > 0)
+    .map((parameter) => {
+      if (parameter.includes(":")) return parameter;
+      if (parameter.startsWith("...")) return `${parameter}: __JitValue[]`;
+      return `${parameter}: __JitValue`;
+    })
+    .join(", ");
+  return `${match[1]}(${parameters})${method.slice(match[0].length)}`;
 }
 
 function abstractGuard(artifact: ClassArtifact, binding: string): string {

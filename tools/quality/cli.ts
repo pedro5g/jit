@@ -11,8 +11,10 @@ import { runLocalBinary } from "./core/process.js";
 import { checkBaseline, initializeBaseline, updateBaseline, writeBaselineReport } from "./core/ratchet.js";
 import { printConsole, writeJsonReport } from "./core/reporter.js";
 import { qualityResult } from "./core/result.js";
+import { agentGate } from "./gates/agent.js";
 import { apiChallengeGate } from "./gates/api-challenge.js";
 import { architectureGate } from "./gates/architecture.js";
+import { artifactGate } from "./gates/artifact.js";
 import { codegenGate } from "./gates/codegen.js";
 import { commentsGate } from "./gates/comments.js";
 import { coverageGate } from "./gates/coverage.js";
@@ -20,6 +22,8 @@ import { deadCodeGate } from "./gates/dead-code.js";
 import { duplicationGate } from "./gates/duplication.js";
 import { integrityGate } from "./gates/integrity.js";
 import { mutationGate } from "./gates/mutation.js";
+import { packageGate } from "./gates/package.js";
+import { protocolGate } from "./gates/protocol.js";
 import { publicApiGate } from "./gates/public-api.js";
 import { structureGate } from "./gates/structure.js";
 import { testArchitectureGate } from "./gates/tests.js";
@@ -55,6 +59,30 @@ const GATES: Record<string, QualityGate> = {
     run: apiChallengeGate,
   },
   mutation: { id: "mutation", tier: "C", description: "Stryker changed and critical mutation flow", run: mutationGate },
+  artifact: {
+    id: "artifact",
+    tier: "B",
+    description: "portable artifact, manifest and standalone parity",
+    run: artifactGate,
+  },
+  agent: {
+    id: "agent",
+    tier: "B",
+    description: "declaration protocol and transport-neutral agent tools",
+    run: agentGate,
+  },
+  package: {
+    id: "package",
+    tier: "B",
+    description: "dist layout and publish tarball integrity",
+    run: packageGate,
+  },
+  protocol: {
+    id: "protocol",
+    tier: "B",
+    description: "explicit runtime/AOT protocol capability ownership",
+    run: protocolGate,
+  },
 };
 
 const command = process.argv[2] ?? "scan";
@@ -130,44 +158,56 @@ function gatesFor(commandName: string, context: ReturnType<typeof createQualityC
         ? ["tests", "coverage"]
         : commandName === "codegen"
           ? ["codegen"]
-          : commandName === "api"
-            ? ["public-api", "api", "api-challenge"]
-            : commandName === "coverage"
-              ? ["coverage"]
-              : commandName === "changed"
-                ? [
-                    "integrity",
-                    "architecture",
-                    "structure",
-                    "duplication",
-                    "dead-code",
-                    "comments",
-                    "public-api",
-                    "tests",
-                    "coverage",
-                    "codegen",
-                    "api",
-                    "api-challenge",
-                  ]
-                : commandName === "full" || commandName === "scan"
-                  ? [
-                      "integrity",
-                      "architecture",
-                      "structure",
-                      "duplication",
-                      "dead-code",
-                      "comments",
-                      "public-api",
-                      "tests",
-                      "coverage",
-                      "codegen",
-                      "api",
-                      "api-challenge",
-                      "mutation",
-                    ]
-                  : commandName === "block"
-                    ? relevantBlockGates(context)
-                    : ["integrity", "architecture", "structure", "comments", "public-api", "api"];
+          : commandName === "artifact"
+            ? ["artifact"]
+            : commandName === "agent"
+              ? ["agent"]
+              : commandName === "package"
+                ? ["package"]
+                : commandName === "protocol"
+                  ? ["protocol"]
+                  : commandName === "api"
+                    ? ["public-api", "api", "api-challenge"]
+                    : commandName === "coverage"
+                      ? ["coverage"]
+                      : commandName === "changed"
+                        ? [
+                            "integrity",
+                            "architecture",
+                            "structure",
+                            "duplication",
+                            "dead-code",
+                            "comments",
+                            "public-api",
+                            "tests",
+                            "coverage",
+                            "codegen",
+                            "api",
+                            "api-challenge",
+                          ]
+                        : commandName === "full" || commandName === "scan"
+                          ? [
+                              "integrity",
+                              "architecture",
+                              "structure",
+                              "duplication",
+                              "dead-code",
+                              "comments",
+                              "public-api",
+                              "tests",
+                              "coverage",
+                              "codegen",
+                              "api",
+                              "api-challenge",
+                              "artifact",
+                              "agent",
+                              "protocol",
+                              "package",
+                              "mutation",
+                            ]
+                          : commandName === "block"
+                            ? relevantBlockGates(context)
+                            : ["integrity", "architecture", "structure", "comments", "public-api", "api"];
   return names.map((name) => GATES[name]).filter((gate): gate is QualityGate => Boolean(gate));
 }
 
@@ -176,6 +216,18 @@ function relevantBlockGates(context: ReturnType<typeof createQualityContext>): s
   const names = new Set(["integrity", "architecture", "structure", "comments", "public-api", "tests"]);
   if (files.some((file) => file.startsWith("packages/jit/src/compiler/") || file.startsWith("packages/jit/src/aot/")))
     names.add("codegen");
+  if (files.some((file) => file.startsWith("packages/jit/src/aot/"))) names.add("artifact");
+  if (files.some((file) => file.startsWith("packages/jit/src/tooling/") || file === "packages/jit/src/mcp.ts"))
+    names.add("agent");
+  if (
+    files.some(
+      (file) =>
+        file.startsWith("packages/jit/src/aot/") ||
+        file.startsWith("packages/jit/src/factories/") ||
+        file.startsWith("packages/jit/src/compiler/")
+    )
+  )
+    names.add("protocol");
   if (
     files.some(
       (file) =>

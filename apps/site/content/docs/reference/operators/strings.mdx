@@ -41,6 +41,22 @@ CanonicalEmail.is(" Ada@Example.com "); // false: not canonical yet
 CanonicalEmail.parse(" Ada@Example.com "); // "ada@example.com"
 ```
 
+Case rules use the same distinction for every supported style:
+
+| Validation | Transform |
+| --- | --- |
+| `lowercase()` | `toLowerCase()` |
+| `uppercase()` | `toUpperCase()` |
+| `camelCase()` | `toCamelCase()` |
+| `pascalCase()` | `toPascalCase()` |
+| `snakeCase()` | `toSnakeCase()` |
+| `kebabCase()` | `toKebabCase()` |
+| `upperSnakeCase()` | `toUpperSnakeCase()` |
+
+Validation accepts only an already canonical value. Transform methods rewrite
+the value during parse operations; `is()` remains a zero-materialization
+validation path and does not apply the rewrite.
+
 Parsers return the original input reference when no node requires rebuilding.
 Transforms make the build path explicit and may allocate the changed string or
 parent object.

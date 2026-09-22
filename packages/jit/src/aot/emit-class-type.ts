@@ -20,10 +20,11 @@ export function classArtifactType(context: ArtifactTypeContext, artifact: ClassA
   const managedFields = new Set((artifact.managedFields ?? []).map((managed) => managed.field));
   const createInput = emitBoundaryType(artifact.schema, "create", context.typeNames, managedFields);
   const hydrateInput = emitBoundaryType(artifact.schema, "hydrate", context.typeNames);
+  const trustedInput = artifact.representation === "value" ? hydrateInput : value;
   const createParameters = acceptsMissingBoundary(artifact.schema, managedFields)
     ? `...args: [] | [input: ${createInput}]`
     : `input: ${createInput}`;
-  const factories = classFactories(artifact, createParameters, hydrateInput);
+  const factories = classFactories(artifact, createParameters, hydrateInput, trustedInput);
   const construct =
     artifact.construction === "factory"
       ? `(abstract new (state: ${value}) => ${instance})`
@@ -111,8 +112,14 @@ function addAggregateMixin(context: ArtifactTypeContext, artifact: ClassArtifact
   }
 }
 
-function classFactories(artifact: ClassArtifact, createParameters: string, hydrateInput: string): string[] {
+function classFactories(
+  artifact: ClassArtifact,
+  createParameters: string,
+  hydrateInput: string,
+  trustedInput: string
+): string[] {
   return [
+    `["__jitMaterialize"]<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${trustedInput}): InstanceType<TThis>;`,
     artifact.factories.create === false
       ? ""
       : `${JSON.stringify(artifact.factories.create)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, ${createParameters}): InstanceType<TThis>;`,

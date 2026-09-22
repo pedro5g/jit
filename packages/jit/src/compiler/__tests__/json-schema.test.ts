@@ -43,6 +43,23 @@ describe("JIT json schema — to", () => {
     expect(JIT.jsonSchema.to(JIT.string().nullable(), { dialect: false })).toEqual({ type: ["string", "null"] });
   });
 
+  it("should describe validation case checks as portable patterns", () => {
+    expect(
+      JIT.jsonSchema.to(
+        JIT.object({
+          handle: JIT.string().camelCase(),
+          code: JIT.string().upperSnakeCase(),
+        }),
+        { dialect: false }
+      )
+    ).toMatchObject({
+      properties: {
+        handle: { pattern: "^[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)*$" },
+        code: { pattern: "^[A-Z0-9]+(?:_[A-Z0-9]+)*$" },
+      },
+    });
+  });
+
   describe("targets", () => {
     const Schema = JIT.object({
       kind: JIT.literal("a"),

@@ -7,7 +7,7 @@ describe("native JSON parse execution", () => {
     name: JIT.string().trim().min(2),
     active: JIT.boolean(),
     role: JIT.enum(["admin", "member"]),
-    tags: JIT.array(JIT.string().lowercase()).max(3),
+    tags: JIT.array(JIT.string().toLowerCase()).max(3),
     note: JIT.string().optional(),
     plan: JIT.string().default("free"),
   });

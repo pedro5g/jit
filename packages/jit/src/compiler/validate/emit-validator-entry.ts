@@ -25,6 +25,8 @@ export interface EmitValidatorOptions {
   readonly validateChecks?: boolean;
   /** Stop the diagnostic traversal as soon as this many issues exist. */
   readonly maxIssues?: number;
+  /** Add TypeScript annotations for a standalone typed artifact. */
+  readonly typescript?: boolean;
 }
 
 function emitFreezeOutput(writer: CodeWriter, output: string): void {
@@ -57,6 +59,7 @@ interface ValidatorSettings {
   readonly materializeRuntimeTypes: boolean;
   readonly validateChecks: boolean;
   readonly maxIssues: number | undefined;
+  readonly typescript: boolean;
 }
 
 function resolveValidatorSettings(options: EmitValidatorOptions): ValidatorSettings {
@@ -69,6 +72,7 @@ function resolveValidatorSettings(options: EmitValidatorOptions): ValidatorSetti
     materializeRuntimeTypes: options.materializeRuntimeTypes ?? true,
     validateChecks: options.validateChecks ?? true,
     maxIssues: options.maxIssues,
+    typescript: options.typescript ?? false,
   };
 }
 
@@ -83,7 +87,8 @@ function createParseEmitter(
       recursive,
       settings.resolveDefaults,
       settings.materializeRuntimeTypes,
-      settings.validateChecks
+      settings.validateChecks,
+      settings.typescript
     );
   if (!settings.emitSafeParse) return undefined;
   return emitDiagnosticEmitter(
@@ -93,7 +98,10 @@ function createParseEmitter(
     settings.materializeRuntimeTypes,
     settings.validateChecks,
     settings.maxIssues,
-    rootHasReadonly(schema)
+    rootHasReadonly(schema),
+    undefined,
+    false,
+    settings.typescript
   );
 }
 
@@ -113,7 +121,8 @@ function createAsyncEmitter(
     settings.maxIssues,
     rootHasReadonly(schema),
     parseEmitter,
-    true
+    true,
+    settings.typescript
   );
 }
 
@@ -130,11 +139,12 @@ function createIsEmitter(
     settings.resolveDefaults,
     settings.materializeRuntimeTypes,
     undefined,
-    settings.validateChecks
+    settings.validateChecks,
+    settings.typescript
   );
   emitter.markRecursive(recursive);
   for (const value of sourceEmitter?.bindings().values ?? []) emitter.bind(value);
-  emitter.writer.line("function is(value) {");
+  emitter.writer.line(`function is(value${settings.typescript ? ": __JitValue" : ""}) {`);
   emitter.writer.indent(() => {
     emitter.emitNode(schema, "value", rootPath());
     emitter.writer.line("return true;");
@@ -154,7 +164,7 @@ function assembleValidator(
     Boolean(emitter)
   );
   const bindings = (isEmitter ?? asyncEmitter ?? parseEmitter)?.bindings() ?? { names: [], values: [] };
-  const helperBlocks = emitters.flatMap((emitter) => emitter.helpers());
+  const helperBlocks = [...new Set(emitters.flatMap((emitter) => emitter.helpers()))];
   const helperSource = helperBlocks.length > 0 ? `${helperBlocks.join("\n")}\n` : "";
   const functionSource = emitters.map((emitter) => emitter.writer.toString()).join("\n");
   const returnedEntries = [
@@ -175,7 +185,8 @@ function emitParseEmitter(
   recursive: ReadonlySet<ATS.AnyTypeSchema>,
   resolveDefaults: boolean,
   materializeRuntimeTypes: boolean,
-  validateChecks: boolean
+  validateChecks: boolean,
+  typescript: boolean
 ): ValidatorEmitter {
   const emitter = new ValidatorEmitter(
     "fast",
@@ -183,10 +194,11 @@ function emitParseEmitter(
     resolveDefaults,
     materializeRuntimeTypes,
     undefined,
-    validateChecks
+    validateChecks,
+    typescript
   );
   emitter.markRecursive(recursive);
-  emitter.writer.line("function parse(value) {");
+  emitter.writer.line(`function parse(value${typescript ? ": __JitValue" : ""})${typescript ? ": __JitValue" : ""} {`);
   emitter.writer.indent(() => {
     const output = emitter.emitNode(schema, "value", rootPath());
     emitter.writer.line(`return ${output};`);
@@ -204,7 +216,8 @@ function emitDiagnosticEmitter(
   maxIssues: number | undefined,
   freezesOutput: boolean,
   sourceEmitter?: ValidatorEmitter,
-  awaited = false
+  awaited = false,
+  typescript = false
 ): ValidatorEmitter {
   const emitter = new ValidatorEmitter(
     "parse",
@@ -212,14 +225,25 @@ function emitDiagnosticEmitter(
     resolveDefaults,
     materializeRuntimeTypes,
     maxIssues,
-    validateChecks
+    validateChecks,
+    typescript
   );
   emitter.markRecursive(recursive);
   if (sourceEmitter) for (const value of sourceEmitter.bindings().values) emitter.bind(value);
 
-  emitter.writer.line(`${awaited ? "async " : ""}function ${awaited ? "safeParseAsync" : "safeParse"}(value) {`);
+  emitter.writer.line(
+    `${awaited ? "async " : ""}function ${awaited ? "safeParseAsync" : "safeParse"}(value${typescript ? ": __JitValue" : ""})${typescript ? ": __JitSafeParse<__JitValue>" : ""} {`
+  );
   emitter.writer.indent(() => {
-    emitter.writer.line(recursive.size === 0 ? "let issues;" : "let issues = [];");
+    emitter.writer.line(
+      recursive.size === 0
+        ? typescript
+          ? "let issues: __JitValidationIssue[] | undefined;"
+          : "let issues;"
+        : typescript
+          ? "let issues: __JitValidationIssue[] = [];"
+          : "let issues = [];"
+    );
     if (maxIssues !== undefined) emitter.writer.line("try {");
     const emitBody = () => {
       const output = emitter.emitNode(schema, "value", rootPath());

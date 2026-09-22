@@ -10,10 +10,12 @@ export interface ValidatorBindingSelection {
   readonly materializeRuntimeTypes?: boolean;
   readonly validateChecks?: boolean;
   readonly maxIssues?: number;
+  readonly typescript?: boolean;
 }
 
 export interface ValidatorBindingEmitterContext {
   readonly js: string[];
+  readonly ts: boolean;
   readonly skipped: SkippedOperation[];
   readonly classBindings: ReadonlyMap<unknown, string>;
   readonly assertionBindings: ReadonlyMap<unknown, string>;
@@ -59,6 +61,7 @@ function emitValidatorBinding(
         : { materializeRuntimeTypes: selection.materializeRuntimeTypes }),
       ...(selection.maxIssues === undefined ? {} : { maxIssues: selection.maxIssues }),
       ...(selection.validateChecks === undefined ? {} : { validateChecks: selection.validateChecks }),
+      typescript: selection.typescript ?? context.ts,
     })
   );
   if (!validator) return undefined;

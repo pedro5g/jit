@@ -55,6 +55,11 @@ export const UserModel = {
 - `parse(value)` returns typed data or throws `JITValidationError`.
 - `safeParse(value)` returns `{ success: true, data }` or
   `{ success: false, issues }`.
+- `parse(value)` is the Standard Schema boundary for `unknown` to a validated
+  value and exposes `parse["~standard"]`. `is(value)` is a boolean type guard
+  and `safeParse(value)` is a result envelope; neither exposes `~standard`.
+- A JSON parsing pipeline that ends in `.validate()` has its own adapter because
+  it accepts text, not the schema's direct input.
 - Async variants compile only when the schema contains promise wrappers.
 
 Prefer `is()` in hot filters and request gates when you do not need detailed

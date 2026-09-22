@@ -9,6 +9,7 @@ export * from "./assertion.js";
 export * from "./binary-rowset.js";
 export * from "./cache-key.js";
 export * from "./canonical.js";
+export * from "./case-transform-plan.js";
 export * from "./changed.js";
 export * from "./clone/index.js";
 export * from "./clone.js";

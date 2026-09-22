@@ -28,7 +28,7 @@ function run(command: string, args: string[], cwd: string, input?: string): stri
 }
 
 try {
-  const packed = JSON.parse(run("npm", ["pack", "--json", "--pack-destination", tempDir], packageDir)) as PackResult[];
+  const packed = JSON.parse(run("pnpm", ["pack", "--json", "--pack-destination", tempDir], packageDir)) as PackResult[];
   const result = packed[0];
   if (!result) throw new Error("npm pack returned no package");
 
@@ -46,7 +46,7 @@ try {
   const consumerDir = join(tempDir, "consumer");
   mkdirSync(consumerDir);
   writeFileSync(join(consumerDir, "package.json"), '{"private":true,"type":"module"}\n');
-  run("npm", ["install", "--ignore-scripts", join(tempDir, result.filename)], consumerDir);
+  run("pnpm", ["add", "--ignore-scripts", join(tempDir, result.filename)], consumerDir);
 
   writeFileSync(
     join(consumerDir, "esm.mjs"),
@@ -61,7 +61,7 @@ try {
 
   const cli = run(
     process.execPath,
-    [join(consumerDir, "node_modules/@jit-compiler/jit/cli.js"), "--help"],
+    [join(consumerDir, "node_modules/@jit-compiler/jit/dist/cli.js"), "--help"],
     consumerDir
   );
   if (!cli.includes("jit generate")) throw new Error("packed CLI help did not load correctly");
@@ -70,7 +70,7 @@ try {
 
   const mcpOutput = run(
     process.execPath,
-    [join(consumerDir, "node_modules/@jit-compiler/jit/mcp.js")],
+    [join(consumerDir, "node_modules/@jit-compiler/jit/dist/mcp.js")],
     consumerDir,
     `${JSON.stringify({
       jsonrpc: "2.0",
@@ -119,7 +119,7 @@ try {
   if (manifest.name !== "@jit-compiler/jit") {
     throw new Error(`packed npm package name is invalid: ${JSON.stringify(manifest.name)}`);
   }
-  if (manifest.bin?.jit !== "cli.js" || manifest.bin["jit-mcp"] !== "mcp.js") {
+  if (manifest.bin?.jit !== "dist/cli.js" || manifest.bin["jit-mcp"] !== "dist/mcp.js") {
     throw new Error(`packed bin map is invalid: ${JSON.stringify(manifest.bin)}`);
   }
   console.log(

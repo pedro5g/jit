@@ -75,16 +75,27 @@ client can distinguish read-only calls from writes.
 | `jit_project_doctor`  | No            | Node, config, declarations, artifacts, output settings        |
 | `jit_docs_search`     | No            | Markdown search with file and line results                    |
 | `jit_aot_inspect`     | No            | Declared types, artifact objects, artifacts, sources, output  |
-| `jit_aot_preview`     | No            | Temporary build; returns the generated source                 |
+| `jit_aot_preview`     | No            | Temporary build; summary by default, source only when asked  |
 | `jit_aot_generate`    | Yes           | Writes the configured import-free generated package           |
+| `jit_model_get`       | No            | Read a filtered Declaration Protocol V1 project               |
+| `jit_model_apply`     | Yes           | Apply a revision-checked structured model patch               |
+| `jit_compile_plan`    | No            | Preview affected declarations, modules and semantic changes   |
+| `jit_compile`         | Yes           | Compile a managed artifact and return compact digests         |
+| `jit_artifact_status` | No            | Verify manifest, receipt and generated file hashes             |
+| `jit_artifact_find`   | No            | Locate generated exports from clean manifest metadata          |
+| `jit_artifact_describe` | No          | Describe a generated contract without implementation source    |
+| `jit_artifact_dependencies` | No     | List forward and reverse generated dependencies                |
+| `jit_artifact_materialize` | Yes    | Copy a clean managed tree and its metadata to an explicit target |
+| `jit_source_read`     | No            | Explicit source retrieval for debugging or review only         |
 
 ### Recommended AOT Sequence
 
 1. Call `jit_project_doctor` to catch missing config, declarations, or exports.
 2. Call `jit_aot_inspect` to verify that every output is explicitly selected.
-3. Call `jit_aot_preview` with `stage: "source"` to review the generated code.
-   TypeScript output carries its public types in that same source, so there is
-   no separate types artifact to inspect.
+3. Call `jit_aot_preview` for a semantic summary. Add `stage: "source"` only
+   when a human review explicitly needs generated code. TypeScript output
+   carries its public types in that same source, so there is no separate types
+   artifact to inspect.
 4. Call `jit_aot_generate` only after review, with `{ "write": true }`.
 5. Run the project's tests and bundle/tree-shaking checks.
 
@@ -119,6 +130,13 @@ output is split per declaration file.
 
 Config remains the source of defaults. Tool arguments may override `files`,
 `patterns`, `outDir`, `format`, and `perFile` for one call.
+
+For agent-native model work, use `jit_model_get` and `jit_model_apply` with
+the returned revision, then preview `jit_compile_plan` before
+`jit_compile`. After compiling, `jit_artifact_status` must be `clean`
+before `jit_artifact_find`, `jit_artifact_describe`, or dependency queries
+are treated as current. `jit_source_read` is not part of the normal
+semantic workflow.
 
 ## Resources
 
@@ -164,10 +182,11 @@ resolved and checked against that boundary. Existing symlinks are canonicalized
 and checked again, preventing a link inside the project from exposing or
 overwriting an outside path.
 
-Only `jit_aot_generate` writes files. Its MCP annotations mark it as mutating,
-destructive (because configured generated files may be replaced), and
-idempotent. JIT's generator cleans only known generated artifacts, but clients
-should still request user approval according to their own MCP tool policy.
+`jit_aot_generate`, `jit_model_apply`, and `jit_compile` are write-scoped.
+Their MCP annotations mark them as mutating, and hosts should require explicit
+approval according to their own policy. JIT's generator cleans only known
+generated artifacts, but a managed file with drift must be reported before its
+manifest can be trusted.
 
 AOT declaration modules are executable project code. Inspect, preview, doctor,
 and generate load those modules in the local Node process, exactly as the CLI

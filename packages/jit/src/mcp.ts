@@ -17,6 +17,8 @@ import {
   searchDocs,
 } from "./mcp-project.js";
 import { JIT } from "./runtime.js";
+import { createAgentToolCore } from "./tooling/agent-tool-core.js";
+import type { JsonValue as ToolJsonValue } from "./tooling/contracts.js";
 
 /**
  * JIT MCP server.
@@ -30,6 +32,12 @@ const SERVER_NAME = "jit-mcp";
 const SERVER_VERSION = "2.0.0";
 const LATEST_PROTOCOL_VERSION = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([LATEST_PROTOCOL_VERSION]);
+const AGENT_TOOL_CORE = createAgentToolCore();
+
+const RESULT_SCHEMA: JsonValue = {
+  type: "object",
+  additionalProperties: true,
+};
 
 interface JsonRpcRequest {
   readonly jsonrpc: "2.0";
@@ -76,11 +84,6 @@ class JsonRpcError extends Error {
   }
 }
 
-const RESULT_SCHEMA: JsonValue = {
-  type: "object",
-  additionalProperties: true,
-};
-
 const AOT_PROPERTIES = {
   root: optionalString("Project root below the MCP workspace. Defaults to the workspace root."),
   files: optionalStringArray("Explicit declaration files relative to the project root."),
@@ -95,6 +98,9 @@ const OUTPUT_PROPERTIES = {
     description: "Generated source format. Defaults to config or ts.",
   },
   perFile: optionalBoolean("Emit one module per declaration file instead of a single index."),
+  emitManifest: optionalBoolean("Emit hash-bound manifest and compilation receipt sidecars."),
+  naming: { type: "string", enum: ["compact", "semantic"], description: "Generated helper naming profile." },
+  portableErrors: optionalBoolean("Use structural portable error names in generated code."),
 } as const;
 
 const TOOLS: readonly ToolDefinition[] = [
@@ -185,6 +191,23 @@ const TOOLS: readonly ToolDefinition[] = [
       openWorldHint: false,
     }
   ),
+  ...AGENT_TOOL_CORE.list().map((contract) =>
+    tool(
+      contract.name,
+      contract.name.replace("jit_", "").replace(/_/g, " "),
+      contract.description,
+      contract.inputSchema,
+      contract.mode === "read"
+        ? readOnlyAnnotations()
+        : {
+            readOnlyHint: false,
+            destructiveHint: contract.mode === "write",
+            idempotentHint: true,
+            openWorldHint: false,
+          },
+      contract.outputSchema
+    )
+  ),
 ];
 
 const PROMPTS: readonly JsonValue[] = [
@@ -247,6 +270,14 @@ export async function callTool(params: unknown, cwd: string): Promise<JsonValue>
     if (name === "jit_aot_inspect") return toolResult(await inspectAot(args, cwd));
     if (name === "jit_aot_preview") return toolResult(await previewAot(args, cwd));
     if (name === "jit_aot_generate") return toolResult(await generateAot(args, cwd));
+    if (
+      name.startsWith("jit_artifact_") ||
+      name.startsWith("jit_model_") ||
+      name === "jit_compile_plan" ||
+      name === "jit_compile"
+    ) {
+      return toolResult(await AGENT_TOOL_CORE.execute(name, args as unknown as ToolJsonValue, { root: cwd }));
+    }
     throw new JsonRpcError(-32602, `Unknown JIT tool "${name}".`);
   } catch (error) {
     if (error instanceof JsonRpcError) throw error;
@@ -386,9 +417,10 @@ function tool(
   title: string,
   description: string,
   inputSchema: JsonValue,
-  annotations: JsonValue
+  annotations: JsonValue,
+  outputSchema: JsonValue = RESULT_SCHEMA
 ): ToolDefinition {
-  return { name, title, description, inputSchema, outputSchema: RESULT_SCHEMA, annotations };
+  return { name, title, description, inputSchema, outputSchema, annotations };
 }
 
 function readOnlyAnnotations(): JsonValue {

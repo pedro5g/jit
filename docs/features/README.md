@@ -52,6 +52,8 @@ work and for production performance. Each page explains:
 - [Benchmarks, memory, and load testing](./benchmarks-memory-load.md)
 - [Executable runtime and AOT examples](./examples.md)
 - [MCP server for coding agents](./mcp-server.md)
+- [Agent project model](./agent-project-model.md)
+- [Case validation and transforms](./case-transforms.md)
 - [Documentation copilot coverage planning](./copilot-coverage.md)
 
 ## Find A Feature By Goal

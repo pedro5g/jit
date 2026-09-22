@@ -105,6 +105,8 @@ export interface RulesEmitOptions {
   readonly ruleId?: string | undefined;
   /** Source identifiers replacing outcome bindings, used by AOT co-emission. */
   readonly bindingNames?: ReadonlyMap<string, string> | undefined;
+  /** Add structural annotations when the source is embedded in a TypeScript artifact. */
+  readonly typescript?: boolean | undefined;
 }
 
 type RuleDeclarationOutcome = Omit<RuleOutcomeDescriptor, "fields" | "binding"> & {
@@ -448,11 +450,25 @@ const SUBJECT = "subject";
 const INPUTS = "inputs";
 
 /** A plan without declared inputs never receives an inputs parameter it cannot read. */
-function paramList(descriptor: RulesDescriptor, head: string, tail?: string): string {
-  const parts = [head];
+function parameterSource(name: string, typescript: boolean, many: boolean): string {
+  if (!typescript) return name;
 
-  if (descriptor.inputs !== undefined) parts[parts.length] = INPUTS;
-  if (tail !== undefined) parts[parts.length] = tail;
+  if (name === "consume") {
+    return many
+      ? "consume: (rule: __JitValue, outcome: __JitValue, index: number) => void"
+      : "consume: (rule: __JitValue, outcome: __JitValue) => void";
+  }
+  return `${name}: __JitValue`;
+}
+
+function paramList(descriptor: RulesDescriptor, head: string, tail?: string, options: RulesEmitOptions = {}): string {
+  const many = head === "list";
+  const parts = head.split(", ").map((name) => parameterSource(name, options.typescript === true, many));
+
+  if (descriptor.inputs !== undefined) {
+    parts[parts.length] = parameterSource(INPUTS, options.typescript === true, many);
+  }
+  if (tail !== undefined) parts[parts.length] = parameterSource(tail, options.typescript === true, many);
   return parts.join(", ");
 }
 
@@ -658,10 +674,10 @@ function emitBindings(writer: CodeWriter, bindings: readonly SharedBinding[]): v
 }
 
 /** Emits deterministic source for the JIT emit rules test source operation. */
-export function emitRulesTestSource(descriptor: RulesDescriptor): string {
+export function emitRulesTestSource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const writer = new CodeWriter();
 
-  writer.line(`function rulesTest(${paramList(descriptor, "rule, subject")}) {`);
+  writer.line(`function rulesTest(${paramList(descriptor, "rule, subject", undefined, options)}) {`);
   writer.indent(() => {
     writer.line("switch (rule) {");
     writer.indent(() => {
@@ -679,17 +695,21 @@ export function emitRulesTestSource(descriptor: RulesDescriptor): string {
 }
 
 /** Emits deterministic source for the JIT emit rules predicate source operation. */
-export function emitRulesPredicateSource(descriptor: RulesDescriptor, ruleId: string): string {
+export function emitRulesPredicateSource(
+  descriptor: RulesDescriptor,
+  ruleId: string,
+  options: RulesEmitOptions = {}
+): string {
   const rule = descriptor.rules.find((candidate) => candidate.id === ruleId);
 
   if (rule === undefined) {
     throw new JITError("INVALID_OPERATION", `unknown rule ${JSON.stringify(ruleId)}`);
   }
-  return `function rulesPredicate(${paramList(descriptor, SUBJECT)}) {\n  return ${emitCondition(rule, EMPTY_PLAN)};\n}\n`;
+  return `function rulesPredicate(${paramList(descriptor, SUBJECT, undefined, options)}) {\n  return ${emitCondition(rule, EMPTY_PLAN)};\n}\n`;
 }
 
 /** Emits deterministic source for the JIT emit rules some source operation. */
-export function emitRulesSomeSource(descriptor: RulesDescriptor): string {
+export function emitRulesSomeSource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const rules = descriptor.rules.filter((rule) => rule.constant !== false);
   const always = rules.some((rule) => rule.constant === true);
   const expression = always
@@ -698,14 +718,14 @@ export function emitRulesSomeSource(descriptor: RulesDescriptor): string {
       ? "false"
       : rules.map((rule) => `(${emitCondition(rule, EMPTY_PLAN)})`).join(" || ");
 
-  return `function rulesSome(${paramList(descriptor, SUBJECT)}) {\n  return ${expression};\n}\n`;
+  return `function rulesSome(${paramList(descriptor, SUBJECT, undefined, options)}) {\n  return ${expression};\n}\n`;
 }
 
 /** Emits deterministic source for the JIT emit rules first source operation. */
-export function emitRulesFirstSource(descriptor: RulesDescriptor): string {
+export function emitRulesFirstSource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const writer = new CodeWriter();
 
-  writer.line(`function rulesFirst(${paramList(descriptor, SUBJECT)}) {`);
+  writer.line(`function rulesFirst(${paramList(descriptor, SUBJECT, undefined, options)}) {`);
   writer.indent(() => {
     for (const rule of orderedRules(descriptor)) {
       if (rule.constant === true) {
@@ -722,16 +742,16 @@ export function emitRulesFirstSource(descriptor: RulesDescriptor): string {
 }
 
 /** Emits deterministic source for the JIT emit rules match source operation. */
-export function emitRulesMatchSource(descriptor: RulesDescriptor): string {
+export function emitRulesMatchSource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const rules = orderedRules(descriptor);
   const plan = planShared(rules);
   const writer = new CodeWriter();
 
-  writer.line(`function rulesMatch(${paramList(descriptor, SUBJECT)}) {`);
+  writer.line(`function rulesMatch(${paramList(descriptor, SUBJECT, undefined, options)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
-    writer.line("const out = [];");
+    writer.line(options.typescript === true ? "const out: __JitValue[] = [];" : "const out = [];");
     writer.line("let j = 0;");
     for (const rule of rules) {
       const id = JSON.stringify(rule.id);
@@ -756,11 +776,11 @@ export function emitRulesRunSource(descriptor: RulesDescriptor, options: RulesEm
   const plan = planShared(rules);
   const writer = new CodeWriter();
 
-  writer.line(`function rulesRun(${paramList(descriptor, SUBJECT)}) {`);
+  writer.line(`function rulesRun(${paramList(descriptor, SUBJECT, undefined, options)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
-    writer.line("const out = [];");
+    writer.line(options.typescript === true ? "const out: __JitValue[] = [];" : "const out = [];");
     writer.line("let j = 0;");
     for (const rule of rules) {
       const outcome = emitOutcome(rule, plan, options);
@@ -780,7 +800,7 @@ export function emitRulesVisitorSource(descriptor: RulesDescriptor, options: Rul
   const plan = planShared(rules);
   const writer = new CodeWriter();
 
-  writer.line(`function rulesVisit(${paramList(descriptor, SUBJECT, "consume")}) {`);
+  writer.line(`function rulesVisit(${paramList(descriptor, SUBJECT, "consume", options)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
@@ -803,7 +823,7 @@ export function emitRulesIteratorSource(descriptor: RulesDescriptor, options: Ru
   const plan = planShared(rules);
   const writer = new CodeWriter();
 
-  writer.line(`function* rulesIterate(${paramList(descriptor, SUBJECT)}) {`);
+  writer.line(`function* rulesIterate(${paramList(descriptor, SUBJECT, undefined, options)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
@@ -847,9 +867,9 @@ export function emitRulesManySource(descriptor: RulesDescriptor, options: RulesE
   const plan = planShared(rules, true);
   const writer = new CodeWriter();
 
-  writer.line(`function rulesMany(${paramList(descriptor, "list")}) {`);
+  writer.line(`function rulesMany(${paramList(descriptor, "list", undefined, options)}) {`);
   writer.indent(() => {
-    writer.line("const out = [];");
+    writer.line(options.typescript === true ? "const out: __JitValue[] = [];" : "const out = [];");
     writer.line("let j = 0;");
     emitManyBody(writer, rules, plan, options, (_rule, outcome) => `out[j++] = ${outcome};`);
     writer.line("return out;");
@@ -864,7 +884,7 @@ export function emitRulesManyVisitorSource(descriptor: RulesDescriptor, options:
   const plan = planShared(rules, true);
   const writer = new CodeWriter();
 
-  writer.line(`function rulesManyVisit(${paramList(descriptor, "list", "consume")}) {`);
+  writer.line(`function rulesManyVisit(${paramList(descriptor, "list", "consume", options)}) {`);
   writer.indent(() => {
     writer.line("let n = 0;");
     emitManyBody(
@@ -886,7 +906,7 @@ export function emitRulesManyIteratorSource(descriptor: RulesDescriptor, options
   const plan = planShared(rules, true);
   const writer = new CodeWriter();
 
-  writer.line(`function* rulesManyIterate(${paramList(descriptor, "list")}) {`);
+  writer.line(`function* rulesManyIterate(${paramList(descriptor, "list", undefined, options)}) {`);
   writer.indent(() => {
     emitManyBody(writer, rules, plan, options, (_rule, outcome) => `yield ${outcome};`);
   });
@@ -895,16 +915,16 @@ export function emitRulesManyIteratorSource(descriptor: RulesDescriptor, options
 }
 
 /** Emits deterministic source for the JIT emit rules explain source operation. */
-export function emitRulesExplainSource(descriptor: RulesDescriptor): string {
+export function emitRulesExplainSource(descriptor: RulesDescriptor, options: RulesEmitOptions = {}): string {
   const rules = orderedRules(descriptor);
   const plan = planShared(rules);
   const writer = new CodeWriter();
 
-  writer.line(`function rulesExplain(${paramList(descriptor, SUBJECT)}) {`);
+  writer.line(`function rulesExplain(${paramList(descriptor, SUBJECT, undefined, options)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
-    writer.line("const matched = [];");
+    writer.line(options.typescript === true ? "const matched: __JitValue[] = [];" : "const matched = [];");
     writer.line("let j = 0;");
     for (const rule of rules) {
       const id = JSON.stringify(rule.id);
@@ -912,7 +932,11 @@ export function emitRulesExplainSource(descriptor: RulesDescriptor): string {
       if (rule.constant === true) writer.line(`matched[j++] = ${id};`);
       else writer.line(`if (${emitCondition(rule, plan)}) matched[j++] = ${id};`);
     }
-    writer.line(`return { matched, evaluated: ${JSON.stringify(rules.map((rule) => rule.id))} };`);
+    writer.line(
+      options.typescript === true
+        ? `return { matched, evaluated: ${JSON.stringify(rules.map((rule) => rule.id))} as readonly __JitValue[] };`
+        : `return { matched, evaluated: ${JSON.stringify(rules.map((rule) => rule.id))} };`
+    );
   });
   writer.line("}");
   return writer.toString();
@@ -951,17 +975,17 @@ function emitRulesPlanSource(descriptor: RulesDescriptor, options: RulesEmitOpti
   writer.line("(() => {");
   writer.indent(() => {
     for (const source of [
-      emitRulesTestSource(descriptor),
-      emitRulesSomeSource(descriptor),
-      emitRulesFirstSource(descriptor),
-      emitRulesMatchSource(descriptor),
+      emitRulesTestSource(descriptor, options),
+      emitRulesSomeSource(descriptor, options),
+      emitRulesFirstSource(descriptor, options),
+      emitRulesMatchSource(descriptor, options),
       emitRulesRunSource(descriptor, options),
       emitRulesVisitorSource(descriptor, options),
       emitRulesIteratorSource(descriptor, options),
       emitRulesManySource(descriptor, options),
       emitRulesManyVisitorSource(descriptor, options),
       emitRulesManyIteratorSource(descriptor, options),
-      emitRulesExplainSource(descriptor),
+      emitRulesExplainSource(descriptor, options),
       emitRulesInspectSource(descriptor),
     ]) {
       for (const line of source.split("\n")) writer.line(line);
@@ -974,10 +998,12 @@ function emitRulesPlanSource(descriptor: RulesDescriptor, options: RulesEmitOpti
     writer.line("const predicates = Object.freeze({");
     writer.indent(() => {
       for (const rule of descriptor.rules) {
-        writer.line(`${emitObjectKey(rule.id)}: ${emitRulesPredicateSource(descriptor, rule.id).trim()},`);
+        writer.line(`${emitObjectKey(rule.id)}: ${emitRulesPredicateSource(descriptor, rule.id, options).trim()},`);
       }
     });
-    writer.line("});");
+    writer.line(
+      options.typescript === true ? "}) as Readonly<Record<string, (...args: __JitValue[]) => boolean>>;" : "});"
+    );
     writer.line("return Object.freeze({");
     writer.indent(() => {
       writer.line("test: rulesTest,");
@@ -987,10 +1013,18 @@ function emitRulesPlanSource(descriptor: RulesDescriptor, options: RulesEmitOpti
       writer.line("run: rulesRun,");
       writer.line("explain: rulesExplain,");
       writer.line("inspect: rulesInspect,");
-      writer.line("predicate: (rule) => predicates[rule],");
+      writer.line(
+        options.typescript === true
+          ? "predicate: (rule: __JitValue) => predicates[rule],"
+          : "predicate: (rule) => predicates[rule],"
+      );
       writer.line("many: () => many,");
       writer.line("to: Object.freeze({ visitor: () => rulesVisit, iterator: () => rulesIterate }),");
-      writer.line(`ids: Object.freeze(${JSON.stringify(descriptor.ids)}),`);
+      writer.line(
+        options.typescript === true
+          ? `ids: Object.freeze(${JSON.stringify(descriptor.ids)}) as readonly __JitValue[],`
+          : `ids: Object.freeze(${JSON.stringify(descriptor.ids)}),`
+      );
     });
     writer.line("});");
   });
@@ -1006,13 +1040,13 @@ export function emitRulesSinkSource(
 ): string {
   switch (sink) {
     case "test":
-      return emitRulesTestSource(descriptor);
+      return emitRulesTestSource(descriptor, options);
     case "some":
-      return emitRulesSomeSource(descriptor);
+      return emitRulesSomeSource(descriptor, options);
     case "first":
-      return emitRulesFirstSource(descriptor);
+      return emitRulesFirstSource(descriptor, options);
     case "match":
-      return emitRulesMatchSource(descriptor);
+      return emitRulesMatchSource(descriptor, options);
     case "run":
       return emitRulesRunSource(descriptor, options);
     case "visitor":
@@ -1026,9 +1060,9 @@ export function emitRulesSinkSource(
     case "many-iterator":
       return emitRulesManyIteratorSource(descriptor, options);
     case "explain":
-      return emitRulesExplainSource(descriptor);
+      return emitRulesExplainSource(descriptor, options);
     case "predicate":
-      return emitRulesPredicateSource(descriptor, options.ruleId as string);
+      return emitRulesPredicateSource(descriptor, options.ruleId as string, options);
     default:
       return emitRulesPlanSource(descriptor, options);
   }

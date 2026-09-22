@@ -1,5 +1,6 @@
 import type { JIT as DefineJIT } from "@jit-compiler/jit/define";
 import type { AotOutputFormat } from "@jit-compiler/jit/aot";
+import type { ArtifactManifestV1, CompilationReceipt } from "@jit-compiler/jit/aot";
 
 export const JIT: typeof DefineJIT;
 
@@ -12,4 +13,6 @@ export function compileBindings(
 ): {
   readonly files: readonly { readonly path: string; readonly source: string }[];
   readonly skipped: readonly { readonly operation: string; readonly reason: string; readonly schema: string }[];
+  readonly manifest?: ArtifactManifestV1;
+  readonly receipt?: CompilationReceipt;
 };

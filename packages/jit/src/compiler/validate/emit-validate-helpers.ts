@@ -440,7 +440,20 @@ function needsBuildString(schema: AnySchema): boolean {
   const checks = (schema.def.checks as readonly SchemaCheckRecord[] | undefined) ?? [];
   if ((schema.def as { coerce?: boolean }).coerce === true) return true;
   return checks.some((check) =>
-    ["trim", "lowercase", "uppercase", "sanitize", "noEmpty", "format", "phoneBR"].includes(check.kind)
+    [
+      "trim",
+      "toLowerCase",
+      "toUpperCase",
+      "toCamelCase",
+      "toPascalCase",
+      "toSnakeCase",
+      "toKebabCase",
+      "toUpperSnakeCase",
+      "sanitize",
+      "noEmpty",
+      "format",
+      "phoneBR",
+    ].includes(check.kind)
   );
 }
 

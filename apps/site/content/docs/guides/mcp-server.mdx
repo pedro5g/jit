@@ -32,6 +32,16 @@ environment.
 | `jit_aot_inspect`     | No     | Explicit grouped and standalone AOT inventory              |
 | `jit_aot_preview`     | No     | Temporary source, embedded types, manifest, or plan build  |
 | `jit_aot_generate`    | Yes    | Write the configured generated package                     |
+| `jit_model_get`       | No     | Read a filtered revisioned declaration project              |
+| `jit_model_apply`     | Yes    | Apply a validated, optimistic-concurrency model patch       |
+| `jit_compile_plan`    | No     | Preview semantic and filesystem impact                      |
+| `jit_compile`         | Yes    | Compile the model and return artifact/manifest digests      |
+| `jit_artifact_status` | No     | Verify managed hashes and receipt                           |
+| `jit_artifact_find`   | No     | Locate a generated symbol from the manifest                 |
+| `jit_artifact_describe` | No   | Describe a generated contract without source                |
+| `jit_artifact_dependencies` | No | List generated dependencies and consumers               |
+| `jit_artifact_materialize` | Yes | Copy a clean artifact and metadata to an explicit target |
+| `jit_source_read`     | No     | Explicit source retrieval for debugging only                |
 
 Every result includes text and structured content. Read-only and mutating
 annotations let the host apply an approval policy. Generation requires an
@@ -45,6 +55,12 @@ explicit `{ "write": true }`; omission is an error.
 4. Preview a `manifest` or named `plan` when needed.
 5. Generate with `write: true` only after review.
 6. Run tests and bundle/tree-shaking checks.
+
+For semantic agent work, use `jit_model_get`, `jit_model_apply`,
+`jit_compile_plan`, and `jit_compile`. Once compilation succeeds, call
+`jit_artifact_status` before using `jit_artifact_find` or
+`jit_artifact_describe`; a non-`clean` managed artifact is not authoritative.
+`jit_source_read` is intentionally separate from this normal workflow.
 
 Preview compiles in a temporary directory and cleans it afterwards. Config is
 the default source for files, patterns, output, package identity, cleanup, and

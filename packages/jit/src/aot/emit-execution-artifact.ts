@@ -11,6 +11,7 @@ interface EmittedBinding {
 
 export interface ExecutionArtifactEmitterContext {
   readonly js: string[];
+  readonly ts: boolean;
   readonly skipped: SkippedOperation[];
   readonly classBindings: ReadonlyMap<unknown, string>;
   readonly classArtifacts: ReadonlyMap<unknown, Extract<CompiledArtifact, { readonly kind: "class" }>>;
@@ -55,6 +56,7 @@ export function createExecutionArtifactEmitter(context: ExecutionArtifactEmitter
     return emitExecutionArtifactModule(
       {
         js,
+        typescript: context.ts,
         skipped,
         classBindings,
         classArtifacts,

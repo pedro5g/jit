@@ -4,7 +4,7 @@
  *
  * Usage:
  *   jit init [--force] [--out <dir>] [--format ts|js] [--entries <path-or-glob>]
- *   jit generate [files...] [--out <dir>] [--format ts|js] [--watch] [--pattern <glob>]
+ *   jit generate [files...] [--out <dir>] [--format ts|js] [--emit-manifest] [--json] [--watch] [--pattern <glob>]
  *   jit doctor [files...] [--pattern <glob>]
  *   jit list [files...] [--pattern <glob>]
  *   jit inspect <export> [files...] [--stage source|plan]
@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { type ArtifactOwnership, inspectArtifactStatus } from "./aot/artifact-manifest.js";
 import {
   collectDeclarations,
   DEFAULT_SCHEMA_PATTERNS,
@@ -27,6 +28,7 @@ import {
   loadModule,
 } from "./aot/discover.js";
 import { type AotOutputFormat, generate } from "./aot/generate.js";
+import type { NamingProfile } from "./aot/semantic-name.js";
 import { getArtifact } from "./runtime/artifact-registry.js";
 
 /** Generated output lands beside the config file, so no `src/` tree is assumed. */
@@ -45,12 +47,26 @@ interface GenerateArguments {
   readonly patterns: readonly string[] | undefined;
   readonly format: AotOutputFormat | undefined;
   readonly perFile: boolean | undefined;
+  readonly emitManifest: boolean | undefined;
+  readonly ownership: ArtifactOwnership | undefined;
+  readonly naming: NamingProfile | undefined;
+  readonly portableErrors: boolean | undefined;
+  readonly manifestPath: string | undefined;
+  readonly receiptPath: string | undefined;
+  readonly json: boolean;
 }
 
-interface ResolvedAotInputs extends Omit<GenerateArguments, "format"> {
+interface ResolvedAotInputs
+  extends Omit<GenerateArguments, "format" | "emitManifest" | "ownership" | "naming" | "portableErrors"> {
   readonly format: AotOutputFormat;
   readonly configFile: string | undefined;
   readonly resolvedOut: string;
+  readonly emitManifest: boolean;
+  readonly ownership: ArtifactOwnership;
+  readonly naming: NamingProfile;
+  readonly portableErrors: boolean;
+  readonly manifestPath: string | undefined;
+  readonly receiptPath: string | undefined;
 }
 
 export interface InitArguments {
@@ -63,7 +79,7 @@ export interface InitArguments {
 
 const USAGE = `Usage:
   jit init [--force] [--out <dir>] [--format ts|js] [--entries <path-or-glob>]
-  jit generate [files...] [--out <dir>] [--format ts|js] [--per-file] [--watch] [--pattern <glob>]
+  jit generate [files...] [--out <dir>] [--format ts|js] [--per-file] [--emit-manifest] [--ownership managed|detached] [--naming compact|semantic] [--json] [--watch] [--pattern <glob>]
   jit doctor [files...] [--pattern <glob>]
   jit list [files...] [--pattern <glob>]
   jit inspect <export> [files...] [--stage source|plan]
@@ -127,10 +143,12 @@ async function runGenerate(
   const resolved = await resolveAotInputs(parsed, cwd);
   const { files, resolvedOut } = resolved;
 
-  if (resolved.configFile) stdout(`using ${resolved.configFile}\n`);
+  if (resolved.configFile && !resolved.json) stdout(`using ${resolved.configFile}\n`);
 
   if (files.length === 0) {
-    stderr("No declaration files found: pass files, add jit.config.*, or create *.jit.ts modules\n");
+    const message = "No declaration files found: pass files, add jit.config.*, or create *.jit.ts modules";
+    if (resolved.json) stdout(`${JSON.stringify({ status: "error", message })}\n`);
+    else stderr(`${message}\n`);
     return 1;
   }
 
@@ -142,9 +160,9 @@ async function runGenerate(
       Object.keys(declarations.groups).length === 0 &&
       Object.keys(declarations.schemas).length === 0
     ) {
-      stderr(
-        `No exported AOT declarations found in: ${files.join(", ")}. Export compiled JIT artifacts or JIT.Typeof aliases.\n`
-      );
+      const message = `No exported AOT declarations found in: ${files.join(", ")}. Export compiled JIT artifacts or JIT.Typeof aliases.`;
+      if (resolved.json) stdout(`${JSON.stringify({ status: "error", message })}\n`);
+      else stderr(`${message}\n`);
       return 1;
     }
 
@@ -153,9 +171,37 @@ async function runGenerate(
       outDir: resolvedOut,
       format: resolved.format,
       perFile: resolved.perFile === true,
+      emitManifest: resolved.emitManifest,
+      ownership: resolved.ownership,
+      naming: resolved.naming,
+      portableErrors: resolved.portableErrors,
+      ...(resolved.manifestPath === undefined ? {} : { manifestPath: resolved.manifestPath }),
+      ...(resolved.receiptPath === undefined ? {} : { receiptPath: resolved.receiptPath }),
     });
 
-    for (const skip of result.skipped) {
+    if (resolved.json) {
+      stdout(
+        `${JSON.stringify({
+          status: result.files.length > 0 ? "success" : "error",
+          files: result.files,
+          skipped: result.skipped,
+          ...(result.manifest
+            ? {
+                artifactDigest: result.manifest.artifactDigest,
+                manifestDigest: result.manifest.manifestDigest,
+                artifactStatus: inspectArtifactStatus(
+                  resolvedOut,
+                  resolved.manifestPath ?? "jit.manifest.json",
+                  resolved.receiptPath ?? "jit.receipt.json"
+                ).status,
+                symbols: result.manifest.symbols.length,
+              }
+            : {}),
+        })}\n`
+      );
+    }
+
+    for (const skip of resolved.json ? [] : result.skipped) {
       stdout(`skipped ${skip.schema}.${skip.operation}: ${skip.reason}\n`);
     }
 
@@ -164,7 +210,7 @@ async function runGenerate(
       return 1;
     }
 
-    for (const file of result.files) {
+    for (const file of resolved.json ? [] : result.files) {
       stdout(`generated ${file}\n`);
     }
 
@@ -324,6 +370,12 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
   let patterns = parsed.patterns;
   let format = parsed.format;
   let perFile = parsed.perFile;
+  let emitManifest = parsed.emitManifest;
+  let ownership = parsed.ownership;
+  let naming = parsed.naming;
+  let portableErrors = parsed.portableErrors;
+  let manifestPath = parsed.manifestPath;
+  let receiptPath = parsed.receiptPath;
   let configFile: string | undefined;
   let configDir = cwd;
 
@@ -340,6 +392,12 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
       outDir = outDir ?? (config.output?.directory ? resolve(configDir, config.output.directory) : undefined);
       format = format ?? config.output?.format;
       perFile = perFile ?? config.output?.perFile;
+      emitManifest = emitManifest ?? config.output?.emitManifest;
+      ownership = ownership ?? config.output?.ownership;
+      naming = naming ?? config.output?.naming;
+      portableErrors = portableErrors ?? config.output?.portableErrors;
+      manifestPath = manifestPath ?? config.output?.manifestPath;
+      receiptPath = receiptPath ?? config.output?.receiptPath;
     }
 
     if (files.length === 0) files = discoverSchemaFiles(cwd, patterns);
@@ -351,6 +409,12 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
     outDir,
     patterns,
     perFile,
+    emitManifest: emitManifest ?? false,
+    ownership: ownership ?? "managed",
+    naming: naming ?? "compact",
+    portableErrors: portableErrors ?? true,
+    manifestPath,
+    receiptPath,
     format: validateOutputFormat(format ?? "ts"),
     configFile,
     resolvedOut: outDir ?? resolve(configDir, DEFAULT_OUT_DIR),
@@ -388,6 +452,13 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
   let patterns: string[] | undefined;
   let format: AotOutputFormat | undefined;
   let perFile: boolean | undefined;
+  let emitManifest: boolean | undefined;
+  let naming: NamingProfile | undefined;
+  let portableErrors: boolean | undefined;
+  let manifestPath: string | undefined;
+  let receiptPath: string | undefined;
+  let json = false;
+  let ownership: ArtifactOwnership | undefined;
 
   for (let index = 0; index < rest.length; index++) {
     const argument = rest[index];
@@ -399,6 +470,45 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
 
     if (argument === "--per-file") {
       perFile = true;
+      continue;
+    }
+
+    if (argument === "--emit-manifest") {
+      emitManifest = true;
+      continue;
+    }
+
+    if (argument === "--portable-errors") {
+      portableErrors = true;
+      continue;
+    }
+
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (argument === "--ownership") {
+      const value = readValue(rest, ++index, "--ownership");
+      if (value !== "managed" && value !== "detached") throw new Error(`unknown ownership mode "${value}"`);
+      ownership = value;
+      continue;
+    }
+
+    if (argument === "--manifest-path") {
+      manifestPath = readValue(rest, ++index, "--manifest-path");
+      continue;
+    }
+
+    if (argument === "--receipt-path") {
+      receiptPath = readValue(rest, ++index, "--receipt-path");
+      continue;
+    }
+
+    if (argument === "--naming") {
+      const value = readValue(rest, ++index, "--naming");
+      if (value !== "compact" && value !== "semantic") throw new Error(`unknown naming profile "${value}"`);
+      naming = value;
       continue;
     }
 
@@ -420,7 +530,21 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
     if (!argument.startsWith("--")) files.push(resolve(cwd, argument));
   }
 
-  return { files, outDir, watch: watchMode, patterns, format, perFile };
+  return {
+    files,
+    outDir,
+    watch: watchMode,
+    patterns,
+    format,
+    perFile,
+    emitManifest,
+    ownership,
+    naming,
+    portableErrors,
+    manifestPath,
+    receiptPath,
+    json,
+  };
 }
 
 function parseInspectArguments(rest: readonly string[], cwd: string): InspectArguments {
@@ -436,6 +560,11 @@ function parseInspectArguments(rest: readonly string[], cwd: string): InspectArg
 
     if (argument === "--stage") {
       stage = readValue(tail, ++index, "--stage");
+      continue;
+    }
+
+    if (argument === "--json") {
+      forwarded.push(argument);
       continue;
     }
 

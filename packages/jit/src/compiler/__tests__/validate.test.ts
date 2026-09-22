@@ -124,7 +124,7 @@ describe("JIT compiler validator", () => {
 
   it("should apply defaults, trims, and pipes to parse output", () => {
     const Signup = JIT.object({
-      email: JIT.string().trim().lowercase().email(),
+      email: JIT.string().trim().toLowerCase().email(),
       plan: JIT.string().default("free"),
       code: JIT.string().pipe((value) => value.toUpperCase()),
     });
@@ -631,7 +631,7 @@ describe("JIT compiler validator", () => {
   it("should rebuild tuple, set, map, and record outputs under transforms", () => {
     const Payload = JIT.object({
       pair: JIT.tuple(JIT.string().trim(), JIT.number()),
-      tags: JIT.set(JIT.string().lowercase()),
+      tags: JIT.set(JIT.string().toLowerCase()),
       meta: JIT.mapSchema(JIT.string().trim(), JIT.number()),
       counts: JIT.record(
         JIT.string(),
@@ -944,7 +944,7 @@ describe("JIT compiler validator", () => {
 
   it("should apply transforms inside intersections on parse", () => {
     const Person = JIT.object({ name: JIT.string().trim() });
-    const Audit = JIT.object({ createdBy: JIT.string().lowercase() });
+    const Audit = JIT.object({ createdBy: JIT.string().toLowerCase() });
     const Full = JIT.intersection(Person, Audit);
     const validate = validation(Full);
     const result = validate.safeParse({ name: "  Ada  ", createdBy: "ROOT" });

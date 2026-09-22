@@ -122,6 +122,20 @@ location does not change format, and neither output imports the JIT package.
 Per-file generation produces independently executable modules; the barrel only
 re-exports them.
 
+## Sovereign artifact metadata
+
+`ArtifactProgram`, its module graph and the source emitter are separate
+boundaries. Imports are planned from semantic dependencies before emission.
+When `emitManifest` is enabled, the output also contains a versioned manifest
+and compilation receipt. Agent-facing lookups may use that metadata only for a
+managed tree whose status is `clean`; detached output makes source authoritative.
+
+Standard Schema is attached only to a callable boundary with the matching
+`unknown -> validated value` contract. `is` and `safeParse` remain their own
+boolean/result contracts. A JSON pipeline receives a separate capability when
+its input is text, and no protocol helper is emitted when the capability is not
+selected.
+
 ## Purity and tree-shaking
 
 Generated artifacts do not capture runtime schemas, constructors, descriptor

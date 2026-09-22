@@ -3,8 +3,10 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SchemaInput } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
+import type { ArtifactOwnership } from "./artifact-manifest.js";
 import { classifyDeclaration, isSchemaInput, readArtifactGroup } from "./classify.js";
 import type { AotOutputFormat } from "./generate.js";
+import type { NamingProfile } from "./semantic-name.js";
 
 export { classifyDeclarations, isSchemaInput } from "./classify.js";
 
@@ -41,6 +43,17 @@ export interface JitConfig {
      * @default false
      */
     readonly perFile?: boolean;
+    /** Keep a hash-bound manifest and compilation receipt beside generated files. */
+    readonly emitManifest?: boolean;
+    /** Ownership mode recorded in the manifest. */
+    readonly ownership?: ArtifactOwnership;
+    /** Naming profile for generated helper identifiers. */
+    readonly naming?: NamingProfile;
+    /** Relative sidecar paths below the output directory. */
+    readonly manifestPath?: string;
+    readonly receiptPath?: string;
+    /** Keep structural portable error names in generated code; defaults to true. */
+    readonly portableErrors?: boolean;
   };
 }
 

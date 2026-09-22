@@ -1,0 +1,39 @@
+---
+title: Sovereign artifacts and manifests
+description: Generated JavaScript and TypeScript are independent products with hash-bound metadata for agents.
+related: /docs/aot/purity, /docs/aot/cli-and-config, /docs/aot/agent-project-model
+---
+
+JIT declarations are compiled into ordinary JavaScript or TypeScript. The
+generated tree does not import the JIT runtime, compiler registry or schema
+walker. Runtime and AOT share semantic plans; only the final materialization
+host differs.
+
+When enabled, generation writes a manifest and receipt beside the files:
+
+```text
+declaration digest
+  -> ArtifactProgram digest
+  -> manifest digest
+  -> generated file hashes
+```
+
+The manifest describes exports, contracts, dependencies, capabilities and
+declaration traceability. It does not duplicate implementation source. A
+managed tree is authoritative for agent lookups only while its status is
+`clean`; modified, missing or stale output must be regenerated or inspected.
+
+Use the explicit source tool for debugging. Normal agent questions such as
+“where is `User`?”, “which factories does it expose?” and “who depends on
+`UserId`?” are answered from exact manifest indexes.
+
+The Lab publishes `jit.manifest.json` and `jit.receipt.json` inside the signed
+artifact tree. The `jlr1_` reference and the offline `jit1_` token therefore
+bind generated source and semantic metadata as one byte-exact bundle.
+
+Protocol capabilities stay attached to their real boundaries: parser exports
+may opt into `standard-schema/v1`, JSON Schema documents use the separate
+`standard-json-schema/v1` capability, and `is`/`safeParse` do not inherit either
+contract. Query and event descriptors remain structural V1 protocols. A
+capability that does not match an artifact's input/output is reported as a
+skip and never emitted as a misleading adapter.
