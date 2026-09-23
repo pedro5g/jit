@@ -87,7 +87,7 @@ describe("AgentToolCore artifact materialization tools", () => {
       status: "clean",
       physical: {
         target: "v8-99",
-        decisions: [expect.objectContaining({ family: "array.validate", strategy: "unrolled" })],
+        decisions: [expect.objectContaining({ family: "array.validate", strategy: "indexed-loop", evidence: [] })],
       },
     });
   });

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { QualityContext } from "../core/context.js";
 import { finding, type QualityFinding } from "../core/finding.js";
+import { optimizerGate } from "./optimizer.js";
 
 /** Checks the contract-first environment, optimizer, extension and evidence boundaries. */
 export function adaptiveGate(context: QualityContext): QualityFinding[] {
@@ -51,8 +52,8 @@ export function adaptiveGate(context: QualityContext): QualityFinding[] {
     [plugin, "version", "QG-EXT-002", "plugin identity does not carry version and ABI"],
     [plugin, "abi", "QG-EXT-002", "plugin identity does not carry version and ABI"],
     [plugin, "ExtensionGrammar", "QG-EXT-003", "extension semantics do not declare API grammar"],
-    [physical, "digest", "QG-OPT-003", "physical planning has no deterministic target fallback"],
-    [physical, "resolveTargetProfile", "QG-OPT-003", "physical planning has no deterministic target fallback"],
+    [physical, "digest", "QG-OPT-005", "physical planning has no deterministic digest"],
+    [physical, "resolveTargetProfile", "QG-OPT-005", "physical planning does not resolve a deterministic target"],
     [strategy, "evidence", "QG-PERF-001", "strategy families do not require evidence identifiers"],
   ] as const;
   for (const [content, token, code, message] of required) {
@@ -60,6 +61,8 @@ export function adaptiveGate(context: QualityContext): QualityFinding[] {
   }
   if (!/^\s*id:\s*"PERF-/m.test(assumptions))
     findings.push(contractFinding("QG-PERF-002", "performance assumption registry is missing evidence ids"));
+
+  findings.push(...optimizerGate(context));
   return findings;
 }
 

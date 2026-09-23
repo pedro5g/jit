@@ -366,10 +366,12 @@ function validationStub<TSchema extends ATS.AnyTypeSchema>(
   operation: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" | "issues",
   options?: ValidationDiagnosticOptions
 ): DefineFunction<(...args: never[]) => unknown> {
-  return executionStub(schema, [
-    stage("value", "value", "value"),
+  const unwrapped = unwrapSchema(schema);
+  return executionStub(unwrapped, [
+    { ...stage("value", "value", "value"), schema: unwrapped } as ExecutionStage,
     {
       ...stage("validate", "value", operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value"),
+      schema: unwrapped,
       operation,
       ...(options?.maxIssues === undefined ? {} : { maxIssues: options.maxIssues }),
       provides: operation === "is" ? [] : ["schema-validated"],

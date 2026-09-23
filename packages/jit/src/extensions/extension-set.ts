@@ -26,7 +26,7 @@ class ImmutableExtensionSet implements ExtensionSet {
     }
     assertCompositionNames([...byId.values()]);
     this.plugins = Object.freeze(
-      [...byId.values()].sort((left, right) => extensionSignature(left).localeCompare(extensionSignature(right)))
+      [...byId.values()].sort((left, right) => compareText(extensionSignature(left), extensionSignature(right)))
     );
     this.digest = digest(this.plugins);
     Object.freeze(this);
@@ -57,6 +57,10 @@ function digest(plugins: readonly ExtensionDescriptor[]): string {
   return `ext-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function assertIdentity(plugin: ExtensionDescriptor): void {
   if (
     typeof plugin.id !== "string" ||
@@ -68,6 +72,14 @@ function assertIdentity(plugin: ExtensionDescriptor): void {
   ) {
     throw new TypeError("extensions require a non-empty id, version and positive integer ABI");
   }
+  if (
+    plugin.metadataDependencies !== undefined &&
+    (!Array.isArray(plugin.metadataDependencies) ||
+      plugin.metadataDependencies.some((key) => typeof key !== "string" || key.length === 0) ||
+      new Set(plugin.metadataDependencies).size !== plugin.metadataDependencies.length)
+  ) {
+    throw new TypeError(`extension ${plugin.id} metadata dependencies must be unique non-empty strings`);
+  }
 }
 
 function assertDescriptor(plugin: ExtensionDescriptor): void {
@@ -75,22 +87,39 @@ function assertDescriptor(plugin: ExtensionDescriptor): void {
   assertGrammar(plugin.grammar);
 
   if (plugin.kind === "composition") {
-    if (plugin.name.length === 0 || plugin.target.length === 0 || typeof plugin.compose !== "function")
-      throw new TypeError("composition extensions require a name, target, and compose function");
+    assertCompositionDescriptor(plugin);
     return;
   }
   if (plugin.kind === "semantic") {
-    if (plugin.name.length === 0 || typeof plugin.lower !== "function")
-      throw new TypeError("semantic extensions require a name and lower function");
+    assertSemanticDescriptor(plugin);
     return;
   }
+  assertStrategyDescriptor(plugin);
+}
+
+function assertCompositionDescriptor(plugin: Extract<ExtensionDescriptor, { readonly kind: "composition" }>): void {
+  if (plugin.name.length === 0 || plugin.target.length === 0 || typeof plugin.compose !== "function")
+    throw new TypeError("composition extensions require a name, target, and compose function");
+}
+
+function assertSemanticDescriptor(plugin: Extract<ExtensionDescriptor, { readonly kind: "semantic" }>): void {
+  if (plugin.name.length === 0 || typeof plugin.lower !== "function")
+    throw new TypeError("semantic extensions require a name and lower function");
+}
+
+function assertStrategyDescriptor(plugin: Extract<ExtensionDescriptor, { readonly kind: "strategy" }>): void {
   if (
     plugin.family.length === 0 ||
-    typeof plugin.supports !== "function" ||
+    plugin.candidate.length === 0 ||
+    !Array.isArray(plugin.evidence) ||
+    plugin.evidence.some((id) => typeof id !== "string" || id.length === 0) ||
+    (plugin.optimized && plugin.evidence.length === 0) ||
+    typeof plugin.legality !== "function" ||
+    typeof plugin.targetSupport !== "function" ||
     typeof plugin.estimate !== "function" ||
     typeof plugin.lower !== "function"
   )
-    throw new TypeError("strategy extensions require a family and supports, estimate, and lower functions");
+    throw new TypeError("strategy extensions require a candidate, legality, target support, estimate, and IR lowering");
 }
 
 function assertGrammar(grammar: unknown): asserts grammar is ExtensionDescriptor["grammar"] {
@@ -114,10 +143,20 @@ function extensionSignature(plugin: ExtensionDescriptor): string {
     id: plugin.id,
     version: plugin.version,
     abi: plugin.abi,
+    metadataDependencies: [...(plugin.metadataDependencies ?? [])].sort(),
     kind: plugin.kind,
     ...(plugin.kind === "composition" ? { name: plugin.name, target: plugin.target, grammar: plugin.grammar } : {}),
     ...(plugin.kind === "semantic" ? { name: plugin.name, grammar: plugin.grammar } : {}),
-    ...(plugin.kind === "strategy" ? { family: plugin.family, grammar: plugin.grammar } : {}),
+    ...(plugin.kind === "strategy"
+      ? {
+          family: plugin.family,
+          candidate: plugin.candidate,
+          optimized: plugin.optimized,
+          portability: plugin.portability,
+          evidence: [...plugin.evidence].sort(),
+          grammar: plugin.grammar,
+        }
+      : {}),
   };
   return JSON.stringify(descriptor);
 }
@@ -126,6 +165,9 @@ function freezeDescriptor(plugin: ExtensionDescriptor): ExtensionDescriptor {
   const grammar = plugin.grammar;
   return Object.freeze({
     ...plugin,
+    ...(plugin.metadataDependencies === undefined
+      ? {}
+      : { metadataDependencies: Object.freeze([...plugin.metadataDependencies].sort()) }),
     grammar: Object.freeze({
       ...grammar,
       ...(grammar.requires === undefined ? {} : { requires: Object.freeze([...grammar.requires]) }),

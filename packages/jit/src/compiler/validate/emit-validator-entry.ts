@@ -1,6 +1,10 @@
 import type * as ATS from "../../core/ats/index.js";
+import { environmentForSchema } from "../../core/environment/environment.js";
 import type { CodeWriter } from "../emitter/code-writer.js";
+import { emitExpr } from "../emitter/emit-expr.js";
+import { resolveSemanticExtensionPlans } from "../extension-lowering.js";
 import { assertSatisfiable } from "../facts/contradictions.js";
+import { type PerformanceProfile, resolvePerformanceProfile } from "../performance/profile.js";
 import { findRecursiveSchemas } from "../schema-recursion.js";
 import { resolveTargetProfile } from "../target/resolve-target.js";
 import type { TargetDescriptor, TargetProfile } from "../target/target-profile.js";
@@ -32,6 +36,8 @@ export interface EmitValidatorOptions {
   readonly typescript?: boolean;
   /** Selects the physical validation profile; AOT must pass this explicitly. */
   readonly target?: TargetDescriptor | TargetProfile;
+  /** Internal evidence policy used by target-specific strategy resolution. */
+  readonly performance?: PerformanceProfile;
 }
 
 function emitFreezeOutput(writer: CodeWriter, output: string): void {
@@ -48,7 +54,7 @@ function emitFreezeOutput(writer: CodeWriter, output: string): void {
  */
 export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorOptions = {}): EmittedValidator {
   assertSatisfiable(schema);
-  const settings = resolveValidatorSettings(options);
+  const settings = resolveValidatorSettings(schema, options);
   const recursive = findRecursiveSchemas(schema);
   const parseEmitter = createParseEmitter(schema, recursive, settings);
   const asyncEmitter = createAsyncEmitter(schema, recursive, settings, parseEmitter);
@@ -67,9 +73,17 @@ interface ValidatorSettings {
   readonly maxIssues: number | undefined;
   readonly typescript: boolean;
   readonly target: TargetProfile;
+  readonly performance: PerformanceProfile;
+  readonly semanticPredicates: readonly string[];
 }
 
-function resolveValidatorSettings(options: EmitValidatorOptions): ValidatorSettings {
+function resolveValidatorSettings(schema: ATS.AnyTypeSchema, options: EmitValidatorOptions): ValidatorSettings {
+  const environment = environmentForSchema(schema);
+  const semanticPredicates =
+    environment === undefined || !(options.validateChecks ?? true)
+      ? []
+      : resolveSemanticExtensionPlans(schema, environment.extensions).map(({ expression }) => emitExpr(expression));
+  const target = isTargetProfile(options.target) ? options.target : resolveTargetProfile(options.target);
   return {
     emitIs: options.is ?? true,
     emitSafeParse: options.safeParse ?? true,
@@ -80,7 +94,9 @@ function resolveValidatorSettings(options: EmitValidatorOptions): ValidatorSetti
     validateChecks: options.validateChecks ?? true,
     maxIssues: options.maxIssues,
     typescript: options.typescript ?? false,
-    target: isTargetProfile(options.target) ? options.target : resolveTargetProfile(options.target),
+    target,
+    performance: options.performance ?? resolvePerformanceProfile(target),
+    semanticPredicates: Object.freeze(semanticPredicates),
   };
 }
 
@@ -97,7 +113,9 @@ function createParseEmitter(
       settings.materializeRuntimeTypes,
       settings.validateChecks,
       settings.typescript,
-      settings.target
+      settings.target,
+      settings.performance,
+      settings.semanticPredicates
     );
   if (!settings.emitSafeParse) return undefined;
   return emitDiagnosticEmitter(
@@ -111,7 +129,9 @@ function createParseEmitter(
     undefined,
     false,
     settings.typescript,
-    settings.target
+    settings.target,
+    settings.performance,
+    settings.semanticPredicates
   );
 }
 
@@ -133,7 +153,9 @@ function createAsyncEmitter(
     parseEmitter,
     true,
     settings.typescript,
-    settings.target
+    settings.target,
+    settings.performance,
+    settings.semanticPredicates
   );
 }
 
@@ -152,13 +174,15 @@ function createIsEmitter(
     undefined,
     settings.validateChecks,
     settings.typescript,
-    settings.target
+    settings.target,
+    settings.performance
   );
   emitter.markRecursive(recursive);
   for (const value of sourceEmitter?.bindings().values ?? []) emitter.bind(value);
   emitter.writer.line(`function is(value${settings.typescript ? ": __JitValue" : ""}) {`);
   emitter.writer.indent(() => {
     emitter.emitNode(schema, "value", rootPath());
+    emitSemanticPredicates(emitter, settings.semanticPredicates, false);
     emitter.writer.line("return true;");
   });
   emitter.writer.line("}");
@@ -199,7 +223,9 @@ function emitParseEmitter(
   materializeRuntimeTypes: boolean,
   validateChecks: boolean,
   typescript: boolean,
-  target: TargetProfile
+  target: TargetProfile,
+  performance: PerformanceProfile,
+  semanticPredicates: readonly string[]
 ): ValidatorEmitter {
   const emitter = new ValidatorEmitter(
     "fast",
@@ -209,12 +235,14 @@ function emitParseEmitter(
     undefined,
     validateChecks,
     typescript,
-    target
+    target,
+    performance
   );
   emitter.markRecursive(recursive);
   emitter.writer.line(`function parse(value${typescript ? ": __JitValue" : ""})${typescript ? ": __JitValue" : ""} {`);
   emitter.writer.indent(() => {
     const output = emitter.emitNode(schema, "value", rootPath());
+    emitSemanticPredicates(emitter, semanticPredicates, false);
     emitter.writer.line(`return ${output};`);
   });
   emitter.writer.line("}");
@@ -232,7 +260,9 @@ function emitDiagnosticEmitter(
   sourceEmitter?: ValidatorEmitter,
   awaited = false,
   typescript = false,
-  target: TargetProfile = resolveTargetProfile()
+  target: TargetProfile = resolveTargetProfile(),
+  performance: PerformanceProfile = resolvePerformanceProfile(target),
+  semanticPredicates: readonly string[] = []
 ): ValidatorEmitter {
   const emitter = new ValidatorEmitter(
     "parse",
@@ -242,7 +272,8 @@ function emitDiagnosticEmitter(
     maxIssues,
     validateChecks,
     typescript,
-    target
+    target,
+    performance
   );
   emitter.markRecursive(recursive);
   if (sourceEmitter) for (const value of sourceEmitter.bindings().values) emitter.bind(value);
@@ -263,6 +294,7 @@ function emitDiagnosticEmitter(
     if (maxIssues !== undefined) emitter.writer.line("try {");
     const emitBody = () => {
       const output = emitter.emitNode(schema, "value", rootPath());
+      emitSemanticPredicates(emitter, semanticPredicates, true);
       emitter.writer.line("if (issues !== undefined) {");
       emitter.writer.indent(() => {
         emitter.writer.line("return { success: false, issues: issues };");
@@ -284,6 +316,34 @@ function emitDiagnosticEmitter(
   });
   emitter.writer.line("}");
   return emitter;
+}
+
+function emitSemanticPredicates(
+  emitter: ValidatorEmitter,
+  predicates: readonly string[],
+  awaitBaseValidation: boolean
+): void {
+  if (predicates.length === 0) return;
+  const emitChecks = () => {
+    const previous = emitter.validationEnabled;
+    emitter.validationEnabled = true;
+    for (const predicate of predicates)
+      emitter.failIf(
+        `!(${predicate})`,
+        rootPath(),
+        "custom",
+        "semantic extension",
+        "semantic extension rejected the value"
+      );
+    emitter.validationEnabled = previous;
+  };
+  if (awaitBaseValidation) {
+    emitter.writer.line("if (issues === undefined || issues.length === 0) {");
+    emitter.writer.indent(emitChecks);
+    emitter.writer.line("}");
+  } else {
+    emitChecks();
+  }
 }
 
 function isTargetProfile(value: TargetDescriptor | TargetProfile | undefined): value is TargetProfile {

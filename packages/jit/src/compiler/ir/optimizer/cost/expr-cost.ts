@@ -21,6 +21,10 @@ export function exprCost(expr: IRExpr): number {
       return 1 + exprCost(expr.left) + exprCost(expr.right);
     case "sameNumber":
       return 20;
+    case "typeof":
+      return 2 + exprCost(expr.value);
+    case "array_isArray":
+      return 5 + exprCost(expr.value);
     case "nary":
       return 1 + expr.operands.reduce((total, operand) => total + exprCost(operand), 0);
     case "schema_guard":

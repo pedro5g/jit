@@ -10,16 +10,29 @@ The supported progression is:
 2. semantic operators, described by a restricted extension IR contract;
 3. strategy candidates for an existing physical family.
 
-The current kernel materializes composition operators. Semantic and strategy
-descriptors are validated, digested, and kept behind the catalog boundary;
-operation-specific lowering is enabled family by family after its runtime/AOT
-contract and evidence exist. This prevents an extension API from promising a
-generic lowering path before the compiler can preserve its semantics.
+Composition operators build on existing schema operations. Semantic
+extensions now lower a validated boolean predicate through the shared core IR
+and validator emitter for runtime and AOT. The extension receives a filtered
+schema view, normalized semantic facts, and only metadata keys listed in its
+`metadataDependencies`. The extension identifier and normalized IR digest are
+recorded in the physical plan and manifest; descriptive metadata is excluded.
 
-The extension IR contains semantic nodes such as load, compare, branch, loop,
-intrinsic call, issue emission, transform, and return. It does not contain a
-source writer, raw JavaScript, or emitter bindings. The compiler remains the
-owner of determinism, runtime/AOT parity, target selection, and security.
+Strategy extension descriptors are validated and versioned, including
+legality, target support, integer estimates, evidence references and IR
+lowering. They do not receive a source writer. The initial integration does not
+let third-party candidates replace built-in emitter lowerings yet: a family
+must first define the extension IR result contract and runtime/AOT conformance
+for that operation. Unsupported IR effects and control-flow nodes fail before
+emission instead of being silently ignored.
+
+The versioned extension IR contract contains load, literal, compare, logical,
+branch, loop, intrinsic call, issue emission, transform, and return nodes. The
+current generic lowerer accepts expression programs for boolean predicates;
+issue emission and general control-flow lowering require an operation-specific
+contract. The IR does not contain raw JavaScript, source templates, writer
+methods, emitter bindings, or runtime callbacks. The compiler remains the owner
+of normalization, determinism, runtime/AOT parity, target selection, and
+security.
 
 The default AOT invariant is that generated artifacts do not import the plugin
 after lowering. A plugin that needs a runtime binding must declare that

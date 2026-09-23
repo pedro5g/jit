@@ -2,11 +2,13 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { MOCK_HELPERS } from "../compiler/mock.js";
 import { JSON_PATCH_HELPERS, PATCH_EQUAL_HELPER } from "../compiler/patch.js";
+import { resolvePerformanceProfile } from "../compiler/performance/profile.js";
 import { resolvePhysicalPlan, resolveValidationPhysicalPlan } from "../compiler/physical/physical-plan.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { resolveLazySchema, schemaChildren } from "../compiler/schema-recursion.js";
+import { STRATEGY_CATALOG_VERSION } from "../compiler/strategy/catalog.js";
 import { portableProfile } from "../compiler/target/portable-profile.js";
-import { resolveTargetProfile } from "../compiler/target/resolve-target.js";
+import { resolveDeploymentTargetProfile } from "../compiler/target/resolve-target.js";
 import type { TargetDescriptor, TargetProfile } from "../compiler/target/target-profile.js";
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
@@ -180,7 +182,7 @@ export function generate(options: GenerateOptions): GenerateResult {
   // AOT has no ambient engine contract. Without an explicit deployment target
   // use the portable profile so the build machine cannot silently determine
   // generated source.
-  const target = options.target === undefined ? portableProfile : resolveTargetProfile(options.target);
+  const target = options.target === undefined ? portableProfile : resolveDeploymentTargetProfile(options.target);
   const naming = options.naming ?? "compact";
   const skipped: SkippedOperation[] = [];
   const modules: EmittedModule[] = [];
@@ -258,9 +260,11 @@ export function generate(options: GenerateOptions): GenerateResult {
     ownership: options.ownership ?? "managed",
     format: layout.format,
     naming,
-    ...(options.target === undefined ? {} : { target }),
-    ...(options.target === undefined ? {} : { physicalPlanDigest: physicalPlanDigest(options, target) }),
-    ...(options.target === undefined ? {} : { physicalPlans: physicalPlans(options, target) }),
+    target,
+    performanceProfileVersion: performanceVersion(target),
+    strategyCatalogVersion: STRATEGY_CATALOG_VERSION,
+    physicalPlanDigest: physicalPlanDigest(options, target),
+    physicalPlans: physicalPlans(options, target),
   });
   const receipt = createCompilationReceipt(manifest, JIT_COMPILER_VERSION, [
     { name: "artifact-program", status: "passed" },
@@ -273,14 +277,22 @@ export function generate(options: GenerateOptions): GenerateResult {
   return { files: [...files, manifestFile, receiptFile], skipped, program, manifest, receipt };
 }
 
-function physicalPlanDigest(options: GenerateOptions, target: ReturnType<typeof resolveTargetProfile>): string {
+function physicalPlanDigest(
+  options: GenerateOptions,
+  target: ReturnType<typeof resolveDeploymentTargetProfile>
+): string {
   const plans = physicalPlans(options, target).map(({ symbol, digest }) => ({ name: symbol, digest }));
   return sha256(stableJson({ target: target.digest, plans }));
 }
 
+function performanceVersion(target: ReturnType<typeof resolveDeploymentTargetProfile>): string {
+  const profile = resolvePerformanceProfile(target);
+  return `${profile.id}@${profile.version}`;
+}
+
 function physicalPlans(
   options: GenerateOptions,
-  target: ReturnType<typeof resolveTargetProfile>
+  target: ReturnType<typeof resolveDeploymentTargetProfile>
 ): readonly ManifestPhysicalPlan[] {
   const plans: ManifestPhysicalPlan[] = [];
   for (const [name, value] of Object.entries(options.artifacts ?? {})) {
@@ -299,7 +311,7 @@ function physicalPlans(
 function physicalPlanForArtifact(
   symbol: string,
   value: unknown,
-  target: ReturnType<typeof resolveTargetProfile>
+  target: ReturnType<typeof resolveDeploymentTargetProfile>
 ): ManifestPhysicalPlan | undefined {
   const artifact = getArtifact(value);
   const physical =
@@ -313,6 +325,9 @@ function physicalPlanForArtifact(
     symbol,
     target: physical.target.id,
     digest: physical.digest,
+    strategyCatalogVersion: physical.strategyCatalogVersion,
+    performanceProfileVersion: physical.performanceProfileVersion,
+    extensions: physical.optimization.semanticExtensions,
     capabilities: physical.capabilities.map((capability) => ({
       kind: capability.kind,
       ...(capability.key === undefined ? {} : { key: capability.key }),

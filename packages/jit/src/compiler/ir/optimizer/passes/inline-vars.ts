@@ -111,6 +111,10 @@ function collectExprUsages(expr: IRExpr, usages: Map<string, number>): void {
     case "not":
       collectExprUsages(expr.expr, usages);
       return;
+    case "typeof":
+    case "array_isArray":
+      collectExprUsages(expr.value, usages);
+      return;
     case "binary":
     case "sameValue":
       collectExprUsages(expr.left, usages);
@@ -163,6 +167,9 @@ function replaceExpr(expr: IRExpr, replacements: ReadonlyMap<string, IRExpr>): I
     case "sameValue":
     case "sameNumber":
       return { ...expr, left: replaceExpr(expr.left, replacements), right: replaceExpr(expr.right, replacements) };
+    case "typeof":
+    case "array_isArray":
+      return { ...expr, value: replaceExpr(expr.value, replacements) };
     case "schema_guard":
       return { ...expr, value: replaceExpr(expr.value, replacements) };
     case "load_prop":
@@ -202,6 +209,9 @@ function isInlineSafe(expr: IRExpr): boolean {
       return isInlineSafe(expr.base) && isInlineSafe(expr.index);
     case "not":
       return isInlineSafe(expr.expr);
+    case "typeof":
+    case "array_isArray":
+      return isInlineSafe(expr.value);
     case "binary":
     case "sameValue":
     case "sameNumber":

@@ -123,17 +123,19 @@ describe("sovereign artifact target selection", () => {
       artifacts: { isValues: JIT.validate.is(Values) },
       outDir: V8,
       format: "js",
-      target: { profile: "v8-99" },
+      target: { profile: "node-26" },
       emitManifest: true,
     });
 
     const portableSource = readFileSync(join(Portable, "index.js"), "utf8");
     const v8Source = readFileSync(join(V8, "index.js"), "utf8");
     expect(portableSource).toContain("for (let");
-    expect(v8Source).toContain("[0]");
+    expect(v8Source).toContain("for (let");
     expect(portable.manifest?.target?.profile).toBe("portable-1");
-    expect(v8.manifest?.target?.profile).toBe("v8-99");
-    expect(portable.manifest?.artifactDigest).not.toBe(v8.manifest?.artifactDigest);
+    expect(v8.manifest?.target?.profile).toBe("node-26");
+    expect(portable.manifest?.performanceProfileVersion).toBe("jit-portable@1");
+    expect(v8.manifest?.performanceProfileVersion).toBe("jit-node-26@1");
+    expect(portable.manifest?.physicalPlanDigest).not.toBe(v8.manifest?.physicalPlanDigest);
   });
 });
 
@@ -256,6 +258,77 @@ describe("sovereign artifact manifest drift", () => {
       status: "stale",
       reason: "receipt does not match the manifest",
     });
+  });
+});
+
+describe("sovereign artifact optimizer manifest", () => {
+  const outputDir = useTemporaryOutput();
+
+  it("records a deployment target and optimizer versions without inheriting the build engine", () => {
+    const outDir = outputDir();
+    const User = JIT.string();
+    const result = AOT.generate({
+      artifacts: { isUser: JIT.validate.is(User) },
+      outDir,
+      format: "js",
+      emitManifest: true,
+      target: { runtime: "node", versions: "24" },
+    });
+
+    expect(result.manifest?.target).toMatchObject({ profile: "node-24", runtimeVersion: "24" });
+    expect(result.manifest?.target?.engineVersion).toBeUndefined();
+    expect(result.manifest?.performanceProfileVersion).toBe("jit-node-24@1");
+    expect(result.manifest?.strategyCatalogVersion).toBe("strategy-catalog-v1");
+    expect(result.receipt?.performanceProfileVersion).toBe("jit-node-24@1");
+    expect(result.manifest?.physicalPlans?.[0]).toMatchObject({
+      target: "node-24",
+      performanceProfileVersion: "jit-node-24@1",
+      strategyCatalogVersion: "strategy-catalog-v1",
+    });
+  });
+
+  it("lowers semantic extensions into standalone AOT validation and records their normalized IR", async () => {
+    const extension = JIT.plugin.semantic({
+      id: "@fixture/active-check",
+      version: "1.0.0",
+      abi: 1,
+      name: "activeCheck",
+      grammar: { repeat: "forbid" },
+      lower: () => ({
+        version: 1,
+        nodes: [
+          { kind: "load", path: ["status"] },
+          { kind: "literal", value: "active" },
+          { kind: "compare", operator: "eq", left: 0, right: 1 },
+          { kind: "return", value: 2 },
+        ],
+        result: 3,
+      }),
+    });
+    const Extended = JIT.$extends(extension);
+    const User = Extended.object({ status: Extended.string() });
+    const runtime = Extended.validate.is(User);
+    const outDir = outputDir();
+    const result = AOT.generate({
+      artifacts: { isUser: runtime },
+      outDir,
+      format: "js",
+      emitManifest: true,
+      target: { profile: "portable-1" },
+    });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly isUser: (value: unknown) => boolean;
+    };
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+
+    expect(runtime({ status: "active" })).toBe(true);
+    expect(runtime({ status: "inactive" })).toBe(false);
+    expect(generated.isUser({ status: "active" })).toBe(true);
+    expect(generated.isUser({ status: "inactive" })).toBe(false);
+    expect(source).not.toContain(extension.id);
+    expect(result.manifest?.physicalPlans?.[0]?.extensions).toContainEqual(
+      expect.objectContaining({ id: extension.id, version: extension.version })
+    );
   });
 });
 

@@ -832,12 +832,12 @@ var JITError = class extends Error {
   }
 };
 var AccessDeniedError = class extends JITError {
-  constructor(action, field, reason2, ruleId) {
+  constructor(action, field, reason, ruleId) {
     super("ACCESS_DENIED", `Access denied for action ${JSON.stringify(action)}`);
     this.name = "AccessDeniedError";
     this.action = action;
     this.field = field;
-    this.reason = reason2;
+    this.reason = reason;
     this.ruleId = ruleId;
   }
 };
@@ -1643,618 +1643,467 @@ function deepEqual(left, right) {
   return true;
 }
 
-// ../../packages/jit/src/core/hints/hint-merge.ts
-function mergeHints(left, right) {
-  if (!left) return right ?? {};
-  if (!right) return left;
-  const collection2 = mergeCollection(left.collection, right.collection);
-  const entity2 = right.entity ?? left.entity;
-  const index2 = right.index ?? left.index;
-  const order = right.order ?? left.order;
-  const compare4 = mergeOptional(left.compare, right.compare);
-  const clone3 = mergeOptional(left.clone, right.clone);
-  const hash4 = mergeOptional(left.hash, right.hash);
-  const diff3 = mergeOptional(left.diff, right.diff);
-  const serialize = mergeOptional(left.serialize, right.serialize);
-  return {
-    ...entity2 ? { entity: entity2 } : {},
-    ...index2 ? { index: index2 } : {},
-    ...order ? { order } : {},
-    ...collection2 ? { collection: collection2 } : {},
-    ...compare4 ? { compare: compare4 } : {},
-    ...clone3 ? { clone: clone3 } : {},
-    ...hash4 ? { hash: hash4 } : {},
-    ...diff3 ? { diff: diff3 } : {},
-    ...serialize ? { serialize } : {}
-  };
+// ../../packages/jit/src/compiler/performance/profile.ts
+var portablePerformanceProfile = createPerformanceProfile({
+  id: "jit-portable",
+  version: "1",
+  evidence: []
+});
+var performanceProfiles = Object.freeze({
+  portable: portablePerformanceProfile,
+  node22: createPerformanceProfile({ id: "jit-node-22", version: "1", evidence: [] }),
+  node24: createPerformanceProfile({ id: "jit-node-24", version: "1", evidence: [] }),
+  node26: createPerformanceProfile({ id: "jit-node-26", version: "1", evidence: [] })
+});
+function resolvePerformanceProfile(target) {
+  const exact = performanceProfilesByTarget[target.id];
+  if (exact !== void 0) return exact;
+  const range = /^node-range-(22|24|26)(?:-(22|24|26))+$/.exec(target.id);
+  if (range === null) return portablePerformanceProfile;
+  const majors = target.id.slice("node-range-".length).split("-");
+  const profiles = majors.map(profileForMajor).filter((profile) => profile !== void 0);
+  if (profiles.length !== majors.length || profiles.length === 0) return portablePerformanceProfile;
+  const shared = profiles[0]?.evidence.filter((id) => profiles.every((profile) => profile.evidence.includes(id))) ?? [];
+  return createPerformanceProfile({ id: `jit-${target.id}`, version: "1", evidence: shared });
 }
-function mergeOptional(left, right) {
-  if (!left) return right;
-  if (!right) return left;
-  return {
-    ...left,
-    ...right
-  };
+function createPerformanceProfile(input) {
+  if (input.id.length === 0 || input.version.length === 0)
+    throw new TypeError("performance profiles require an id and version");
+  const evidence = [...input.evidence].sort(compareText);
+  if (new Set(evidence).size !== evidence.length)
+    throw new TypeError(`performance profile ${input.id} has duplicate evidence`);
+  if (evidence.some((id) => !/^PERF-[A-Z0-9-]+$/.test(id)))
+    throw new TypeError(`performance profile ${input.id} has an invalid evidence id`);
+  return Object.freeze({
+    id: input.id,
+    version: input.version,
+    digest: digest(JSON.stringify([input.id, input.version, evidence])),
+    evidence: Object.freeze(evidence)
+  });
 }
-function mergeCollection(left, right) {
-  if (!left) return right;
-  if (!right) return left;
-  const ordered = left.ordered || right.ordered ? {
-    ...left.ordered,
-    ...right.ordered
-  } : void 0;
-  return {
-    ...left,
-    ...right,
-    ...ordered ? { ordered } : {}
-  };
-}
-
-// ../../packages/jit/src/core/hints/hint-resolver.ts
-function resolveHints(schema) {
-  let current = schema;
-  let hints = {};
-  while (current) {
-    const annotations = current.annotations;
-    hints = mergeHints(annotations?.hints, hints);
-    current = innerSchema(current);
-  }
-  if (hints.order && !hints.order.key && typeof hints.collection?.identify === "string") {
-    hints = mergeHints(hints, {
-      order: {
-        ...hints.order,
-        key: hints.collection.identify
-      }
-    });
-  }
-  return hints;
-}
-function innerSchema(schema) {
-  if (schema.type === "optional" || schema.type === "nullable" || schema.type === "nullish" || schema.type === "readonly" || schema.type === "promise" || schema.type === "default" || schema.type === "brand" || schema.type === "transform" || schema.type === "pipe" || schema.type === "refine" || schema.type === "coerce") {
-    return schema.def.innerType;
-  }
-  if (schema.type === "lazy") return schema.def.getter();
+var defaultPerformanceProfile = portablePerformanceProfile;
+var performanceProfilesByTarget = Object.freeze({
+  "portable-1": performanceProfiles.portable,
+  "node-22": performanceProfiles.node22,
+  "node-24": performanceProfiles.node24,
+  "node-26": performanceProfiles.node26
+});
+function profileForMajor(major) {
+  if (major === "22") return performanceProfiles.node22;
+  if (major === "24") return performanceProfiles.node24;
+  if (major === "26") return performanceProfiles.node26;
   return void 0;
 }
-
-// ../../packages/jit/src/core/hints/hint-schema.ts
-function attachHint(schema, hints) {
-  const annotations = schema.annotations ?? {};
-  return {
-    type: schema.type,
-    _type: null,
-    def: schema.def,
-    annotations: {
-      ...annotations,
-      hints: mergeHints(annotations.hints, hints)
-    }
-  };
+function isPerformanceProfileDigestValid(profile) {
+  return profile.digest === digest(JSON.stringify([profile.id, profile.version, [...profile.evidence].sort(compareText)]));
 }
-function attachMetadata(schema, metadata) {
-  const annotations = schema.annotations ?? {};
-  const result = {
-    type: schema.type,
-    _type: null,
-    def: schema.def,
-    annotations: { ...annotations, metadata: { ...annotations.metadata, ...metadata } }
-  };
-  rememberDescriptiveMetadata(result, executableSchema(schema));
-  return result;
+function digest(value) {
+  let first = 2166136261;
+  let second = 2246822519;
+  for (let index2 = 0; index2 < value.length; index2++) {
+    const code = value.charCodeAt(index2);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code + index2, 3266489917);
+  }
+  return `performance-${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+}
+function compareText(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
-// ../../packages/jit/src/compiler/schema-recursion.ts
-function resolveLazySchema(schema) {
-  let current = schema;
-  let guard = 0;
-  while (current.type === TypeName.lazy && guard++ < 100) {
-    current = current.def.getter();
+// ../../packages/jit/src/extensions/extension-ir-normalizer.ts
+function normalizeExtensionIR(input) {
+  const nodes = input.nodes.map(normalizeNode);
+  return Object.freeze({
+    version: 1,
+    nodes: Object.freeze(nodes),
+    result: input.result,
+    ...input.effects === void 0 ? {} : { effects: Object.freeze([...input.effects].sort(compareText2)) }
+  });
+}
+function stableExtensionIRJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableExtensionIRJson).join(",")}]`;
+  if (typeof value === "object" && value !== null)
+    return `{${Object.entries(value).sort(([left], [right]) => compareText2(left, right)).map(([key, entry]) => `${JSON.stringify(key)}:${stableExtensionIRJson(entry)}`).join(",")}}`;
+  if (typeof value === "number" && Object.is(value, -0)) return `"$number:-0"`;
+  return JSON.stringify(value);
+}
+function digestExtensionIR(value) {
+  let first = 2166136261;
+  let second = 2246822519;
+  for (let index2 = 0; index2 < value.length; index2++) {
+    const code = value.charCodeAt(index2);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code + index2, 3266489917);
   }
-  return current;
+  return `extension-ir-${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
 }
-function schemaChildren(schema) {
-  const current = schema;
-  const def = current.def;
-  switch (current.type) {
-    case TypeName.object:
-      return Object.values(def.props ?? {});
-    case TypeName.array:
-    case TypeName.set:
-      return def.element ? [def.element] : [];
-    case TypeName.map:
-      return [def.key, def.value].filter(Boolean);
-    case TypeName.record:
-      return def.value ? [def.value] : [];
-    case TypeName.tuple:
-      return [
-        ...def.items ?? [],
-        ...def.rest ? [def.rest] : []
-      ];
-    case TypeName.union:
-    case TypeName.xor:
-    case TypeName.discriminatedUnion:
-    case TypeName.intersection:
-      return def.options ?? [];
-    case TypeName.when:
-      return [def.thenType, def.otherwiseType].filter(Boolean);
-    case TypeName.codec:
-      return [def.input, def.output].filter(Boolean);
-    default:
-      return def.innerType ? [def.innerType] : [];
-  }
+function normalizeNode(node) {
+  const fields = Object.fromEntries(Object.entries(node).filter(([, value]) => value !== void 0));
+  if ("path" in node) fields.path = Object.freeze([...node.path]);
+  if ("operands" in node) fields.operands = Object.freeze([...node.operands]);
+  if ("args" in node) fields.args = Object.freeze([...node.args]);
+  if ("params" in node && node.params !== void 0) fields.params = normalizeRecord(node.params);
+  return Object.freeze(fields);
 }
-var RECURSIVE_CACHE = /* @__PURE__ */ new WeakMap();
-function findRecursiveSchemas(schema) {
-  const cached = RECURSIVE_CACHE.get(schema);
-  if (cached !== void 0) return cached;
-  const recursive = /* @__PURE__ */ new Set();
-  const stack = /* @__PURE__ */ new Set();
-  const seen = /* @__PURE__ */ new Set();
-  const walk = (node) => {
-    const target = resolveLazySchema(node);
-    if (stack.has(target)) {
-      recursive.add(target);
-      return;
-    }
-    if (seen.has(target)) return;
-    seen.add(target);
-    stack.add(target);
-    for (const child of schemaChildren(target)) walk(child);
-    stack.delete(target);
-  };
-  walk(schema);
-  RECURSIVE_CACHE.set(schema, recursive);
-  return recursive;
+function normalizeRecord(record2) {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.keys(record2).sort(compareText2).map((key) => [key, normalizePortableValue(record2[key])])
+    )
+  );
 }
-
-// ../../packages/jit/src/compiler/facts/constraint-model.ts
-function normalizeConstraints(schema) {
-  const wrappers = resolveWrappers(schema);
-  const base = wrappers.base;
-  const checks = readChecks(base);
-  const dimension = base.type === TypeName.string ? "length" : base.type === TypeName.array || base.type === TypeName.tuple ? "cardinality" : isNumericType(base.type) ? "range" : void 0;
-  let bound;
-  const contradictions = [];
-  for (const check of checks) {
-    if (dimension === void 0) continue;
-    const next = boundForCheck(check, dimension);
-    if (next === void 0) continue;
-    const merged = mergeBound(bound, next, check.kind);
-    bound = merged.bound;
-    if (merged.contradiction !== void 0) contradictions.push(merged.contradiction);
-  }
-  if (base.type === TypeName.tuple) {
-    const tuple2 = base.def;
-    const structuralBound = tuple2.rest === void 0 ? { exact: tuple2.items.length, minimum: tuple2.items.length, maximum: tuple2.items.length } : { minimum: tuple2.items.length };
-    const merged = mergeBound(bound, structuralBound, "tuple");
-    bound = merged.bound;
-    if (merged.contradiction !== void 0) contradictions.push(merged.contradiction);
-  }
-  if (bound !== void 0 && bound.exact === void 0 && bound.minimum !== void 0 && bound.minimum === bound.maximum) {
-    bound = { ...bound, exact: bound.minimum };
-  }
-  const values = enumValues(base);
-  const element = elementOf(base);
-  const length = dimension === "length" ? bound : void 0;
-  const cardinality = dimension === "cardinality" ? bound : void 0;
-  const range = dimension === "range" ? bound : void 0;
-  const model = {
-    type: base.type,
-    ...length === void 0 ? {} : { length },
-    ...cardinality === void 0 ? {} : { cardinality },
-    ...range === void 0 ? {} : { range },
-    ...base.type === TypeName.object ? {
-      knownKeys: Object.freeze(Object.keys(base.def.props)),
-      exactKeys: base.def.unknownKeys === "strict"
-    } : {},
-    ...values === void 0 ? {} : { enumValues: Object.freeze(values) },
-    ...base.type === TypeName.literal ? { literalValue: base.def.value } : {},
-    nullable: wrappers.nullable,
-    optional: wrappers.optional,
-    nonNull: !wrappers.nullable && !wrappers.optional,
-    ...element === void 0 ? {} : { element },
-    primitiveElement: isPrimitive(element),
-    stableShape: base.type === TypeName.object,
-    contradictions: Object.freeze(contradictions)
-  };
-  return Object.freeze(model);
-}
-function readChecks(schema) {
-  const checks = schema.def.checks;
-  return Array.isArray(checks) ? checks : [];
-}
-function isNumericType(type) {
-  return type === TypeName.number || type === TypeName.int;
-}
-function boundForCheck(check, dimension) {
-  if (check.kind === "length" && (dimension === "length" || dimension === "cardinality") && typeof check.value === "number") {
-    return { exact: check.value, minimum: check.value, maximum: check.value };
-  }
-  if (check.kind === "nonEmpty" && (dimension === "length" || dimension === "cardinality")) return { minimum: 1 };
-  if ((check.kind === "min" || check.kind === "gte") && typeof check.value === "number") {
-    return { minimum: check.value };
-  }
-  if ((check.kind === "max" || check.kind === "lte") && typeof check.value === "number") {
-    return { maximum: check.value };
-  }
-  if ((check.kind === "moreThan" || check.kind === "gt") && typeof check.value === "number") {
-    return { minimum: check.value, minimumInclusive: false };
-  }
-  if ((check.kind === "lessThan" || check.kind === "lt") && typeof check.value === "number") {
-    return { maximum: check.value, maximumInclusive: false };
-  }
-  return void 0;
-}
-function mergeBound(current, next, checkKind) {
-  if (current === void 0) return { bound: next };
-  const minimum = chooseMinimum(current, next);
-  const maximum = chooseMaximum(current, next);
-  const exact = chooseExact(current.exact, next.exact);
-  const merged = {
-    ...minimum.value === void 0 ? {} : { minimum: minimum.value },
-    ...maximum.value === void 0 ? {} : { maximum: maximum.value },
-    ...exact === void 0 ? {} : { exact },
-    ...minimum.inclusive ? {} : { minimumInclusive: false },
-    ...maximum.inclusive ? {} : { maximumInclusive: false }
-  };
-  const exactConflict = current.exact !== void 0 && next.exact !== void 0 && current.exact !== next.exact;
-  const exactOutside = exact !== void 0 && (minimum.value !== void 0 && (exact < minimum.value || exact === minimum.value && !minimum.inclusive) || maximum.value !== void 0 && (exact > maximum.value || exact === maximum.value && !maximum.inclusive));
-  const contradiction = exactConflict || exactOutside || minimum.value !== void 0 && maximum.value !== void 0 && (minimum.value > maximum.value || minimum.value === maximum.value && (!minimum.inclusive || !maximum.inclusive)) ? {
-    code: exact !== void 0 ? "length_conflict" : "range_conflict",
-    message: `constraint ${checkKind} makes the normalized bounds impossible`,
-    checks: Object.freeze([checkKind])
-  } : void 0;
-  return { bound: Object.freeze(merged), ...contradiction === void 0 ? {} : { contradiction } };
-}
-function chooseMinimum(left, right) {
-  if (left.minimum === void 0) return { value: right.minimum, inclusive: right.minimumInclusive !== false };
-  if (right.minimum === void 0) return { value: left.minimum, inclusive: left.minimumInclusive !== false };
-  if (left.minimum > right.minimum) return { value: left.minimum, inclusive: left.minimumInclusive !== false };
-  if (right.minimum > left.minimum) return { value: right.minimum, inclusive: right.minimumInclusive !== false };
-  return {
-    value: left.minimum,
-    inclusive: left.minimumInclusive !== false && right.minimumInclusive !== false
-  };
-}
-function chooseMaximum(left, right) {
-  if (left.maximum === void 0) return { value: right.maximum, inclusive: right.maximumInclusive !== false };
-  if (right.maximum === void 0) return { value: left.maximum, inclusive: left.maximumInclusive !== false };
-  if (left.maximum < right.maximum) return { value: left.maximum, inclusive: left.maximumInclusive !== false };
-  if (right.maximum < left.maximum) return { value: right.maximum, inclusive: right.maximumInclusive !== false };
-  return {
-    value: left.maximum,
-    inclusive: left.maximumInclusive !== false && right.maximumInclusive !== false
-  };
-}
-function chooseExact(left, right) {
-  if (left === void 0) return right;
-  if (right === void 0 || left === right) return left;
-  return left;
-}
-function enumValues(schema) {
-  if (schema.type !== TypeName.enum) return void 0;
-  const values = schema.def.values;
-  const raw = Array.isArray(values) ? values : Object.values(values);
-  return [
-    ...new Set(raw.filter((value) => typeof value === "string" || typeof value === "number"))
-  ];
-}
-function elementOf(schema) {
-  if (schema.type === TypeName.array || schema.type === TypeName.set) return schema.def.element;
-  return void 0;
-}
-function isPrimitive(schema) {
-  if (schema === void 0) return false;
-  const base = resolveWrappers(schema).base;
-  return base.type === TypeName.string || base.type === TypeName.number || base.type === TypeName.int || base.type === TypeName.boolean || base.type === TypeName.literal || base.type === TypeName.enum;
-}
-
-// ../../packages/jit/src/compiler/strategy/catalog.ts
-var Catalog = class _Catalog {
-  constructor(families) {
-    this.families = Object.freeze([...families]);
-    Object.freeze(this);
-  }
-  family(id) {
-    return this.families.find((candidate) => candidate.id === id);
-  }
-  add(family) {
-    return new _Catalog([...this.families.filter((candidate) => candidate.id !== family.id), family]);
-  }
-  resolve(family, context, profile) {
-    const supported = family.candidates.filter((candidate) => candidate.supports(context, profile));
-    if (supported.length === 0) throw new Error(`No legal strategy candidate for ${family.id}`);
-    const ranked = supported.map((candidate) => ({ candidate, estimate: candidate.estimate(context, profile) })).sort(
-      (left, right) => score(left.estimate, profile) - score(right.estimate, profile) || compare(left.candidate, right.candidate)
+function normalizePortableValue(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number")
+    return value;
+  if (Array.isArray(value)) return Object.freeze(value.map(normalizePortableValue));
+  if (typeof value === "object")
+    return Object.freeze(
+      Object.fromEntries(
+        Object.keys(value).sort(compareText2).map((key) => [key, normalizePortableValue(value[key])])
+      )
     );
-    const selected = ranked[0];
-    if (selected === void 0) throw new Error(`No legal strategy candidate for ${family.id}`);
-    const operation = selected.candidate.lower(context);
-    return Object.freeze({
-      family: family.id,
-      strategy: selected.candidate.id,
-      reason: Object.freeze(reason(context, selected.candidate)),
-      evidence: Object.freeze([...selected.candidate.evidence]),
-      estimated: Object.freeze(selected.estimate),
-      operation
-    });
+  throw new TypeError("extension IR constants must be portable JSON values");
+}
+function compareText2(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+// ../../packages/jit/src/extensions/extension-ir-validator.ts
+var allowedNodeKeys = Object.freeze({
+  load: ["kind", "path"],
+  literal: ["kind", "value"],
+  compare: ["kind", "operator", "left", "right"],
+  logical: ["kind", "operator", "operands"],
+  not: ["kind", "input"],
+  branch: ["kind", "when", "then", "otherwise"],
+  loop: ["kind", "body", "count"],
+  callIntrinsic: ["kind", "name", "args"],
+  emitIssue: ["kind", "code", "params"],
+  transform: ["kind", "input", "intrinsic"],
+  return: ["kind", "value"]
+});
+var referenceFields = Object.freeze({
+  load: [],
+  literal: [],
+  compare: ["left", "right"],
+  logical: ["operands"],
+  not: ["input"],
+  branch: ["when", "then", "otherwise"],
+  loop: ["body"],
+  callIntrinsic: ["args"],
+  emitIssue: [],
+  transform: ["input"],
+  return: ["value"]
+});
+var semanticActions = Object.freeze({
+  load: (_node, index2, state3) => state3.types.set(index2, "unknown"),
+  literal: (node, index2, state3) => {
+    if (node.kind !== "literal") return;
+    if (typeof node.value === "number" && !Number.isFinite(node.value))
+      throw new TypeError(`extension IR literal at ${index2} must be finite`);
+    state3.types.set(index2, literalType(node.value));
+  },
+  compare: (node, index2, state3) => {
+    if (node.kind !== "compare") return;
+    requireExpression(node.left, state3.types, index2, "left");
+    requireExpression(node.right, state3.types, index2, "right");
+    state3.types.set(index2, "boolean");
+  },
+  logical: (node, index2, state3) => {
+    if (node.kind !== "logical") return;
+    for (const operand of node.operands) requireBoolean(operand, state3.types, index2);
+    state3.types.set(index2, "boolean");
+  },
+  not: (node, index2, state3) => {
+    if (node.kind !== "not") return;
+    requireBoolean(node.input, state3.types, index2);
+    state3.types.set(index2, "boolean");
+  },
+  branch: (node, index2, state3) => {
+    if (node.kind !== "branch") return;
+    requireBoolean(node.when, state3.types, index2);
+    requireExpression(node.then, state3.types, index2, "branch then");
+    if (node.otherwise !== void 0) requireExpression(node.otherwise, state3.types, index2, "branch else");
+  },
+  loop: () => {
+  },
+  callIntrinsic: (node, index2, state3) => {
+    if (node.kind !== "callIntrinsic") return;
+    validateIntrinsic(node, state3.types, index2);
+    state3.types.set(index2, intrinsicType(node.name));
+  },
+  emitIssue: (node, index2, state3) => {
+    if (node.kind !== "emitIssue") return;
+    state3.effects.add("issues");
+    validatePortableValue(node.params ?? {}, `issue params at ${index2}`);
+  },
+  transform: (node, index2, state3) => {
+    if (node.kind !== "transform") return;
+    validateTransform(node, index2, state3.types);
+    state3.effects.add("transform");
+  },
+  return: (node, index2, state3) => {
+    if (node.kind === "return" && node.value !== void 0)
+      requireExpression(node.value, state3.types, index2, "return value");
   }
-};
-function createStrategyCatalog(families = []) {
-  return new Catalog(families);
+});
+function validateExtensionIR(input) {
+  validateProgramHeader(input);
+  const state3 = validateProgram(input.nodes);
+  validateProgramResult(input, state3.types);
+  validateDeclaredEffects(input.effects, state3.effects);
+  const normalized = normalizeExtensionIR({
+    version: 1,
+    nodes: input.nodes,
+    result: input.result,
+    ...state3.effects.size === 0 ? {} : { effects: [...state3.effects].sort(compareText3) }
+  });
+  return Object.freeze({
+    ir: normalized,
+    digest: digestExtensionIR(stableExtensionIRJson(normalized)),
+    resultType: returnType(input.nodes[input.result], state3.types),
+    effects: Object.freeze([...state3.effects].sort(compareText3)),
+    portable: true
+  });
 }
-function score(estimate, profile) {
-  return estimate.runtime * profile.weights.runtime + estimate.allocation * profile.weights.allocation + estimate.setup * profile.weights.setup + estimate.codeSize * profile.weights.codeSize + (estimate.cold ?? 0) * profile.weights.cold + (estimate.branches ?? 0) * (profile.weights.branches ?? 0);
+function validateProgramHeader(input) {
+  const keys = /* @__PURE__ */ new Set(["version", "nodes", "result", "effects"]);
+  if (typeof input !== "object" || input === null || Reflect.ownKeys(input).some((key) => typeof key !== "string" || !keys.has(key)))
+    throw new TypeError("extension IR contains an unsupported top-level field");
+  if (input.version !== 1) throw new TypeError(`unsupported extension IR version ${String(input.version)}`);
+  if (!Array.isArray(input.nodes) || input.nodes.length === 0) throw new TypeError("extension IR requires nodes");
+  if (!isNodeIndex(input.result, input.nodes.length))
+    throw new TypeError("extension IR result is outside its node list");
+  if (input.effects !== void 0 && !validEffects(input.effects))
+    throw new TypeError("extension IR effects must be issues or transform");
 }
-function compare(left, right) {
-  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+function validEffects(effects) {
+  return Array.isArray(effects) && effects.every((effect) => effect === "issues" || effect === "transform") && new Set(effects).size === effects.length;
 }
-function reason(context, candidate) {
+function validateProgram(nodes) {
+  const state3 = { types: /* @__PURE__ */ new Map(), effects: /* @__PURE__ */ new Set() };
+  let returnCount = 0;
+  for (let index2 = 0; index2 < nodes.length; index2++) {
+    const node = nodes[index2];
+    if (node === void 0) throw new TypeError(`extension IR node ${index2} is missing`);
+    validateNodeShape(node, index2, nodes.length);
+    validateNodeSemantics(node, index2, state3);
+    if (node.kind === "return") returnCount++;
+  }
+  if (returnCount !== 1 || nodes[nodes.length - 1]?.kind !== "return")
+    throw new TypeError("extension IR must end with exactly one terminal return node");
+  return state3;
+}
+function validateNodeSemantics(node, index2, state3) {
+  semanticActions[node.kind](node, index2, state3);
+}
+function validateNodeShape(node, index2, length) {
+  assertSupportedNode(node, index2);
+  assertAllowedFields(node, index2);
+  validateNodePayload(node, index2);
+  validateNodeReferences(node, index2, length);
+}
+function assertSupportedNode(node, index2) {
+  if (typeof node !== "object" || node === null || !("kind" in node))
+    throw new TypeError(`invalid extension IR node at ${index2}`);
+  if (typeof node.kind !== "string" || !Object.keys(allowedNodeKeys).includes(node.kind))
+    throw new TypeError(`unsupported extension IR node kind at ${index2}`);
+}
+function assertAllowedFields(node, index2) {
+  const allowed = allowedNodeKeys[node.kind];
+  const keys = Reflect.ownKeys(node);
+  if (keys.some((key) => typeof key !== "string" || !allowed.includes(key)))
+    throw new TypeError(`extension IR node ${index2} contains an unsupported field`);
+}
+function validateNodePayload(node, index2) {
+  const validate3 = payloadValidators[node.kind];
+  validate3(node, index2);
+}
+var payloadValidators = Object.freeze({
+  load: (node, index2) => validateLoadPath(node.path, index2),
+  literal: (node, index2) => {
+    if (node.value !== null && !["string", "number", "boolean"].includes(typeof node.value))
+      throw new TypeError(`invalid extension IR literal at ${index2}`);
+  },
+  compare: (node, index2) => {
+    if (!isComparison(node.operator)) throw new TypeError(`invalid comparison at ${index2}`);
+  },
+  logical: (node, index2) => validateLogicalPayload(node, index2),
+  not: () => {
+  },
+  branch: () => {
+  },
+  loop: (node, index2) => {
+    if (node.count !== void 0 && (!Number.isSafeInteger(node.count) || node.count < 0))
+      throw new TypeError(`invalid loop count at ${index2}`);
+  },
+  callIntrinsic: (node, index2) => {
+    if (!Array.isArray(node.args) || !isIntrinsic(node.name)) throw new TypeError(`invalid intrinsic call at ${index2}`);
+  },
+  emitIssue: (node, index2) => {
+    if (!/^[A-Z][A-Z0-9_]*$/.test(node.code)) throw new TypeError(`invalid issue code at ${index2}`);
+  },
+  transform: (node, index2) => {
+    if (node.intrinsic !== void 0 && !isTransform(node.intrinsic))
+      throw new TypeError(`invalid transform at ${index2}`);
+  },
+  return: () => {
+  }
+});
+function validateLogicalPayload(node, index2) {
+  const validOperator = node.operator === "and" || node.operator === "or";
+  if (!Array.isArray(node.operands) || !validOperator || node.operands.length < 2)
+    throw new TypeError(`invalid logical node at ${index2}`);
+}
+function validateLoadPath(path, index2) {
+  if (!Array.isArray(path) || path.some((key) => typeof key !== "string" && (!Number.isSafeInteger(key) || key < 0)))
+    throw new TypeError(`extension IR load path at ${index2} must contain strings or non-negative integer indexes`);
+}
+function validateNodeReferences(node, index2, length) {
+  for (const field of referenceFields[node.kind]) {
+    const value = node[field];
+    if (value === void 0) continue;
+    const references = Array.isArray(value) ? value : [value];
+    for (const reference of references) {
+      if (!isNodeIndex(reference, length))
+        throw new TypeError(`extension IR ${field} at ${index2} is outside its node list`);
+    }
+  }
+}
+function validateTransform(node, index2, types) {
+  requireExpression(node.input, types, index2, "input");
+  if (node.intrinsic !== void 0 && types.get(node.input) !== "string")
+    throw new TypeError(`extension IR string transform at ${index2} requires a statically known string`);
+  types.set(index2, node.intrinsic === void 0 ? types.get(node.input) ?? "unknown" : "string");
+}
+function validateIntrinsic(node, types, index2) {
+  if (node.args.length !== 1) throw new TypeError(`intrinsic ${node.name} at ${index2} requires one argument`);
+  const argument = node.args[0];
+  if (argument === void 0 || !types.has(argument))
+    throw new TypeError(`intrinsic ${node.name} at ${index2} must reference an earlier expression`);
+  const type = types.get(argument);
+  if (node.name === "stringLength" && type !== "string" || node.name === "arrayLength" && type !== "unknown")
+    throw new TypeError(`intrinsic ${node.name} at ${index2} has an incompatible argument`);
+}
+function validateProgramResult(input, types) {
+  const result = input.nodes[input.result];
+  if (result?.kind !== "return" || input.result !== input.nodes.length - 1)
+    throw new TypeError("extension IR result must reference the terminal return node");
+  if (result.value !== void 0) requireExpression(result.value, types, input.result, "return value");
+}
+function validateDeclaredEffects(declared, used) {
+  const effects = new Set(declared ?? []);
+  if ([...used].some((effect) => !effects.has(effect)))
+    throw new TypeError("extension IR uses an effect that was not declared");
+  if ([...effects].some((effect) => !used.has(effect))) throw new TypeError("extension IR declares an unused effect");
+}
+function returnType(node, types) {
+  if (node?.kind !== "return" || node.value === void 0) return "unknown";
+  return types.get(node.value) ?? "unknown";
+}
+function validatePortableValue(value, label, seen = /* @__PURE__ */ new Set()) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError(`${label} contains a non-finite number`);
+    return;
+  }
+  if (typeof value !== "object" || seen.has(value))
+    throw new TypeError(`${label} must contain only acyclic portable JSON values`);
+  if (!Array.isArray(value) && !isPlainRecord(value))
+    throw new TypeError(`${label} must contain only plain objects and arrays`);
+  seen.add(value);
+  validatePortableChildren(value, label, seen);
+  seen.delete(value);
+}
+function validatePortableChildren(value, label, seen) {
+  const children2 = Array.isArray(value) ? value : Object.values(value);
+  for (const entry of children2) validatePortableValue(entry, label, seen);
+}
+function isPlainRecord(value) {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+function requireExpression(index2, types, at, name) {
+  if (!types.has(index2)) throw new TypeError(`extension IR ${name} at ${at} must reference an earlier expression`);
+}
+function requireBoolean(index2, types, at) {
+  if (types.get(index2) !== "boolean") throw new TypeError(`extension IR logical operand at ${at} must be boolean`);
+}
+function literalType(value) {
+  if (typeof value === "string") return "string";
+  if (typeof value === "number") return "number";
+  if (typeof value === "boolean") return "boolean";
+  return "null";
+}
+function intrinsicType(name) {
+  return name === "stringLength" || name === "arrayLength" ? "number" : "boolean";
+}
+function isNodeIndex(value, length) {
+  return Number.isSafeInteger(value) && value >= 0 && value < length;
+}
+function isComparison(value) {
+  return ["eq", "neq", "lt", "lte", "gt", "gte"].includes(value);
+}
+function isIntrinsic(value) {
   return [
-    ...context.cardinality === void 0 ? [] : [`exact cardinality ${context.cardinality} is proven`],
-    ...context.bodyCost === void 0 ? [] : [`estimated body cost ${context.bodyCost}`],
-    `candidate ${candidate.id} is semantically legal`
-  ];
+    "isString",
+    "isNumber",
+    "isBoolean",
+    "isBigint",
+    "isSymbol",
+    "isFunction",
+    "isArray",
+    "isNull",
+    "isDefined",
+    "stringLength",
+    "arrayLength"
+  ].includes(value);
+}
+function isTransform(value) {
+  return ["string.toLowerCase", "string.toUpperCase", "string.trim"].includes(value);
+}
+function compareText3(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
-// ../../packages/jit/src/compiler/strategy/family.ts
-function createStrategyFamily(id, candidates) {
-  if (id.length === 0) throw new TypeError("strategy families require a stable id");
-  for (const candidate of candidates) {
-    if (candidate.id.length === 0 || candidate.evidence.length === 0)
-      throw new TypeError(`strategy ${candidate.id || "<anonymous>"} requires performance evidence`);
-  }
-  return Object.freeze({ id, candidates: Object.freeze([...candidates]) });
-}
-
-// ../../packages/jit/src/compiler/strategy/families/array-validation.ts
-var loop = Object.freeze({
-  id: "indexed-loop",
-  evidence: Object.freeze(["PERF-ARRAY-001"]),
-  supports: (context) => context.cardinality !== void 0,
-  estimate: (context) => {
-    const count = context.cardinality ?? 0;
-    const body = context.bodyCost ?? 1;
-    return { runtime: count * body + 3, allocation: 0, setup: 0, codeSize: 4, cold: 1, branches: count + 1 };
-  },
-  lower: (context) => Object.freeze({ family: context.family, strategy: "indexed-loop" })
-});
-var unrolled = Object.freeze({
-  id: "unrolled",
-  evidence: Object.freeze(["PERF-ARRAY-001"]),
-  supports: (context, profile) => context.cardinality !== void 0 && context.bodyCost !== void 0 && context.cardinality <= profile.limits.arrayUnrollMaxLength && context.bodyCost <= profile.limits.arrayUnrollMaxBodyCost,
-  estimate: (context) => {
-    const count = context.cardinality ?? 0;
-    const body = context.bodyCost ?? 1;
-    return {
-      runtime: count * body,
-      allocation: 0,
-      setup: 0,
-      codeSize: Math.max(1, count * body * 0.4),
-      cold: count * 0.05,
-      branches: count
-    };
-  },
-  lower: (context) => Object.freeze({ family: context.family, strategy: "unrolled" })
-});
-var arrayValidationFamily = createStrategyFamily("array.validate", [loop, unrolled]);
-var catalog = createStrategyCatalog([arrayValidationFamily]);
-function resolveArrayValidationStrategy(schema, profile, mode = "is") {
-  if (schema.type !== TypeName.array && schema.type !== TypeName.tuple) return void 0;
-  const model = normalizeConstraints(schema);
-  const exact = model.cardinality?.exact;
-  if (exact === void 0) return void 0;
-  const element = schema.type === TypeName.array ? schema.def.element : void 0;
-  const bodyCost = element === void 0 ? 1 : elementCost(element);
-  const context = {
-    family: arrayValidationFamily.id,
-    schema,
-    facts: [],
-    mode,
-    cardinality: exact,
-    bodyCost
-  };
-  return catalog.resolve(arrayValidationFamily, context, profile);
-}
-function elementCost(schema) {
-  switch (schema.type) {
-    case TypeName.string:
-    case TypeName.number:
-    case TypeName.int:
-    case TypeName.boolean:
-    case TypeName.literal:
-    case TypeName.enum:
-      return 1;
-    case TypeName.object:
-      return 4;
-    default:
-      return 6;
-  }
-}
-
-// ../../packages/jit/src/compiler/strategy/families/enum-membership.ts
-var directChain = Object.freeze({
-  id: "direct-chain",
-  evidence: Object.freeze(["PERF-ENUM-001"]),
-  supports: (context, profile) => {
-    const cardinality = context.cardinality ?? 0;
-    return cardinality > 0 && (cardinality <= profile.limits.enumChainMaxCardinality || !lookupSafe(context.schema));
-  },
-  estimate: (context) => ({
-    runtime: context.cardinality ?? 0,
-    allocation: 0,
-    setup: 0,
-    codeSize: context.cardinality ?? 0,
-    cold: 1
-  }),
-  lower: (context) => Object.freeze({ family: context.family, strategy: "direct-chain" })
-});
-var switchCandidate = Object.freeze({
-  id: "switch",
-  evidence: Object.freeze(["PERF-ENUM-003"]),
-  supports: (context, profile) => {
-    const values = enumValues2(context.schema);
-    const cardinality = values?.length ?? 0;
-    return cardinality > profile.limits.enumChainMaxCardinality && cardinality <= profile.limits.enumSwitchMaxCardinality && values?.every((value) => typeof value === "number" && !Number.isNaN(value)) === true;
-  },
-  estimate: (context) => {
-    const cardinality = context.cardinality ?? 0;
-    return {
-      runtime: 0.8,
-      allocation: 0,
-      setup: 0,
-      codeSize: cardinality * 0.8 + 1,
-      cold: 1
-    };
-  },
-  lower: (context) => Object.freeze({ family: context.family, strategy: "switch" })
-});
-var lookup = Object.freeze({
-  id: "lookup-object",
-  evidence: Object.freeze(["PERF-ENUM-002"]),
-  supports: (context) => (context.cardinality ?? 0) > 4 && lookupSafe(context.schema),
-  estimate: (context) => ({
-    runtime: 1,
-    allocation: 0,
-    setup: 2,
-    codeSize: (context.cardinality ?? 0) + 2,
-    cold: 2
-  }),
-  lower: (context) => Object.freeze({ family: context.family, strategy: "lookup-object" })
-});
-var enumMembershipFamily = createStrategyFamily("enum.membership", [directChain, switchCandidate, lookup]);
-var catalog2 = createStrategyCatalog([enumMembershipFamily]);
-function resolveEnumMembershipStrategy(schema, profile) {
-  if (schema.type !== TypeName.enum && schema.type !== TypeName.literal) return void 0;
-  const model = normalizeConstraints(schema);
-  const cardinality = schema.type === TypeName.literal ? 1 : model.enumValues?.length;
-  if (cardinality === void 0) return void 0;
-  const context = { family: enumMembershipFamily.id, schema, facts: [], cardinality };
-  return catalog2.resolve(enumMembershipFamily, context, profile);
-}
-function lookupSafe(schema) {
-  if (typeof schema !== "object" || schema === null || !("def" in schema)) return false;
-  const def = schema.def;
-  const values = def?.values;
-  if (typeof values !== "object" || values === null) return false;
-  const entries = Object.values(values).filter(
-    (value) => typeof value === "string" || typeof value === "number"
-  );
-  if (entries.length === 0 || entries.some((value) => typeof value === "number" && Number.isNaN(value))) return false;
-  const type = typeof entries[0];
-  return entries.every((value) => typeof value === type);
-}
-function enumValues2(schema) {
-  if (typeof schema !== "object" || schema === null || !("def" in schema)) return void 0;
-  const values = schema.def?.values;
-  if (Array.isArray(values))
-    return values.filter((value) => typeof value === "string" || typeof value === "number");
-  if (typeof values !== "object" || values === null) return void 0;
-  return Object.values(values).filter(
-    (value) => typeof value === "string" || typeof value === "number"
-  );
-}
-
-// ../../packages/jit/src/compiler/target/portable-profile.ts
-var portableProfile = Object.freeze({
-  id: "portable-1",
-  runtime: "portable",
-  engine: "portable",
-  digest: "portable-1",
-  weights: Object.freeze({ runtime: 1, allocation: 8, setup: 3, codeSize: 4, cold: 2, branches: 0.5 }),
-  limits: Object.freeze({
-    arrayUnrollMaxLength: 4,
-    arrayUnrollMaxBodyCost: 2,
-    enumChainMaxCardinality: 4,
-    enumSwitchMaxCardinality: 16
-  }),
-  confidence: "fallback"
-});
-
-// ../../packages/jit/src/compiler/target/runtime-detector.ts
-function detectRuntimeFingerprint() {
-  const runtime = globalThis;
-  const processValue = runtime.process;
-  const versions = processValue?.versions;
-  return Object.freeze({
-    ...processValue?.version === void 0 ? {} : { node: processValue.version },
-    ...versions?.v8 === void 0 ? {} : { v8: versions.v8 },
-    ...versions?.uv === void 0 ? {} : { uv: versions.uv },
-    ...processValue?.arch === void 0 ? {} : { arch: processValue.arch },
-    ...processValue?.platform === void 0 ? {} : { platform: processValue.platform }
-  });
-}
-
-// ../../packages/jit/src/compiler/target/v8/profile.ts
-function createV8Profile(fingerprint, major) {
-  const id = `v8-${major}`;
-  return Object.freeze({
-    id,
-    runtime: "node",
-    engine: "v8",
-    engineVersion: major,
-    digest: id,
-    fingerprint,
-    weights: Object.freeze({ runtime: 1, allocation: 10, setup: 3, codeSize: 2, cold: 2, branches: 0.25 }),
-    limits: Object.freeze({
-      arrayUnrollMaxLength: 8,
-      arrayUnrollMaxBodyCost: 4,
-      enumChainMaxCardinality: 6,
-      enumSwitchMaxCardinality: 32
-    }),
-    confidence: "medium"
-  });
-}
-
-// ../../packages/jit/src/compiler/target/resolve-target.ts
-function resolveTargetProfile(target) {
-  if (target?.profile === "portable-1" || target?.runtime === "portable") return portableProfile;
-  if (target?.versions !== void 0 && target?.profile === void 0) return portableProfile;
-  const fingerprint = detectRuntimeFingerprint();
-  const major = majorV8(fingerprint.v8);
-  if (target?.profile?.startsWith("v8-") && target.profile.slice(3).length > 0) {
-    return createV8Profile(fingerprint, target.profile.slice(3));
-  }
-  if (target?.runtime === "node" && major !== void 0) return createV8Profile(fingerprint, major);
-  if (target === void 0 && major !== void 0) return createV8Profile(fingerprint, major);
-  return portableProfile;
-}
-function majorV8(version) {
-  const match2 = version?.match(/^(\d+)/);
-  return match2?.[1];
+// ../../packages/jit/src/extensions/extension-ir.ts
+function validateExtensionIR2(input) {
+  return validateExtensionIR(input);
 }
 
 // ../../packages/jit/src/extensions/extension-set.ts
 var ImmutableExtensionSet = class _ImmutableExtensionSet {
   constructor(plugins) {
     const byId = /* @__PURE__ */ new Map();
-    for (const plugin2 of plugins) {
-      assertDescriptor(plugin2);
-      const previous = byId.get(plugin2.id);
-      if (previous !== void 0 && extensionSignature(previous) !== extensionSignature(plugin2)) {
-        throw new Error(`extension ${plugin2.id} has conflicting descriptors`);
+    for (const plugin3 of plugins) {
+      assertDescriptor(plugin3);
+      const previous = byId.get(plugin3.id);
+      if (previous !== void 0 && extensionSignature(previous) !== extensionSignature(plugin3)) {
+        throw new Error(`extension ${plugin3.id} has conflicting descriptors`);
       }
-      byId.set(plugin2.id, freezeDescriptor(plugin2));
+      byId.set(plugin3.id, freezeDescriptor(plugin3));
     }
     assertCompositionNames([...byId.values()]);
     this.plugins = Object.freeze(
-      [...byId.values()].sort((left, right) => extensionSignature(left).localeCompare(extensionSignature(right)))
+      [...byId.values()].sort((left, right) => compareText4(extensionSignature(left), extensionSignature(right)))
     );
-    this.digest = digest(this.plugins);
+    this.digest = digest2(this.plugins);
     Object.freeze(this);
   }
-  add(plugin2) {
-    assertDescriptor(plugin2);
-    const sameIdentity = this.plugins.find((candidate) => candidate.id === plugin2.id);
-    if (sameIdentity !== void 0 && extensionSignature(sameIdentity) !== extensionSignature(plugin2))
-      throw new Error(`extension ${plugin2.id} is already installed with a different descriptor`);
+  add(plugin3) {
+    assertDescriptor(plugin3);
+    const sameIdentity = this.plugins.find((candidate) => candidate.id === plugin3.id);
+    if (sameIdentity !== void 0 && extensionSignature(sameIdentity) !== extensionSignature(plugin3))
+      throw new Error(`extension ${plugin3.id} is already installed with a different descriptor`);
     if (sameIdentity !== void 0) return this;
-    return new _ImmutableExtensionSet([...this.plugins, plugin2]);
+    return new _ImmutableExtensionSet([...this.plugins, plugin3]);
   }
 };
 function createExtensionSet(plugins = []) {
   return new ImmutableExtensionSet(plugins);
 }
-function digest(plugins) {
+function digest2(plugins) {
   let hash4 = 2166136261;
   const source = plugins.map(extensionSignature).join("|");
   for (let index2 = 0; index2 < source.length; index2++) {
@@ -2263,26 +2112,41 @@ function digest(plugins) {
   }
   return `ext-${(hash4 >>> 0).toString(16).padStart(8, "0")}`;
 }
-function assertIdentity(plugin2) {
-  if (typeof plugin2.id !== "string" || plugin2.id.length === 0 || typeof plugin2.version !== "string" || plugin2.version.length === 0 || !Number.isSafeInteger(plugin2.abi) || plugin2.abi < 1) {
+function compareText4(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+function assertIdentity(plugin3) {
+  if (typeof plugin3.id !== "string" || plugin3.id.length === 0 || typeof plugin3.version !== "string" || plugin3.version.length === 0 || !Number.isSafeInteger(plugin3.abi) || plugin3.abi < 1) {
     throw new TypeError("extensions require a non-empty id, version and positive integer ABI");
   }
+  if (plugin3.metadataDependencies !== void 0 && (!Array.isArray(plugin3.metadataDependencies) || plugin3.metadataDependencies.some((key) => typeof key !== "string" || key.length === 0) || new Set(plugin3.metadataDependencies).size !== plugin3.metadataDependencies.length)) {
+    throw new TypeError(`extension ${plugin3.id} metadata dependencies must be unique non-empty strings`);
+  }
 }
-function assertDescriptor(plugin2) {
-  assertIdentity(plugin2);
-  assertGrammar(plugin2.grammar);
-  if (plugin2.kind === "composition") {
-    if (plugin2.name.length === 0 || plugin2.target.length === 0 || typeof plugin2.compose !== "function")
-      throw new TypeError("composition extensions require a name, target, and compose function");
+function assertDescriptor(plugin3) {
+  assertIdentity(plugin3);
+  assertGrammar(plugin3.grammar);
+  if (plugin3.kind === "composition") {
+    assertCompositionDescriptor(plugin3);
     return;
   }
-  if (plugin2.kind === "semantic") {
-    if (plugin2.name.length === 0 || typeof plugin2.lower !== "function")
-      throw new TypeError("semantic extensions require a name and lower function");
+  if (plugin3.kind === "semantic") {
+    assertSemanticDescriptor(plugin3);
     return;
   }
-  if (plugin2.family.length === 0 || typeof plugin2.supports !== "function" || typeof plugin2.estimate !== "function" || typeof plugin2.lower !== "function")
-    throw new TypeError("strategy extensions require a family and supports, estimate, and lower functions");
+  assertStrategyDescriptor(plugin3);
+}
+function assertCompositionDescriptor(plugin3) {
+  if (plugin3.name.length === 0 || plugin3.target.length === 0 || typeof plugin3.compose !== "function")
+    throw new TypeError("composition extensions require a name, target, and compose function");
+}
+function assertSemanticDescriptor(plugin3) {
+  if (plugin3.name.length === 0 || typeof plugin3.lower !== "function")
+    throw new TypeError("semantic extensions require a name and lower function");
+}
+function assertStrategyDescriptor(plugin3) {
+  if (plugin3.family.length === 0 || plugin3.candidate.length === 0 || !Array.isArray(plugin3.evidence) || plugin3.evidence.some((id) => typeof id !== "string" || id.length === 0) || plugin3.optimized && plugin3.evidence.length === 0 || typeof plugin3.legality !== "function" || typeof plugin3.targetSupport !== "function" || typeof plugin3.estimate !== "function" || typeof plugin3.lower !== "function")
+    throw new TypeError("strategy extensions require a candidate, legality, target support, estimate, and IR lowering");
 }
 function assertGrammar(grammar) {
   if (typeof grammar !== "object" || grammar === null || Array.isArray(grammar))
@@ -2298,22 +2162,31 @@ function assertGrammar(grammar) {
       throw new TypeError(`extension grammar ${key} must contain only strings`);
   }
 }
-function extensionSignature(plugin2) {
+function extensionSignature(plugin3) {
   const descriptor2 = {
-    id: plugin2.id,
-    version: plugin2.version,
-    abi: plugin2.abi,
-    kind: plugin2.kind,
-    ...plugin2.kind === "composition" ? { name: plugin2.name, target: plugin2.target, grammar: plugin2.grammar } : {},
-    ...plugin2.kind === "semantic" ? { name: plugin2.name, grammar: plugin2.grammar } : {},
-    ...plugin2.kind === "strategy" ? { family: plugin2.family, grammar: plugin2.grammar } : {}
+    id: plugin3.id,
+    version: plugin3.version,
+    abi: plugin3.abi,
+    metadataDependencies: [...plugin3.metadataDependencies ?? []].sort(),
+    kind: plugin3.kind,
+    ...plugin3.kind === "composition" ? { name: plugin3.name, target: plugin3.target, grammar: plugin3.grammar } : {},
+    ...plugin3.kind === "semantic" ? { name: plugin3.name, grammar: plugin3.grammar } : {},
+    ...plugin3.kind === "strategy" ? {
+      family: plugin3.family,
+      candidate: plugin3.candidate,
+      optimized: plugin3.optimized,
+      portability: plugin3.portability,
+      evidence: [...plugin3.evidence].sort(),
+      grammar: plugin3.grammar
+    } : {}
   };
   return JSON.stringify(descriptor2);
 }
-function freezeDescriptor(plugin2) {
-  const grammar = plugin2.grammar;
+function freezeDescriptor(plugin3) {
+  const grammar = plugin3.grammar;
   return Object.freeze({
-    ...plugin2,
+    ...plugin3,
+    ...plugin3.metadataDependencies === void 0 ? {} : { metadataDependencies: Object.freeze([...plugin3.metadataDependencies].sort()) },
     grammar: Object.freeze({
       ...grammar,
       ...grammar.requires === void 0 ? {} : { requires: Object.freeze([...grammar.requires]) },
@@ -2325,24 +2198,27 @@ function freezeDescriptor(plugin2) {
 }
 function assertCompositionNames(plugins) {
   const names = /* @__PURE__ */ new Map();
-  for (const plugin2 of plugins) {
-    if (plugin2.kind !== "composition") continue;
-    const key = `${plugin2.target}.${plugin2.name}`;
+  for (const plugin3 of plugins) {
+    if (plugin3.kind !== "composition") continue;
+    const key = `${plugin3.target}.${plugin3.name}`;
     const previous = names.get(key);
-    if (previous !== void 0 && previous !== plugin2.id)
-      throw new Error(`composition extensions ${previous} and ${plugin2.id} both provide ${key}`);
-    names.set(key, plugin2.id);
+    if (previous !== void 0 && previous !== plugin3.id)
+      throw new Error(`composition extensions ${previous} and ${plugin3.id} both provide ${key}`);
+    names.set(key, plugin3.id);
   }
 }
 
 // ../../packages/jit/src/extensions/plugin.ts
 var plugin = Object.freeze({
+  /** Creates a composition plugin expressed through existing schema builders. */
   operator(descriptor2) {
     return Object.freeze(withIdentity(descriptor2, "composition"));
   },
+  /** Creates a semantic plugin lowered through the restricted extension IR. */
   semantic(descriptor2) {
     return Object.freeze(withIdentity(descriptor2, "semantic"));
   },
+  /** Creates an advanced physical candidate plugin. */
   strategy(descriptor2) {
     return Object.freeze(withIdentity(descriptor2, "strategy"));
   }
@@ -2459,12 +2335,12 @@ function reconfigureEnvironment(environment, input) {
     extensions: environment.extensions
   });
 }
-function extendEnvironment(environment, plugin2) {
+function extendEnvironment(environment, plugin3) {
   return Object.freeze({
-    id: `${environment.id}:extend:${plugin2.id}@${plugin2.version}`,
+    id: `${environment.id}:extend:${plugin3.id}@${plugin3.version}`,
     config: environment.config,
     globalRegistry: environment.globalRegistry,
-    extensions: environment.extensions.add(plugin2)
+    extensions: environment.extensions.add(plugin3)
   });
 }
 var schemaEnvironments = /* @__PURE__ */ new WeakMap();
@@ -2484,12 +2360,12 @@ function getActiveEnvironment() {
 function rememberSchemaEnvironment(schema, environment) {
   schemaEnvironments.set(schema, environment);
 }
-function rememberExtensionResult(value, plugin2, environment) {
-  if (isSchemaObject(value)) return annotateExtension(value, plugin2, environment);
+function rememberExtensionResult(value, plugin3, environment) {
+  if (isSchemaObject(value)) return annotateExtension(value, plugin3, environment);
   if (typeof value !== "object" || value === null || !("schema" in value)) return value;
   const builder2 = value;
   if (!isSchemaObject(builder2.schema)) return value;
-  builder2.schema = annotateExtension(builder2.schema, plugin2, environment);
+  builder2.schema = annotateExtension(builder2.schema, plugin3, environment);
   return value;
 }
 function environmentForSchema(schema) {
@@ -2520,10 +2396,10 @@ function findNestedEnvironment(schema, seen) {
 function isSchemaObject(value) {
   return typeof value === "object" && value !== null && "type" in value && "def" in value;
 }
-function annotateExtension(schema, plugin2, environment) {
+function annotateExtension(schema, plugin3, environment) {
   const annotations = isRecord(schema.annotations) ? schema.annotations : {};
   const previous = Array.isArray(annotations.extensions) ? annotations.extensions.filter(isExtensionIdentity) : [];
-  const identity = Object.freeze({ id: plugin2.id, version: plugin2.version, abi: plugin2.abi });
+  const identity = Object.freeze({ id: plugin3.id, version: plugin3.version, abi: plugin3.abi });
   const extensions = previous.some(
     (candidate) => candidate.id === identity.id && candidate.version === identity.version && candidate.abi === identity.abi
   ) ? previous : [...previous, identity].sort((left, right) => left.id.localeCompare(right.id));
@@ -2541,6 +2417,2462 @@ function isRecord(value) {
 }
 function isExtensionIdentity(value) {
   return isRecord(value) && typeof value.id === "string" && typeof value.version === "string" && typeof value.abi === "number" && Number.isSafeInteger(value.abi) && value.abi > 0;
+}
+
+// ../../packages/jit/src/core/hints/hint-merge.ts
+function mergeHints(left, right) {
+  if (!left) return right ?? {};
+  if (!right) return left;
+  const collection2 = mergeCollection(left.collection, right.collection);
+  const entity2 = right.entity ?? left.entity;
+  const index2 = right.index ?? left.index;
+  const order = right.order ?? left.order;
+  const compare3 = mergeOptional(left.compare, right.compare);
+  const clone3 = mergeOptional(left.clone, right.clone);
+  const hash4 = mergeOptional(left.hash, right.hash);
+  const diff3 = mergeOptional(left.diff, right.diff);
+  const serialize = mergeOptional(left.serialize, right.serialize);
+  return {
+    ...entity2 ? { entity: entity2 } : {},
+    ...index2 ? { index: index2 } : {},
+    ...order ? { order } : {},
+    ...collection2 ? { collection: collection2 } : {},
+    ...compare3 ? { compare: compare3 } : {},
+    ...clone3 ? { clone: clone3 } : {},
+    ...hash4 ? { hash: hash4 } : {},
+    ...diff3 ? { diff: diff3 } : {},
+    ...serialize ? { serialize } : {}
+  };
+}
+function mergeOptional(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  return {
+    ...left,
+    ...right
+  };
+}
+function mergeCollection(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  const ordered = left.ordered || right.ordered ? {
+    ...left.ordered,
+    ...right.ordered
+  } : void 0;
+  return {
+    ...left,
+    ...right,
+    ...ordered ? { ordered } : {}
+  };
+}
+
+// ../../packages/jit/src/core/hints/hint-resolver.ts
+function resolveHints(schema) {
+  let current = schema;
+  let hints = {};
+  while (current) {
+    const annotations = current.annotations;
+    hints = mergeHints(annotations?.hints, hints);
+    current = innerSchema(current);
+  }
+  if (hints.order && !hints.order.key && typeof hints.collection?.identify === "string") {
+    hints = mergeHints(hints, {
+      order: {
+        ...hints.order,
+        key: hints.collection.identify
+      }
+    });
+  }
+  return hints;
+}
+function innerSchema(schema) {
+  if (schema.type === "optional" || schema.type === "nullable" || schema.type === "nullish" || schema.type === "readonly" || schema.type === "promise" || schema.type === "default" || schema.type === "brand" || schema.type === "transform" || schema.type === "pipe" || schema.type === "refine" || schema.type === "coerce") {
+    return schema.def.innerType;
+  }
+  if (schema.type === "lazy") return schema.def.getter();
+  return void 0;
+}
+
+// ../../packages/jit/src/core/hints/hint-schema.ts
+function attachHint(schema, hints) {
+  const annotations = schema.annotations ?? {};
+  return {
+    type: schema.type,
+    _type: null,
+    def: schema.def,
+    annotations: {
+      ...annotations,
+      hints: mergeHints(annotations.hints, hints)
+    }
+  };
+}
+function attachMetadata(schema, metadata) {
+  const annotations = schema.annotations ?? {};
+  const result = {
+    type: schema.type,
+    _type: null,
+    def: schema.def,
+    annotations: { ...annotations, metadata: { ...annotations.metadata, ...metadata } }
+  };
+  rememberDescriptiveMetadata(result, executableSchema(schema));
+  return result;
+}
+
+// ../../packages/jit/src/compiler/row-keys.ts
+function resolveRowObjectSchema(schema, operation) {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.array || base.type === TypeName.set) {
+    base = resolveWrappers(base.def.element).base;
+  }
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers(base.def.innerType).base;
+  }
+  if (base.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", `${operation} expects an object or collection-of-objects schema`);
+  }
+  return base;
+}
+function resolveRowField(object2, key, operation) {
+  if (typeof key !== "string" || key.length === 0) {
+    throw new JITError("INVALID_OPERATION", `${operation} keys must be non-empty strings`);
+  }
+  const field = object2.def.props[key];
+  if (!field) {
+    throw new JITError("INVALID_OPERATION", `${operation} received unknown key ${JSON.stringify(key)}`, {
+      path: [key]
+    });
+  }
+  return field;
+}
+function resolveScalarKeyKind(schema, key, operation) {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers(base.def.innerType).base;
+  }
+  if (base.type === TypeName.date) return "date";
+  if (base.type === TypeName.number || base.type === TypeName.int) return "numeric";
+  if (base.type === TypeName.union) {
+    const options = base.def.options;
+    if (options.length > 0) {
+      const kinds = options.map((option) => resolveScalarKeyKind(option, key, operation));
+      if (kinds.every((kind) => kind === kinds[0])) return kinds[0];
+    }
+  }
+  if (base.type === TypeName.string || base.type === TypeName.bigint || base.type === TypeName.boolean || base.type === TypeName.literal || base.type === TypeName.enum) {
+    return "direct";
+  }
+  throw new JITError(
+    "INVALID_OPERATION",
+    `${operation} key ${JSON.stringify(key)} must resolve to a statically comparable scalar`,
+    { path: [key] }
+  );
+}
+function resolveScalarKeyDomain(schema, key, operation) {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers(base.def.innerType).base;
+  }
+  if (base.type === TypeName.string) return "string";
+  if (base.type === TypeName.number || base.type === TypeName.int || base.type === TypeName.nan) return "number";
+  if (base.type === TypeName.bigint) return "bigint";
+  if (base.type === TypeName.boolean) return "boolean";
+  if (base.type === TypeName.date) return "date";
+  if (base.type === TypeName.literal) {
+    const value = base.def.value;
+    if (typeof value === "string") return "string";
+    if (typeof value === "number") return "number";
+    if (typeof value === "bigint") return "bigint";
+    if (typeof value === "boolean") return "boolean";
+  }
+  if (base.type === TypeName.enum) {
+    const domains = new Set(Object.values(base.def.values).map((value) => typeof value));
+    if (domains.size === 1) {
+      const domain2 = domains.values().next().value;
+      if (domain2 === "string" || domain2 === "number") return domain2;
+    }
+  }
+  if (base.type === TypeName.union) {
+    const domains = base.def.options.map(
+      (option) => resolveScalarKeyDomain(option, key, operation)
+    );
+    if (domains.length > 0 && domains.every((domain2) => domain2 === domains[0])) return domains[0];
+  }
+  throw new JITError("INVALID_OPERATION", `${operation} key ${JSON.stringify(key)} has no scalar equality domain`, {
+    path: [key]
+  });
+}
+function isNullishField(schema) {
+  const resolved = resolveWrappers(schema);
+  return resolved.optional || resolved.nullable;
+}
+
+// ../../packages/jit/src/compiler/ordering.ts
+function resolveOrderingDescriptor(schema, criteria) {
+  const object2 = resolveRowObjectSchema(schema, "ordering");
+  if (criteria.length === 0) {
+    throw new JITError("INVALID_OPERATION", "ordering requires at least one criterion");
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const resolved = criteria.map((criterion) => {
+    if (criterion.direction !== "asc" && criterion.direction !== "desc") {
+      throw new JITError("INVALID_OPERATION", "ordering direction must be asc or desc");
+    }
+    const field = resolveRowField(object2, criterion.key, "ordering");
+    if (seen.has(criterion.key)) {
+      throw new JITError("INVALID_OPERATION", `ordering repeats key ${JSON.stringify(criterion.key)}`, {
+        path: [criterion.key]
+      });
+    }
+    seen.add(criterion.key);
+    return Object.freeze({
+      key: criterion.key,
+      direction: criterion.direction,
+      valueKind: resolveScalarKeyKind(field, criterion.key, "ordering"),
+      nullish: isNullishField(field)
+    });
+  });
+  return Object.freeze({ criteria: Object.freeze(resolved) });
+}
+function emitOrderingComparatorBody(writer, descriptor2, left = "left", right = "right") {
+  const last2 = descriptor2.criteria.length - 1;
+  let terminated = false;
+  descriptor2.criteria.forEach((criterion, index2) => {
+    const suffix = descriptor2.criteria.length === 1 ? "" : String(index2);
+    const date3 = criterion.valueKind === "date";
+    const leftRaw = `left${date3 ? "Raw" : "Value"}${suffix}`;
+    const rightRaw = `right${date3 ? "Raw" : "Value"}${suffix}`;
+    const leftValue = `leftValue${suffix}`;
+    const rightValue = `rightValue${suffix}`;
+    const leftPresentWins = criterion.direction === "desc" ? "-1" : "1";
+    const rightPresentWins = criterion.direction === "desc" ? "1" : "-1";
+    const subtract = criterion.valueKind === "numeric" && index2 === last2;
+    const emitCompare2 = () => {
+      if (date3) {
+        writer.line(`const ${leftValue} = ${leftRaw}.getTime();`);
+        writer.line(`const ${rightValue} = ${rightRaw}.getTime();`);
+      }
+      if (subtract) {
+        writer.line(
+          criterion.direction === "desc" ? `return ${rightValue} - ${leftValue};` : `return ${leftValue} - ${rightValue};`
+        );
+        return;
+      }
+      writer.line(`if (${leftValue} !== ${rightValue}) {`);
+      writer.indent(() => {
+        writer.line(
+          criterion.direction === "desc" ? `return ${leftValue} < ${rightValue} ? 1 : -1;` : `return ${leftValue} < ${rightValue} ? -1 : 1;`
+        );
+      });
+      writer.line("}");
+    };
+    writer.line(`const ${leftRaw} = ${emitPropertyAccess(left, criterion.key)};`);
+    writer.line(`const ${rightRaw} = ${emitPropertyAccess(right, criterion.key)};`);
+    if (!criterion.nullish) {
+      emitCompare2();
+      terminated = subtract;
+      return;
+    }
+    writer.line(`if (${leftRaw} == null || ${rightRaw} == null) {`);
+    writer.indent(() => {
+      writer.line(`if (${leftRaw} != null) return ${leftPresentWins};`);
+      writer.line(`if (${rightRaw} != null) return ${rightPresentWins};`);
+    });
+    writer.line("} else {");
+    writer.indent(emitCompare2);
+    writer.line("}");
+  });
+  if (!terminated) writer.line("return 0;");
+}
+function emitOrderingComparatorBodySource(descriptor2) {
+  const writer = new CodeWriter();
+  emitOrderingComparatorBody(writer, descriptor2);
+  return writer.toString();
+}
+
+// ../../packages/jit/src/compiler/source/literal.ts
+function emitLiteral(value) {
+  switch (typeof value) {
+    case "string":
+      return parse_exports.parseKey(value, { parseAsJson: true });
+    case "bigint":
+      return `${value}n`;
+    case "undefined":
+      return "undefined";
+    default:
+      return String(value);
+  }
+}
+function emitObjectKey(key) {
+  return parse_exports.parseKey(key);
+}
+
+// ../../packages/jit/src/compiler/ir/ir.ts
+function irVar(name) {
+  return { kind: "var", name };
+}
+function literal2(value) {
+  return { kind: "literal", value };
+}
+function not(expr) {
+  return { kind: "not", expr };
+}
+function strictEqual(left, right) {
+  return { kind: "binary", op: "strictEqual", left, right };
+}
+function notStrictEqual(left, right) {
+  return { kind: "binary", op: "notStrictEqual", left, right };
+}
+function sameValue(left, right) {
+  return { kind: "sameValue", left, right };
+}
+function sameNumber(left, right) {
+  return { kind: "sameNumber", left, right };
+}
+function arrayIsArray(value) {
+  return { kind: "array_isArray", value };
+}
+function schemaGuard(schema, value) {
+  return { kind: "schema_guard", schema, value };
+}
+function loadProp(base, key) {
+  return { kind: "load_prop", base, key };
+}
+function loadIndex(base, index2) {
+  return { kind: "load_index", base, index: index2 };
+}
+function call(callee, args = []) {
+  return { kind: "call", callee, args };
+}
+function binary(op, left, right) {
+  return { kind: "binary", op, left, right };
+}
+function allOf(operands) {
+  return { kind: "nary", op: "and", operands };
+}
+function objectLiteral(entries) {
+  return { kind: "object_literal", entries };
+}
+function arrayLiteral(elements = []) {
+  return { kind: "array_literal", elements };
+}
+function construct(ctor, args = []) {
+  return { kind: "construct", ctor, args };
+}
+function letDecl(target, expr) {
+  return expr === void 0 ? { kind: "let", target } : { kind: "let", target, expr };
+}
+function store(target, expr) {
+  return { kind: "store", target, expr };
+}
+function exprStmt(expr) {
+  return { kind: "expr_stmt", expr };
+}
+function forRange(index2, length, body) {
+  return { kind: "for_range", index: index2, length, body };
+}
+function forOf(item, iterable, body) {
+  return { kind: "for_of", item, iterable, body };
+}
+function append(target, cursor, value) {
+  return { kind: "append", target, cursor, value };
+}
+function sortByKey(target, ordering) {
+  return { kind: "sort_by_key", target, ordering };
+}
+function mapExprChildren(expr, mapExpr) {
+  switch (expr.kind) {
+    case "var":
+    case "literal":
+      return expr;
+    case "not":
+      return { ...expr, expr: mapExpr(expr.expr) };
+    case "binary":
+    case "sameValue":
+    case "sameNumber":
+      return { ...expr, left: mapExpr(expr.left), right: mapExpr(expr.right) };
+    case "typeof":
+    case "array_isArray":
+      return { ...expr, value: mapExpr(expr.value) };
+    case "nary":
+      return { ...expr, operands: expr.operands.map(mapExpr) };
+    case "schema_guard":
+      return { ...expr, value: mapExpr(expr.value) };
+    case "load_prop":
+      return { ...expr, base: mapExpr(expr.base) };
+    case "load_index":
+      return { ...expr, base: mapExpr(expr.base), index: mapExpr(expr.index) };
+    case "call":
+      return { ...expr, callee: mapExpr(expr.callee), args: expr.args.map(mapExpr) };
+    case "object_literal":
+      return { ...expr, entries: expr.entries.map((entry) => ({ ...entry, value: mapExpr(entry.value) })) };
+    case "array_literal":
+      return { ...expr, elements: expr.elements.map(mapExpr) };
+    case "construct":
+      return { ...expr, args: expr.args.map(mapExpr) };
+  }
+}
+function mapNodeExprs(node, mapExpr) {
+  switch (node.kind) {
+    case "assign":
+      return { ...node, expr: mapExpr(node.expr) };
+    case "let":
+      return node.expr === void 0 ? node : { ...node, expr: mapExpr(node.expr) };
+    case "store":
+      return { ...node, target: mapExpr(node.target), expr: mapExpr(node.expr) };
+    case "expr_stmt":
+      return { ...node, expr: mapExpr(node.expr) };
+    case "hash_compare":
+      return { ...node, leftHash: mapExpr(node.leftHash), rightHash: mapExpr(node.rightHash) };
+    case "map_equal":
+    case "binary_search_equal":
+      return { ...node, left: mapExpr(node.left), right: mapExpr(node.right) };
+    case "if":
+      return { ...node, test: mapExpr(node.test) };
+    case "for":
+      return { ...node, from: mapExpr(node.from) };
+    case "for_range":
+      return { ...node, length: mapExpr(node.length) };
+    case "for_of":
+      return { ...node, iterable: mapExpr(node.iterable) };
+    case "append":
+      return { ...node, value: mapExpr(node.value) };
+    case "return":
+      return { ...node, value: mapExpr(node.value) };
+    case "block":
+    case "sort_by_key":
+      return node;
+  }
+}
+function mapNodeBodies(node, mapNodes) {
+  switch (node.kind) {
+    case "block":
+      return { ...node, body: mapNodes(node.body) };
+    case "if":
+      return {
+        ...node,
+        then: mapNodes(node.then),
+        ...node.otherwise ? { otherwise: mapNodes(node.otherwise) } : {}
+      };
+    case "for":
+    case "for_range":
+    case "for_of":
+    case "map_equal":
+    case "binary_search_equal":
+      return { ...node, body: mapNodes(node.body) };
+    default:
+      return node;
+  }
+}
+
+// ../../packages/jit/src/compiler/defaults.ts
+var NO_DEFAULT = /* @__PURE__ */ Symbol("jit.no-static-default");
+function emitStaticDefaultSource(schema) {
+  const value = getStaticDefaultValue(schema);
+  if (value === NO_DEFAULT) return void 0;
+  return emitStaticDefaultValueSource(value, /* @__PURE__ */ new Set());
+}
+function staticDefaultIRExpr(schema) {
+  const value = getStaticDefaultValue(schema);
+  if (value === NO_DEFAULT) return void 0;
+  return staticValueIRExpr(value, /* @__PURE__ */ new Set());
+}
+function emitDefaultedValue(schema, valueExpr) {
+  const defaultSource = emitStaticDefaultSource(schema);
+  return defaultSource === void 0 ? valueExpr : `(${valueExpr} === undefined ? ${defaultSource} : ${valueExpr})`;
+}
+function getStaticDefaultValue(schema) {
+  let current = schema;
+  while (true) {
+    switch (current.type) {
+      case TypeName.default: {
+        const value = current.def.defaultValue;
+        return typeof value === "function" ? NO_DEFAULT : value;
+      }
+      case TypeName.optional:
+      case TypeName.nullish:
+        return NO_DEFAULT;
+      case TypeName.nullable:
+      case TypeName.brand:
+      case TypeName.readonly:
+      case TypeName.refine:
+      case TypeName.coerce:
+      case TypeName.pipe:
+      case TypeName.transform:
+        current = current.def.innerType;
+        continue;
+      case TypeName.lazy:
+        current = current.def.getter?.();
+        continue;
+      default:
+        return NO_DEFAULT;
+    }
+  }
+}
+function emitStaticDefaultValueSource(value, seen) {
+  if (value instanceof Date) return `new Date(${value.getTime()})`;
+  if (value === null) return "null";
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "bigint":
+    case "boolean":
+    case "undefined":
+      return emitLiteral(value);
+    case "object":
+      return emitStaticObjectDefaultSource(value, seen);
+    default:
+      return void 0;
+  }
+}
+function staticValueIRExpr(value, seen) {
+  if (value instanceof Date) return construct("Date", [literal2(value.getTime())]);
+  if (value === null) return literal2(null);
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "bigint":
+    case "boolean":
+    case "undefined":
+      return literal2(value);
+    case "object":
+      return staticObjectDefaultIRExpr(value, seen);
+    default:
+      return void 0;
+  }
+}
+function emitStaticObjectDefaultSource(value, seen) {
+  if (seen.has(value)) return void 0;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const elements = value.map((element) => emitStaticDefaultValueSource(element, seen));
+    seen.delete(value);
+    return elements.every((element) => element !== void 0) ? `[${elements.join(", ")}]` : void 0;
+  }
+  if (!isPlainObject(value)) {
+    seen.delete(value);
+    return void 0;
+  }
+  const entries = [];
+  for (const key of Object.keys(value)) {
+    const emitted = emitStaticDefaultValueSource(value[key], seen);
+    if (emitted === void 0) {
+      seen.delete(value);
+      return void 0;
+    }
+    entries.push(`${emitObjectKey(key)}: ${emitted}`);
+  }
+  seen.delete(value);
+  return `{ ${entries.join(", ")} }`;
+}
+function staticObjectDefaultIRExpr(value, seen) {
+  if (seen.has(value)) return void 0;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const elements = value.map((element) => staticValueIRExpr(element, seen));
+    seen.delete(value);
+    return elements.every((element) => element !== void 0) ? arrayLiteral(elements) : void 0;
+  }
+  if (!isPlainObject(value)) {
+    seen.delete(value);
+    return void 0;
+  }
+  const entries = [];
+  for (const key of Object.keys(value)) {
+    const emitted = staticValueIRExpr(value[key], seen);
+    if (emitted === void 0) {
+      seen.delete(value);
+      return void 0;
+    }
+    entries.push({ key, value: emitted });
+  }
+  seen.delete(value);
+  return objectLiteral(entries);
+}
+function isPlainObject(value) {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+// ../../packages/jit/src/compiler/source/guard.ts
+function emitSchemaGuard(schema, value) {
+  const resolved = resolveWrappers(schema);
+  const base = resolved.base;
+  const inner = emitBaseGuard(base, value);
+  const defaultable = emitStaticDefaultSource(schema) !== void 0;
+  if (resolved.optional && resolved.nullable) return `(${value} == null || (${inner}))`;
+  if (resolved.optional) return `(${value} === undefined || (${inner}))`;
+  if (resolved.nullable) {
+    return defaultable ? `(${value} === undefined || ${value} === null || (${inner}))` : `(${value} === null || (${inner}))`;
+  }
+  if (defaultable) return `(${value} === undefined || (${inner}))`;
+  return inner;
+}
+function emitBaseGuard(schema, value) {
+  switch (schema.type) {
+    case TypeName.any:
+    case TypeName.unknown:
+      return "true";
+    case TypeName.never:
+      return "false";
+    case TypeName.void:
+    case TypeName.undefined:
+      return `${value} === undefined`;
+    case TypeName.null:
+      return `${value} === null`;
+    case TypeName.string:
+      return `typeof ${value} === "string"`;
+    case TypeName.number:
+    case TypeName.int:
+    case TypeName.nan:
+      return `typeof ${value} === "number"`;
+    case TypeName.boolean:
+      return `typeof ${value} === "boolean"`;
+    case TypeName.bigint:
+      return `typeof ${value} === "bigint"`;
+    case TypeName.symbol:
+      return `typeof ${value} === "symbol"`;
+    case TypeName.date:
+      return `${value} instanceof Date`;
+    case TypeName.regex:
+      return `${value} instanceof RegExp`;
+    case TypeName.file:
+      return `(typeof File !== "undefined" && ${value} instanceof File)`;
+    case TypeName.json:
+      return "true";
+    case TypeName.custom:
+      return "true";
+    case TypeName.templateLiteral:
+      return `typeof ${value} === "string"`;
+    case TypeName.function:
+      return `typeof ${value} === "function"`;
+    case TypeName.temporal:
+      return emitTemporalGuard(schema, value);
+    case TypeName.codec:
+      return emitSchemaGuard(schema.def.input, value);
+    case TypeName.literal:
+      return emitLiteralGuard(schema, value);
+    case TypeName.enum:
+      return emitEnumGuard(schema, value);
+    case TypeName.array:
+      return `Array.isArray(${value})`;
+    case TypeName.set:
+      return `${value} instanceof Set`;
+    case TypeName.map:
+      return `${value} instanceof Map`;
+    case TypeName.record:
+      return `${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})`;
+    case TypeName.object:
+      return emitObjectGuard(schema, value);
+    case TypeName.tuple:
+      return `Array.isArray(${value})`;
+    case TypeName.union:
+      return `(${schema.def.options.map((option) => emitSchemaGuard(option, value)).join(" || ")})`;
+    case TypeName.xor:
+      return emitXorGuard(schema, value);
+    case TypeName.not:
+      return `!(${emitSchemaGuard(schema.def.innerType, value)})`;
+    case TypeName.when:
+      return `((${emitSchemaGuard(schema.def.thenType, value)}) || (${emitSchemaGuard(schema.def.otherwiseType, value)}))`;
+    case TypeName.discriminatedUnion:
+      return emitDiscriminatedUnionGuard(schema, value);
+    case TypeName.intersection:
+      return `(${schema.def.options.map((option) => emitSchemaGuard(option, value)).join(" && ")})`;
+    case TypeName.instanceof:
+      return emitInstanceOfGuard(schema, value);
+    default:
+      return "true";
+  }
+}
+function emitXorGuard(schema, value) {
+  const tests = schema.def.options.map((option) => emitSchemaGuard(option, value));
+  if (tests.length === 0) return "false";
+  return `(${tests.map((test) => `((${test}) ? 1 : 0)`).join(" + ")} === 1)`;
+}
+function emitObjectGuard(schema, value) {
+  const props = schema.def.props;
+  const checks = Object.entries(props).map(([key, prop]) => emitSchemaGuard(prop, emitPropertyAccess(value, key)));
+  const objectCheck = `${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})`;
+  return checks.length === 0 ? objectCheck : `(${objectCheck} && ${checks.join(" && ")})`;
+}
+function emitLiteralGuard(schema, value) {
+  const literal4 = schema.def.value;
+  if (typeof literal4 === "number") {
+    return `${value} === ${emitLiteral(literal4)} || (${value} !== ${value} && ${emitLiteral(literal4)} !== ${emitLiteral(literal4)})`;
+  }
+  return `${value} === ${emitLiteral(literal4)}`;
+}
+function emitEnumGuard(schema, value) {
+  const values = Object.values(schema.def.values);
+  if (values.length === 0) return "false";
+  return `(${values.map((enumValue) => `${value} === ${emitLiteral(enumValue)}`).join(" || ")})`;
+}
+function emitDiscriminatedUnionGuard(schema, value) {
+  const discriminator = schema.def.discriminator;
+  const tags = schema.def.options.map((option) => {
+    const tag = literalDiscriminatorValue(option, discriminator);
+    return tag === void 0 ? void 0 : `${emitPropertyAccess(value, discriminator)} === ${emitLiteral(tag)}`;
+  });
+  const filtered = tags.filter((tag) => tag !== void 0);
+  return filtered.length === 0 ? "false" : `(${filtered.join(" || ")})`;
+}
+function emitInstanceOfGuard(schema, value) {
+  const name = schema.def.ctor.name;
+  if (!name) return `${value} !== null && typeof ${value} === "object"`;
+  return `(typeof ${name} !== "undefined" && ${value} instanceof ${name})`;
+}
+function emitTemporalGuard(schema, value) {
+  const ctor = temporalConstructorName(schema.def.kind);
+  return `(globalThis.Temporal !== undefined && ${value} instanceof globalThis.Temporal.${ctor})`;
+}
+function temporalConstructorName(kind) {
+  switch (kind) {
+    case "instant":
+      return "Instant";
+    case "plainDate":
+      return "PlainDate";
+    case "plainTime":
+      return "PlainTime";
+    case "plainDateTime":
+      return "PlainDateTime";
+    case "zonedDateTime":
+      return "ZonedDateTime";
+    case "plainYearMonth":
+      return "PlainYearMonth";
+    case "plainMonthDay":
+      return "PlainMonthDay";
+    case "duration":
+      return "Duration";
+  }
+}
+function literalDiscriminatorValue(schema, discriminator) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.object) return void 0;
+  const props = resolved.def.props;
+  const prop = props[discriminator];
+  const propBase = prop ? resolveWrappers(prop).base : void 0;
+  if (propBase?.type !== TypeName.literal) return void 0;
+  const value = propBase.def.value;
+  return typeof value === "string" || typeof value === "number" ? value : void 0;
+}
+
+// ../../packages/jit/src/compiler/emitter/emit-expr.ts
+var BINARY_OPERATORS = {
+  strictEqual: "===",
+  notStrictEqual: "!==",
+  or: "||",
+  and: "&&",
+  add: "+",
+  divide: "/",
+  greaterThan: ">",
+  greaterThanOrEqual: ">=",
+  lessThan: "<",
+  lessThanOrEqual: "<="
+};
+var COMPARISON_OPERATORS = /* @__PURE__ */ new Set([
+  "strictEqual",
+  "notStrictEqual",
+  "greaterThan",
+  "greaterThanOrEqual",
+  "lessThan",
+  "lessThanOrEqual"
+]);
+function emitExpr(expr) {
+  switch (expr.kind) {
+    case "var":
+      return expr.name;
+    case "literal":
+      return emitLiteral(expr.value);
+    case "not":
+      return `!(${emitExpr(expr.expr)})`;
+    case "binary":
+      return `(${emitExpr(expr.left)} ${BINARY_OPERATORS[expr.op]} ${emitExpr(expr.right)})`;
+    case "nary":
+      return `(${expr.operands.map(emitConditionRaw).join(expr.op === "and" ? " && " : " || ")})`;
+    case "sameValue":
+      return `Object.is(${emitExpr(expr.left)}, ${emitExpr(expr.right)})`;
+    case "typeof":
+      return `typeof ${emitExpr(expr.value)} === ${emitLiteral(expr.type)}`;
+    case "array_isArray":
+      return `Array.isArray(${emitExpr(expr.value)})`;
+    case "sameNumber": {
+      const left = emitExpr(expr.left);
+      const right = emitExpr(expr.right);
+      return `(${left} === ${right} || (${left} !== ${left} && ${right} !== ${right}))`;
+    }
+    case "schema_guard":
+      return emitSchemaGuard(expr.schema, emitExpr(expr.value));
+    case "load_prop":
+      return emitPropertyAccess(emitExpr(expr.base), expr.key);
+    case "load_index":
+      return emitIndexAccess(emitExpr(expr.base), emitExpr(expr.index));
+    case "call":
+      return `${emitExpr(expr.callee)}(${expr.args.map(emitExpr).join(", ")})`;
+    case "object_literal": {
+      if (expr.entries.length === 0) return "{}";
+      const entries = expr.entries.map((entry) => `${emitLiteral(entry.key)}: ${emitExpr(entry.value)}`);
+      return `{ ${entries.join(", ")} }`;
+    }
+    case "array_literal":
+      return `[${expr.elements.map(emitExpr).join(", ")}]`;
+    case "construct":
+      return `new ${expr.ctor}(${expr.args.map(emitExpr).join(", ")})`;
+  }
+}
+function emitConditionRaw(expr) {
+  if (expr.kind === "binary" && COMPARISON_OPERATORS.has(expr.op)) {
+    return `${emitExpr(expr.left)} ${BINARY_OPERATORS[expr.op]} ${emitExpr(expr.right)}`;
+  }
+  if (expr.kind === "not") {
+    return `!(${emitConditionRaw(expr.expr)})`;
+  }
+  return emitExpr(expr);
+}
+
+// ../../packages/jit/src/compiler/emitter/emit-node.ts
+function emitNode(writer, node) {
+  switch (node.kind) {
+    case "block":
+      for (const child of node.body) emitNode(writer, child);
+      return;
+    case "assign":
+      writer.line(`const ${node.target.name} = ${emitExpr(node.expr)};`);
+      return;
+    case "let":
+      if (node.expr === void 0) {
+        writer.line(`let ${node.target.name};`);
+      } else {
+        writer.line(`let ${node.target.name} = ${emitExpr(node.expr)};`);
+      }
+      return;
+    case "store":
+      writer.line(`${emitExpr(node.target)} = ${emitExpr(node.expr)};`);
+      return;
+    case "expr_stmt":
+      writer.line(`${emitExpr(node.expr)};`);
+      return;
+    case "hash_compare":
+      writer.line(`if (${emitExpr(node.leftHash)} !== ${emitExpr(node.rightHash)}) {`);
+      writer.indent(() => {
+        writer.line("return false;");
+      });
+      writer.line("}");
+      return;
+    case "map_equal":
+      emitMapEqual(writer, node);
+      return;
+    case "binary_search_equal":
+      emitBinarySearchEqual(writer, node);
+      return;
+    case "if":
+      writer.line(`if (${emitTestExpr(node.test)}) {`);
+      writer.indent(() => {
+        for (const child of node.then) emitNode(writer, child);
+      });
+      if (node.otherwise && node.otherwise.length > 0) {
+        writer.line("} else {");
+        writer.indent(() => {
+          for (const child of node.otherwise ?? []) emitNode(writer, child);
+        });
+      }
+      writer.line("}");
+      return;
+    case "for":
+      writer.line(`for (let ${node.index.name} = ${emitExpr(node.from)}; ${node.index.name}-- !== 0;) {`);
+      writer.indent(() => {
+        for (const child of node.body) emitNode(writer, child);
+      });
+      writer.line("}");
+      return;
+    case "for_range": {
+      const index2 = node.index.name;
+      writer.line(`for (let ${index2} = 0; ${index2} < ${emitExpr(node.length)}; ${index2}++) {`);
+      writer.indent(() => {
+        for (const child of node.body) emitNode(writer, child);
+      });
+      writer.line("}");
+      return;
+    }
+    case "for_of":
+      writer.line(`for (const ${node.item.name} of ${emitExpr(node.iterable)}) {`);
+      writer.indent(() => {
+        for (const child of node.body) emitNode(writer, child);
+      });
+      writer.line("}");
+      return;
+    case "append":
+      writer.line(`${node.target.name}[${node.cursor.name}++] = ${emitExpr(node.value)};`);
+      return;
+    case "sort_by_key":
+      writer.line(`${node.target.name}.sort((left, right) => {`);
+      writer.indent(() => emitOrderingComparatorBody(writer, node.ordering));
+      writer.line("});");
+      return;
+    case "return":
+      writer.line(`return ${emitExpr(node.value)};`);
+      return;
+  }
+}
+function emitTestExpr(expr) {
+  if (expr.kind === "binary") {
+    const left = emitExpr(expr.left);
+    const right = emitExpr(expr.right);
+    if (expr.op === "strictEqual") return `${left} === ${right}`;
+    if (expr.op === "notStrictEqual") return `${left} !== ${right}`;
+  }
+  if (expr.kind === "nary") {
+    const op = expr.op === "and" ? " && " : " || ";
+    return expr.operands.map((operand) => `(${emitConditionRaw(operand)})`).join(op);
+  }
+  if (expr.kind === "not") {
+    const inner = expr.expr;
+    if (inner.kind === "sameNumber") {
+      const left = emitExpr(inner.left);
+      const right = emitExpr(inner.right);
+      return `${left} !== ${right} && (${left} === ${left} || ${right} === ${right})`;
+    }
+    if (inner.kind === "sameValue") {
+      return `!Object.is(${emitExpr(inner.left)}, ${emitExpr(inner.right)})`;
+    }
+    if (inner.kind === "binary" && inner.op === "strictEqual") {
+      return `${emitExpr(inner.left)} !== ${emitExpr(inner.right)}`;
+    }
+    if (inner.kind === "call") {
+      return `!${emitExpr(inner)}`;
+    }
+    if (inner.kind === "nary") {
+      return `!(${emitTestExpr(inner)})`;
+    }
+  }
+  return emitExpr(expr);
+}
+function emitMapEqual(writer, node) {
+  writer.line(`const ${node.length.name} = ${emitExpr(node.left)}.length;`);
+  writer.line(`if (${node.length.name} !== ${emitExpr(node.right)}.length) {`);
+  writer.indent(() => {
+    writer.line("return false;");
+  });
+  writer.line("}");
+  writer.line(`if (${node.length.name} < 64) {`);
+  writer.indent(() => {
+    writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
+    writer.indent(() => {
+      writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
+      writer.line("let found = false;");
+      writer.line(`for (let j = 0; j < ${node.length.name}; j++) {`);
+      writer.indent(() => {
+        writer.line(`const ${node.rightItem.name} = ${emitExpr(node.right)}[j];`);
+        writer.line(
+          `if (${emitPropertyAccess(node.rightItem.name, node.key)} === ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
+        );
+        writer.indent(() => {
+          writer.line("found = true;");
+          for (const child of node.body) emitNode(writer, child);
+          writer.line("break;");
+        });
+        writer.line("}");
+      });
+      writer.line("}");
+      writer.line("if (!found) {");
+      writer.indent(() => {
+        writer.line("return false;");
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+  });
+  writer.line("} else {");
+  writer.indent(() => {
+    writer.line(`let ${node.rightIndex.name};`);
+    writer.line(`${node.rightIndex.name} = __getIndex(${emitExpr(node.right)}, ${emitLiteral(node.key)});`);
+    writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
+    writer.indent(() => {
+      writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
+      writer.line(
+        `const ${node.rightItem.name} = ${node.rightIndex.name}.get(${emitPropertyAccess(node.leftItem.name, node.key)});`
+      );
+      writer.line(
+        `if (${node.rightItem.name} === undefined && !${node.rightIndex.name}.has(${emitPropertyAccess(node.leftItem.name, node.key)})) {`
+      );
+      writer.indent(() => {
+        writer.line("return false;");
+      });
+      writer.line("}");
+      for (const child of node.body) emitNode(writer, child);
+    });
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitBinarySearchEqual(writer, node) {
+  const compareLeft = node.direction === "desc" ? ">" : "<";
+  writer.line(`const ${node.length.name} = ${emitExpr(node.left)}.length;`);
+  writer.line(`if (${node.length.name} !== ${emitExpr(node.right)}.length) {`);
+  writer.indent(() => {
+    writer.line("return false;");
+  });
+  writer.line("}");
+  writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
+  writer.indent(() => {
+    writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
+    writer.line(`let ${node.searchLow.name} = 0;`);
+    writer.line(`let ${node.searchHigh.name} = ${node.length.name} - 1;`);
+    writer.line(`let ${node.rightItem.name};`);
+    writer.line(`while (${node.searchLow.name} <= ${node.searchHigh.name}) {`);
+    writer.indent(() => {
+      writer.line(`const ${node.searchMid.name} = (${node.searchLow.name} + ${node.searchHigh.name}) >> 1;`);
+      writer.line(`const ${node.found.name} = ${emitExpr(node.right)}[${node.searchMid.name}];`);
+      writer.line(
+        `if (${emitPropertyAccess(node.found.name, node.key)} === ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
+      );
+      writer.indent(() => {
+        writer.line(`${node.rightItem.name} = ${node.found.name};`);
+        writer.line("break;");
+      });
+      writer.line("}");
+      writer.line(
+        `if (${emitPropertyAccess(node.found.name, node.key)} ${compareLeft} ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
+      );
+      writer.indent(() => {
+        writer.line(`${node.searchLow.name} = ${node.searchMid.name} + 1;`);
+      });
+      writer.line("} else {");
+      writer.indent(() => {
+        writer.line(`${node.searchHigh.name} = ${node.searchMid.name} - 1;`);
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+    writer.line(`if (${node.rightItem.name} === undefined) {`);
+    writer.indent(() => {
+      writer.line("return false;");
+    });
+    writer.line("}");
+    for (const child of node.body) emitNode(writer, child);
+  });
+  writer.line("}");
+}
+
+// ../../packages/jit/src/compiler/schema-recursion.ts
+function resolveLazySchema(schema) {
+  let current = schema;
+  let guard = 0;
+  while (current.type === TypeName.lazy && guard++ < 100) {
+    current = current.def.getter();
+  }
+  return current;
+}
+function schemaChildren(schema) {
+  const current = schema;
+  const def = current.def;
+  switch (current.type) {
+    case TypeName.object:
+      return Object.values(def.props ?? {});
+    case TypeName.array:
+    case TypeName.set:
+      return def.element ? [def.element] : [];
+    case TypeName.map:
+      return [def.key, def.value].filter(Boolean);
+    case TypeName.record:
+      return def.value ? [def.value] : [];
+    case TypeName.tuple:
+      return [
+        ...def.items ?? [],
+        ...def.rest ? [def.rest] : []
+      ];
+    case TypeName.union:
+    case TypeName.xor:
+    case TypeName.discriminatedUnion:
+    case TypeName.intersection:
+      return def.options ?? [];
+    case TypeName.when:
+      return [def.thenType, def.otherwiseType].filter(Boolean);
+    case TypeName.codec:
+      return [def.input, def.output].filter(Boolean);
+    default:
+      return def.innerType ? [def.innerType] : [];
+  }
+}
+var RECURSIVE_CACHE = /* @__PURE__ */ new WeakMap();
+function findRecursiveSchemas(schema) {
+  const cached = RECURSIVE_CACHE.get(schema);
+  if (cached !== void 0) return cached;
+  const recursive = /* @__PURE__ */ new Set();
+  const stack = /* @__PURE__ */ new Set();
+  const seen = /* @__PURE__ */ new Set();
+  const walk = (node) => {
+    const target = resolveLazySchema(node);
+    if (stack.has(target)) {
+      recursive.add(target);
+      return;
+    }
+    if (seen.has(target)) return;
+    seen.add(target);
+    stack.add(target);
+    for (const child of schemaChildren(target)) walk(child);
+    stack.delete(target);
+  };
+  walk(schema);
+  RECURSIVE_CACHE.set(schema, recursive);
+  return recursive;
+}
+
+// ../../packages/jit/src/compiler/facts/constraint-model.ts
+function normalizeConstraints(schema) {
+  const wrappers = resolveWrappers(schema);
+  const base = wrappers.base;
+  const dimension = constraintDimension(base.type);
+  const normalized = mergeChecks(readChecks(base), dimension);
+  const withTuple = base.type === TypeName.tuple ? mergeTupleBound(base, normalized) : normalized;
+  const bound = exactify(withTuple.bound);
+  const contradictions = withTuple.contradictions;
+  const values = enumValues(base);
+  const element = elementOf(base);
+  const length = dimension === "length" ? bound : void 0;
+  const cardinality = dimension === "cardinality" ? bound : void 0;
+  const range = dimension === "range" ? bound : void 0;
+  const model = {
+    type: base.type,
+    ...length === void 0 ? {} : { length },
+    ...cardinality === void 0 ? {} : { cardinality },
+    ...range === void 0 ? {} : { range },
+    ...base.type === TypeName.object ? {
+      knownKeys: Object.freeze(Object.keys(base.def.props)),
+      exactKeys: base.def.unknownKeys === "strict"
+    } : {},
+    ...values === void 0 ? {} : { enumValues: Object.freeze(values) },
+    ...base.type === TypeName.literal ? { literalValue: base.def.value } : {},
+    nullable: wrappers.nullable,
+    optional: wrappers.optional,
+    nonNull: !wrappers.nullable && !wrappers.optional,
+    ...element === void 0 ? {} : { element },
+    primitiveElement: isPrimitive(element),
+    stableShape: base.type === TypeName.object,
+    contradictions: Object.freeze(contradictions)
+  };
+  return Object.freeze(model);
+}
+function constraintDimension(type) {
+  if (type === TypeName.string) return "length";
+  if (type === TypeName.array || type === TypeName.tuple) return "cardinality";
+  return isNumericType(type) ? "range" : void 0;
+}
+function mergeChecks(checks, dimension) {
+  let bound;
+  const contradictions = [];
+  if (dimension === void 0) return { contradictions };
+  for (const check of checks) {
+    const next = boundForCheck(check, dimension);
+    if (next === void 0) continue;
+    const merged = mergeBound(bound, next, check.kind);
+    bound = merged.bound;
+    if (merged.contradiction !== void 0) contradictions.push(merged.contradiction);
+  }
+  return { ...bound === void 0 ? {} : { bound }, contradictions };
+}
+function mergeTupleBound(schema, analysis) {
+  const tuple2 = schema.def;
+  const structuralBound = tuple2.rest === void 0 ? { exact: tuple2.items.length, minimum: tuple2.items.length, maximum: tuple2.items.length } : { minimum: tuple2.items.length };
+  const merged = mergeBound(analysis.bound, structuralBound, "tuple");
+  return {
+    ...merged.bound === void 0 ? {} : { bound: merged.bound },
+    contradictions: merged.contradiction === void 0 ? analysis.contradictions : [...analysis.contradictions, merged.contradiction]
+  };
+}
+function exactify(bound) {
+  if (bound?.exact !== void 0 || bound?.minimum === void 0 || bound.minimum !== bound.maximum) return bound;
+  return { ...bound, exact: bound.minimum };
+}
+function readChecks(schema) {
+  const checks = schema.def.checks;
+  return Array.isArray(checks) ? checks : [];
+}
+function isNumericType(type) {
+  return type === TypeName.number || type === TypeName.int;
+}
+function boundForCheck(check, dimension) {
+  switch (check.kind) {
+    case "length":
+      return isLengthDimension(dimension) ? exactBound(check.value) : void 0;
+    case "nonEmpty":
+      return isLengthDimension(dimension) ? { minimum: 1 } : void 0;
+    case "min":
+    case "gte":
+      return minimumBound(check.value);
+    case "max":
+    case "lte":
+      return maximumBound(check.value);
+    case "moreThan":
+    case "gt":
+      return exclusiveMinimumBound(check.value);
+    case "lessThan":
+    case "lt":
+      return exclusiveMaximumBound(check.value);
+    default:
+      return void 0;
+  }
+}
+function isLengthDimension(dimension) {
+  return dimension === "length" || dimension === "cardinality";
+}
+function exactBound(value) {
+  return typeof value === "number" ? { exact: value, minimum: value, maximum: value } : void 0;
+}
+function minimumBound(value) {
+  return typeof value === "number" ? { minimum: value } : void 0;
+}
+function maximumBound(value) {
+  return typeof value === "number" ? { maximum: value } : void 0;
+}
+function exclusiveMinimumBound(value) {
+  return typeof value === "number" ? { minimum: value, minimumInclusive: false } : void 0;
+}
+function exclusiveMaximumBound(value) {
+  return typeof value === "number" ? { maximum: value, maximumInclusive: false } : void 0;
+}
+function mergeBound(current, next, checkKind) {
+  if (current === void 0) return { bound: next };
+  const minimum = chooseMinimum(current, next);
+  const maximum = chooseMaximum(current, next);
+  const exact = chooseExact(current.exact, next.exact);
+  const merged = createMergedBound(minimum, maximum, exact);
+  const contradiction = findContradiction(current, next, minimum, maximum, exact, checkKind);
+  return { bound: Object.freeze(merged), ...contradiction === void 0 ? {} : { contradiction } };
+}
+function createMergedBound(minimum, maximum, exact) {
+  return {
+    ...minimum.value === void 0 ? {} : { minimum: minimum.value },
+    ...maximum.value === void 0 ? {} : { maximum: maximum.value },
+    ...exact === void 0 ? {} : { exact },
+    ...minimum.inclusive ? {} : { minimumInclusive: false },
+    ...maximum.inclusive ? {} : { maximumInclusive: false }
+  };
+}
+function findContradiction(current, next, minimum, maximum, exact, checkKind) {
+  const exactConflict = hasExactConflict(current, next);
+  const exactOutside = isExactOutside(exact, minimum, maximum);
+  const rangeConflict = isRangeConflict(minimum, maximum);
+  if (!exactConflict && !exactOutside && !rangeConflict) return void 0;
+  return {
+    code: exact !== void 0 ? "length_conflict" : "range_conflict",
+    message: `constraint ${checkKind} makes the normalized bounds impossible`,
+    checks: Object.freeze([checkKind])
+  };
+}
+function hasExactConflict(left, right) {
+  return left.exact !== void 0 && right.exact !== void 0 && left.exact !== right.exact;
+}
+function isExactOutside(exact, minimum, maximum) {
+  if (exact === void 0) return false;
+  return isBelowMinimum(exact, minimum) || isAboveMaximum(exact, maximum);
+}
+function isBelowMinimum(exact, minimum) {
+  return minimum.value !== void 0 && (exact < minimum.value || exact === minimum.value && !minimum.inclusive);
+}
+function isAboveMaximum(exact, maximum) {
+  return maximum.value !== void 0 && (exact > maximum.value || exact === maximum.value && !maximum.inclusive);
+}
+function isRangeConflict(minimum, maximum) {
+  if (minimum.value === void 0 || maximum.value === void 0) return false;
+  return minimum.value > maximum.value || minimum.value === maximum.value && (!minimum.inclusive || !maximum.inclusive);
+}
+function chooseMinimum(left, right) {
+  if (left.minimum === void 0) return { value: right.minimum, inclusive: right.minimumInclusive !== false };
+  if (right.minimum === void 0) return { value: left.minimum, inclusive: left.minimumInclusive !== false };
+  if (left.minimum > right.minimum) return { value: left.minimum, inclusive: left.minimumInclusive !== false };
+  if (right.minimum > left.minimum) return { value: right.minimum, inclusive: right.minimumInclusive !== false };
+  return {
+    value: left.minimum,
+    inclusive: left.minimumInclusive !== false && right.minimumInclusive !== false
+  };
+}
+function chooseMaximum(left, right) {
+  if (left.maximum === void 0) return { value: right.maximum, inclusive: right.maximumInclusive !== false };
+  if (right.maximum === void 0) return { value: left.maximum, inclusive: left.maximumInclusive !== false };
+  if (left.maximum < right.maximum) return { value: left.maximum, inclusive: left.maximumInclusive !== false };
+  if (right.maximum < left.maximum) return { value: right.maximum, inclusive: right.maximumInclusive !== false };
+  return {
+    value: left.maximum,
+    inclusive: left.maximumInclusive !== false && right.maximumInclusive !== false
+  };
+}
+function chooseExact(left, right) {
+  if (left === void 0) return right;
+  if (right === void 0 || left === right) return left;
+  return left;
+}
+function enumValues(schema) {
+  if (schema.type !== TypeName.enum) return void 0;
+  const values = schema.def.values;
+  const raw = Array.isArray(values) ? values : Object.values(values);
+  return [
+    ...new Set(raw.filter((value) => typeof value === "string" || typeof value === "number"))
+  ];
+}
+function elementOf(schema) {
+  if (schema.type === TypeName.array || schema.type === TypeName.set) return schema.def.element;
+  return void 0;
+}
+function isPrimitive(schema) {
+  if (schema === void 0) return false;
+  const base = resolveWrappers(schema).base;
+  return base.type === TypeName.string || base.type === TypeName.number || base.type === TypeName.int || base.type === TypeName.boolean || base.type === TypeName.literal || base.type === TypeName.enum;
+}
+
+// ../../packages/jit/src/compiler/facts/schema-facts.ts
+function deriveSchemaFacts(schema, path = []) {
+  return deriveSchemaFactsInternal(schema, path, /* @__PURE__ */ new Set());
+}
+function deriveSchemaFactsInternal(schema, path, seen) {
+  const { base, optional: optional3, nullable: nullable3 } = resolveWrappers(schema);
+  if (seen.has(base)) return [];
+  seen.add(base);
+  const model = normalizeConstraints(schema);
+  const hints = resolveHints(schema);
+  const facts = deriveTypeFacts(base, model, path, seen);
+  if (optional3) facts.push(fact("Optional", path));
+  if (nullable3) facts.push(fact("Nullable", path));
+  if (!optional3 && !nullable3 && base.type !== TypeName.object) facts.push(fact("NonNull", path));
+  appendHintFacts(facts, hints, path);
+  addBoundFacts(facts, model.length, "Length", path);
+  addBoundFacts(facts, model.cardinality, "Cardinality", path);
+  appendRangeFact(facts, model.range, path);
+  appendGenericChildren(facts, base, path, seen);
+  seen.delete(base);
+  return facts;
+}
+function deriveTypeFacts(schema, model, path, seen) {
+  switch (schema.type) {
+    case TypeName.string:
+      return [fact("IsString", path)];
+    case TypeName.number:
+      return [fact("IsNumber", path)];
+    case TypeName.int:
+      return [fact("IsNumber", path), fact("IsInteger", path)];
+    case TypeName.boolean:
+      return [fact("IsBoolean", path)];
+    case TypeName.object:
+      return deriveObjectFacts(schema, model, path, seen);
+    case TypeName.array:
+      return deriveArrayFacts(model, path, seen);
+    case TypeName.tuple:
+      return deriveTupleFacts(schema, path, seen);
+    case TypeName.enum:
+      return deriveEnumFacts(model, path);
+    case TypeName.literal:
+      return [factWith("LiteralValue", path, { value: model.literalValue })];
+    default:
+      return [];
+  }
+}
+function deriveObjectFacts(schema, model, path, seen) {
+  const props = schema.def.props;
+  const facts = [fact("IsObject", path), fact("NonNull", path), fact("KnownShape", path), fact("StableShape", path)];
+  facts.push(factWith("KnownKeys", path, { values: model.knownKeys ?? [] }));
+  if (model.exactKeys) facts.push(fact("ExactKeys", path), fact("MonomorphicShape", path));
+  for (const key of model.knownKeys ?? []) {
+    const childPath = [...path, key];
+    facts.push(fact("KnownField", childPath), ...deriveSchemaFactsInternal(props[key], childPath, seen));
+  }
+  return facts;
+}
+function deriveArrayFacts(model, path, seen) {
+  const facts = model.primitiveElement ? [fact("PrimitiveElement", path)] : [];
+  if (model.element !== void 0) {
+    facts.push(
+      factWith("KnownElementType", path, { elementType: model.element.type }),
+      ...deriveSchemaFactsInternal(model.element, [...path, "element"], seen)
+    );
+  }
+  return facts;
+}
+function deriveTupleFacts(schema, path, seen) {
+  const facts = [];
+  for (const [index2, child] of schemaChildren(schema).entries()) {
+    facts.push(...deriveSchemaFactsInternal(child, [...path, String(index2)], seen));
+  }
+  return facts;
+}
+function deriveEnumFacts(model, path) {
+  if (model.enumValues === void 0) return [];
+  return [
+    factWith("EnumValues", path, { values: model.enumValues }),
+    factWith("EnumCardinality", path, { exact: model.enumValues.length })
+  ];
+}
+function appendRangeFact(facts, range, path) {
+  if (range === void 0) return;
+  facts.push(
+    Object.freeze({
+      kind: "Range",
+      path: Object.freeze([...path]),
+      ...range.minimum === void 0 ? {} : { minimum: range.minimum },
+      ...range.maximum === void 0 ? {} : { maximum: range.maximum }
+    })
+  );
+}
+function appendGenericChildren(facts, schema, path, seen) {
+  if (isSpecializedNode(schema.type)) return;
+  for (const [index2, child] of schemaChildren(schema).entries()) {
+    facts.push(...deriveSchemaFactsInternal(child, [...path, `$${index2}`], seen));
+  }
+}
+function isSpecializedNode(type) {
+  return type === TypeName.object || type === TypeName.array || type === TypeName.tuple || type === TypeName.enum || type === TypeName.literal;
+}
+function addBoundFacts(facts, bound, dimension, path) {
+  if (bound === void 0) return;
+  if (bound.exact !== void 0 && Number.isFinite(bound.exact))
+    facts.push(factWith(`Exact${dimension}`, path, { exact: bound.exact }));
+  else {
+    if (bound.minimum !== void 0) facts.push(factWith(`Min${dimension}`, path, { minimum: bound.minimum }));
+    if (bound.maximum !== void 0) facts.push(factWith(`Max${dimension}`, path, { maximum: bound.maximum }));
+  }
+}
+function fact(kind, path = []) {
+  return Object.freeze({ kind, path: Object.freeze([...path]) });
+}
+function factWith(kind, path, fields) {
+  return Object.freeze({ ...fact(kind, path), ...fields });
+}
+function appendHintFacts(facts, hints, path) {
+  const collection2 = hints.collection;
+  if (typeof collection2?.uniqueBy === "string") facts.push(factWith("UniqueBy", path, { value: collection2.uniqueBy }));
+  if (collection2?.indexed === true && typeof collection2.identify === "string") {
+    facts.push(factWith("IndexedBy", path, { value: collection2.identify }));
+  }
+  const ordered = collection2?.ordered ?? hints.order;
+  if (typeof ordered?.key === "string") facts.push(factWith("OrderedBy", path, { value: ordered.key }));
+  if (hints.hash?.strategy !== void 0) facts.push(factWith("HashedBy", path, { value: hints.hash.strategy }));
+}
+
+// ../../packages/jit/src/compiler/extension-lowering.ts
+function lowerExtensionIR(input) {
+  const validated = validateExtensionIR2(input).ir;
+  if (validated.effects?.includes("issues"))
+    throw new TypeError("issue-producing extension IR must be consumed by an operation-specific compiler stage");
+  const values = /* @__PURE__ */ new Map();
+  for (let index2 = 0; index2 < validated.nodes.length; index2++) {
+    const node = validated.nodes[index2];
+    if (node === void 0) throw new TypeError(`extension IR node ${index2} is missing`);
+    lowerNode(node, index2, values);
+  }
+  const result = validated.nodes[validated.result];
+  if (result?.kind !== "return" || result.value === void 0)
+    throw new TypeError("expression extension IR must return a value");
+  return Object.freeze({
+    kind: "program",
+    params: Object.freeze([irVar("value")]),
+    body: Object.freeze([{ kind: "return", value: expression(result.value, values) }])
+  });
+}
+var nodeLowerers = Object.freeze({
+  load: (node, index2, values) => values.set(index2, lowerLoad(node.path)),
+  literal: (node, index2, values) => values.set(index2, literal2(node.value)),
+  compare: (node, index2, values) => values.set(index2, lowerComparison(node.operator, expression(node.left, values), expression(node.right, values))),
+  logical: (node, index2, values) => values.set(index2, {
+    kind: "nary",
+    op: node.operator,
+    operands: node.operands.map((operand) => expression(operand, values))
+  }),
+  not: (node, index2, values) => values.set(index2, { kind: "not", expr: expression(node.input, values) }),
+  callIntrinsic: (node, index2, values) => values.set(
+    index2,
+    lowerIntrinsic(
+      node.name,
+      node.args.map((argument) => expression(argument, values))
+    )
+  ),
+  transform: (node, index2, values) => values.set(index2, lowerTransformNode(node.input, node.intrinsic, values)),
+  return: () => {
+  },
+  branch: (node) => unsupportedNode(node.kind),
+  loop: (node) => unsupportedNode(node.kind),
+  emitIssue: (node) => unsupportedNode(node.kind)
+});
+function lowerNode(node, index2, values) {
+  const lower = nodeLowerers[node.kind];
+  lower(node, index2, values);
+}
+function unsupportedNode(kind) {
+  throw new TypeError(`extension IR ${kind} requires an operation-specific compiler stage`);
+}
+function lowerLoad(path) {
+  let value = irVar("value");
+  for (const key of path)
+    value = typeof key === "string" ? loadProp(value, key) : { kind: "load_index", base: value, index: literal2(key) };
+  return value;
+}
+function lowerTransformNode(input, intrinsic, values) {
+  const value = expression(input, values);
+  return intrinsic === void 0 ? value : lowerTransform(intrinsic, value);
+}
+function resolveSemanticExtensionPlans(schema, extensions, facts = deriveSchemaFacts(schema)) {
+  const semantic = extensions.plugins.filter(
+    (extension) => extension.kind === "semantic"
+  );
+  if (semantic.length === 0) return Object.freeze([]);
+  const normalizedFacts = Object.freeze(
+    [...facts].sort(
+      (left, right) => compareText5(left.path.join("\0"), right.path.join("\0")) || compareText5(left.kind, right.kind) || compareText5(stableValue(left), stableValue(right))
+    )
+  );
+  const plans = semantic.map((extension) => {
+    const dependencies = new Set(extension.metadataDependencies ?? []);
+    const safeSchema = stripUndeclaredMetadata(schema, dependencies, /* @__PURE__ */ new Map());
+    const metadata = metadataRecord(schema, dependencies);
+    const validated = validateExtensionIR2(
+      extension.lower(
+        Object.freeze({
+          schema: safeSchema,
+          facts: normalizedFacts,
+          metadata
+        })
+      )
+    );
+    if (validated.resultType !== "boolean")
+      throw new TypeError(`semantic extension ${extension.id} must return a boolean predicate`);
+    const program = lowerExtensionIR(validated.ir);
+    const terminal = program.body[0];
+    if (terminal?.kind !== "return")
+      throw new TypeError(`semantic extension ${extension.id} did not lower to a predicate`);
+    return Object.freeze({
+      id: extension.id,
+      version: extension.version,
+      irDigest: validated.digest,
+      expression: terminal.value
+    });
+  });
+  return Object.freeze(plans);
+}
+function expression(index2, values) {
+  const value = values.get(index2);
+  if (value === void 0) throw new TypeError(`extension IR expression ${index2} is unavailable to lowering`);
+  return value;
+}
+function lowerIntrinsic(name, args) {
+  const value = args[0];
+  if (value === void 0) throw new TypeError(`intrinsic ${name} has no argument`);
+  if (name === "isArray") return arrayIsArray(value);
+  if (name === "isNull") return strictEqual(value, literal2(null));
+  if (name === "isDefined") return { kind: "binary", op: "notStrictEqual", left: value, right: literal2(void 0) };
+  if (name === "stringLength" || name === "arrayLength") return loadProp(value, "length");
+  return {
+    kind: "typeof",
+    value,
+    type: name.slice(2).toLowerCase()
+  };
+}
+function lowerComparison(operator, left, right) {
+  switch (operator) {
+    case "eq":
+      return strictEqual(left, right);
+    case "neq":
+      return { kind: "binary", op: "notStrictEqual", left, right };
+    case "lt":
+      return { kind: "binary", op: "lessThan", left, right };
+    case "lte":
+      return { kind: "binary", op: "lessThanOrEqual", left, right };
+    case "gt":
+      return { kind: "binary", op: "greaterThan", left, right };
+    case "gte":
+      return { kind: "binary", op: "greaterThanOrEqual", left, right };
+  }
+}
+function lowerTransform(intrinsic, value) {
+  const method = intrinsic === "string.trim" ? "trim" : intrinsic === "string.toLowerCase" ? "toLowerCase" : "toUpperCase";
+  return { kind: "call", callee: loadProp(value, method), args: [] };
+}
+function metadataRecord(schema, dependencies) {
+  if (typeof schema !== "object" || schema === null || !("annotations" in schema)) return Object.freeze({});
+  const annotations = schema.annotations;
+  if (typeof annotations !== "object" || annotations === null || !("metadata" in annotations)) return Object.freeze({});
+  const metadata = annotations.metadata;
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return Object.freeze({});
+  return Object.freeze(
+    Object.fromEntries(
+      [...dependencies].sort(compareText5).flatMap(
+        (key) => Object.keys(metadata).includes(key) ? [[key, sanitizeMetadata(metadata[key])]] : []
+      )
+    )
+  );
+}
+function sanitizeMetadata(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("declared semantic metadata dependencies must be finite numbers");
+    return value;
+  }
+  return sanitizeMetadataObject(value, /* @__PURE__ */ new Set());
+}
+function sanitizeMetadataObject(value, seen) {
+  if (typeof value !== "object" || value === null || seen.has(value))
+    throw new TypeError("declared semantic metadata dependencies must be acyclic portable values");
+  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)
+    throw new TypeError("declared semantic metadata dependencies must be plain objects or arrays");
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const copy2 = Object.freeze(value.map((entry) => sanitizeMetadataNested(entry, seen)));
+    seen.delete(value);
+    return copy2;
+  }
+  const entries = Object.entries(value).sort(
+    ([left], [right]) => left < right ? -1 : left > right ? 1 : 0
+  );
+  const copy = Object.freeze(
+    Object.fromEntries(entries.map(([key, entry]) => [key, sanitizeMetadataNested(entry, seen)]))
+  );
+  seen.delete(value);
+  return copy;
+}
+function sanitizeMetadataNested(value, seen) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("declared semantic metadata dependencies must be finite numbers");
+    return value;
+  }
+  return sanitizeMetadataObject(value, seen);
+}
+function stripUndeclaredMetadata(value, dependencies, seen) {
+  if (typeof value !== "object" || value === null) return value;
+  const previous = seen.get(value);
+  if (previous !== void 0) return previous;
+  if (Array.isArray(value)) {
+    const copy2 = [];
+    seen.set(value, copy2);
+    for (const entry of value) copy2.push(stripUndeclaredMetadata(entry, dependencies, seen));
+    return Object.freeze(copy2);
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  const copy = {};
+  seen.set(value, copy);
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "annotations" && typeof entry === "object" && entry !== null) {
+      copy[key] = stripAnnotations(entry, dependencies, seen);
+    } else {
+      copy[key] = stripUndeclaredMetadata(entry, dependencies, seen);
+    }
+  }
+  return Object.freeze(copy);
+}
+function stripAnnotations(value, dependencies, seen) {
+  const entries = Object.entries(value).flatMap(([key, entry]) => {
+    if (key === "metadata") {
+      const safe = sanitizeMetadataRecord(entry, dependencies);
+      return Object.keys(safe).length > 0 ? [[key, safe]] : [];
+    }
+    return key === "extensions" ? [[key, stripUndeclaredMetadata(entry, dependencies, seen)]] : [];
+  });
+  return Object.freeze(Object.fromEntries(entries));
+}
+function sanitizeMetadataRecord(value, dependencies) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return Object.freeze({});
+  return Object.freeze(
+    Object.fromEntries(
+      Object.keys(value).filter((key) => dependencies.has(key)).sort().map((key) => [key, sanitizeMetadata(value[key])])
+    )
+  );
+}
+function stableValue(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(",")}]`;
+  return `{${Object.entries(value).sort(([left], [right]) => compareText5(left, right)).map(([key, entry]) => `${JSON.stringify(key)}:${stableValue(entry)}`).join(",")}}`;
+}
+function compareText5(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+// ../../packages/jit/src/compiler/optimization-context.ts
+function createOptimizationContext(plan, target, capabilities, extensions = createExtensionSet(), performance = defaultPerformanceProfile) {
+  const facts = normalizeSemanticFacts(deriveSchemaFacts(plan.schema));
+  const existingIndexes = capabilities.filter((capability2) => capability2.kind === "index" && capability2.key !== void 0).map((capability2) => capability2.key).sort(compareText6);
+  const indexReuseCount = {};
+  for (const key of existingIndexes) indexReuseCount[key] = (indexReuseCount[key] ?? 0) + 1;
+  const previousStageProvides = plan.stages.flatMap((stage) => stage.provides).sort(compareText6);
+  const optimizationFacts = Object.freeze({
+    previousStageProvides: Object.freeze(previousStageProvides),
+    existingIndexes: Object.freeze(existingIndexes),
+    indexReuseCount: Object.freeze(indexReuseCount),
+    lookupCount: plan.stages.filter((stage) => stage.kind === "query" || stage.kind === "aggregate").length,
+    inputAlreadyValidated: plan.stages.some((stage) => stage.kind === "validate"),
+    capabilities: Object.freeze([...capabilities])
+  });
+  const semanticExtensions = Object.freeze(
+    resolveSemanticExtensionPlans(plan.schema, extensions, facts).map(
+      ({ id, version, irDigest }) => Object.freeze({ id, version, irDigest })
+    )
+  );
+  return Object.freeze({
+    target,
+    semanticFacts: facts,
+    optimizationFacts,
+    extensions,
+    performance: Object.freeze({ ...performance, evidence: Object.freeze([...performance.evidence]) }),
+    semanticExtensions
+  });
+}
+function normalizeSemanticFacts(facts) {
+  return Object.freeze(
+    [...facts].sort(
+      (left, right) => compareText6(left.path.join("\0"), right.path.join("\0")) || compareText6(left.kind, right.kind) || compareText6(stableValue2(left), stableValue2(right))
+    )
+  );
+}
+function stableValue2(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) return `[${value.map(stableValue2).join(",")}]`;
+  return `{${Object.entries(value).sort(([left], [right]) => compareText6(left, right)).map(([key, entry]) => `${JSON.stringify(key)}:${stableValue2(entry)}`).join(",")}}`;
+}
+function compareText6(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+// ../../packages/jit/src/compiler/target/target-profile.ts
+function targetProfileDigest(input) {
+  const source = JSON.stringify({
+    id: input.id,
+    runtime: input.runtime,
+    engine: input.engine,
+    runtimeVersion: input.runtimeVersion,
+    weights: input.weights,
+    limits: input.limits
+  });
+  let first = 2166136261;
+  let second = 2246822519;
+  for (let index2 = 0; index2 < source.length; index2++) {
+    const code = source.charCodeAt(index2);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code + index2, 3266489917);
+  }
+  return `target-${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+}
+function assertTargetProfile(profile) {
+  for (const key of ["runtime", "allocation", "setup", "codeSize", "cold", "branches"]) {
+    const value = profile.weights[key];
+    if (value === void 0) continue;
+    if (!Number.isSafeInteger(value) || value < 0)
+      throw new TypeError(`target profile ${profile.id} weight ${key} must be a non-negative integer`);
+  }
+  for (const [key, value] of Object.entries(profile.limits)) {
+    if (!Number.isSafeInteger(value) || value < 0)
+      throw new TypeError(`target profile ${profile.id} limit ${key} must be a non-negative integer`);
+  }
+  const expected = targetProfileDigest(profile);
+  if (profile.digest !== expected) throw new TypeError(`target profile ${profile.id} has a stale digest`);
+  return profile;
+}
+
+// ../../packages/jit/src/compiler/strategy/catalog.ts
+var STRATEGY_CATALOG_VERSION = "strategy-catalog-v1";
+var Catalog = class _Catalog {
+  constructor(families, performanceProfile = defaultPerformanceProfile) {
+    const sorted = [...families].sort((left, right) => compareText7(left.id, right.id));
+    const ids = /* @__PURE__ */ new Set();
+    for (const family of sorted) {
+      if (ids.has(family.id)) throw new TypeError(`duplicate strategy family ${family.id}`);
+      ids.add(family.id);
+    }
+    this.families = Object.freeze(sorted);
+    this.performanceProfile = validatePerformanceProfile(performanceProfile);
+    this.version = STRATEGY_CATALOG_VERSION;
+    Object.freeze(this);
+  }
+  family(id) {
+    return this.families.find((candidate) => candidate.id === id);
+  }
+  add(family) {
+    const existing = this.family(family.id);
+    if (existing !== void 0 && familySignature(existing) !== familySignature(family))
+      throw new Error(`strategy family ${family.id} is already registered with different candidates`);
+    if (existing !== void 0) return this;
+    return new _Catalog([...this.families, family], this.performanceProfile);
+  }
+  resolve(family, context, profile) {
+    assertTargetProfile(profile);
+    if (context.family !== family.id) throw new Error(`strategy context family mismatch for ${family.id}`);
+    const checks = family.candidates.map((candidate) => ({
+      candidate,
+      legality: candidate.legality(context),
+      target: candidate.targetSupport(context, profile)
+    }));
+    const eligible = checks.filter(
+      ({ candidate, legality, target }) => legality.supported && target.supported && (!candidate.optimized || candidate.evidence.every((id) => this.performanceProfile.evidence.includes(id)))
+    );
+    const ranked = eligible.map(({ candidate }) => ({ candidate, estimate: validateEstimate(candidate.estimate(context, profile)) })).sort((left, right) => compareRank(left, right, profile));
+    const selected = ranked[0];
+    if (selected === void 0)
+      throw new Error(`No legal, supported, evidence-backed strategy candidate for ${family.id}`);
+    const operation = selected.candidate.lower(context);
+    const considered = buildEvaluations(family, checks, ranked, selected, this.performanceProfile, profile);
+    return Object.freeze({
+      family: family.id,
+      strategy: selected.candidate.id,
+      reason: Object.freeze([
+        `semantic legality: ${checks.find((entry) => entry.candidate === selected.candidate)?.legality.reason ?? "supported"}`,
+        `target support: ${checks.find((entry) => entry.candidate === selected.candidate)?.target.reason ?? "supported"}`,
+        `integer cost score ${score(selected.estimate, profile)}`
+      ]),
+      evidence: Object.freeze([...selected.candidate.evidence]),
+      estimated: Object.freeze(selected.estimate),
+      operation,
+      targetProfile: profile.id,
+      performanceProfileVersion: `${this.performanceProfile.id}@${this.performanceProfile.version}`,
+      considered
+    });
+  }
+};
+function createStrategyCatalog(families = [], performanceProfile = defaultPerformanceProfile) {
+  return new Catalog(families, performanceProfile);
+}
+function score(estimate, profile) {
+  return estimate.runtime * profile.weights.runtime + estimate.allocation * profile.weights.allocation + estimate.setup * profile.weights.setup + estimate.codeSize * profile.weights.codeSize + (estimate.cold ?? 0) * profile.weights.cold + (estimate.branches ?? 0) * (profile.weights.branches ?? 0);
+}
+function compareRank(left, right, profile) {
+  return score(left.estimate, profile) - score(right.estimate, profile) || left.estimate.allocation - right.estimate.allocation || left.estimate.cold - right.estimate.cold || left.estimate.codeSize - right.estimate.codeSize || Number(left.candidate.portability === "target-specific") - Number(right.candidate.portability === "target-specific") || stableStrategyTieBreak(left.candidate, right.candidate);
+}
+function stableStrategyTieBreak(left, right) {
+  return compareText7(`${left.family}.${left.id}`, `${right.family}.${right.id}`);
+}
+function buildEvaluations(family, checks, ranked, selected, performance, target) {
+  const byId = new Map(ranked.map((entry) => [entry.candidate.id, entry]));
+  return Object.freeze(
+    family.candidates.map((candidate) => {
+      const check = checks.find((entry2) => entry2.candidate === candidate);
+      if (check === void 0) throw new Error(`missing candidate evaluation for ${family.id}.${candidate.id}`);
+      if (!check.legality.supported) return evaluation(candidate.id, "illegal", check.legality.reason);
+      if (!check.target.supported) return evaluation(candidate.id, "unsupported-target", check.target.reason);
+      if (candidate.optimized && !candidate.evidence.every((id) => performance.evidence.includes(id)))
+        return evaluation(
+          candidate.id,
+          "insufficient-evidence",
+          "no evidence reference is promoted by the performance profile"
+        );
+      const entry = byId.get(candidate.id);
+      if (entry === void 0) throw new Error(`missing ranked candidate ${family.id}.${candidate.id}`);
+      if (candidate.id === selected.candidate.id)
+        return evaluation(candidate.id, "selected", `lowest deterministic cost for ${target.id}`, entry.estimate);
+      const selectedScore = score(selected.estimate, target);
+      const candidateScore = score(entry.estimate, target);
+      const isDominated = dominates(selected.estimate, entry.estimate);
+      return evaluation(
+        candidate.id,
+        isDominated ? "dominated" : "higher-cost",
+        isDominated ? `selected ${selected.candidate.id} is no worse in every estimated dimension` : `estimated score ${candidateScore} is not lower than selected score ${selectedScore}`,
+        entry.estimate
+      );
+    })
+  );
+}
+function evaluation(strategy, status, reason, estimate) {
+  return Object.freeze({ strategy, status, reason, ...estimate === void 0 ? {} : { estimate } });
+}
+function dominates(left, right) {
+  const dimensions = ["runtime", "allocation", "setup", "codeSize", "cold", "branches"];
+  let strictlyBetter = false;
+  for (const dimension of dimensions) {
+    if (left[dimension] > right[dimension]) return false;
+    if (left[dimension] < right[dimension]) strictlyBetter = true;
+  }
+  return strictlyBetter;
+}
+function validateEstimate(estimate) {
+  for (const key of ["runtime", "allocation", "setup", "codeSize", "cold", "branches"]) {
+    if (!Number.isSafeInteger(estimate[key]) || estimate[key] < 0)
+      throw new TypeError(`strategy estimate ${key} must be a non-negative safe integer`);
+  }
+  return Object.freeze({ ...estimate });
+}
+function validatePerformanceProfile(profile) {
+  if (profile.id.length === 0 || profile.version.length === 0 || profile.digest.length === 0)
+    throw new TypeError("performance profiles require an id, version, and digest");
+  if (!isPerformanceProfileDigestValid(profile))
+    throw new TypeError(`performance profile ${profile.id}@${profile.version} has a stale digest`);
+  if (new Set(profile.evidence).size !== profile.evidence.length)
+    throw new TypeError(`performance profile ${profile.id} has duplicate evidence references`);
+  return Object.freeze({ ...profile, evidence: Object.freeze([...profile.evidence].sort(compareText7)) });
+}
+function familySignature(family) {
+  return family.candidates.map(
+    (candidate) => `${candidate.family}.${candidate.id}:${candidate.optimized}:${candidate.portability}:${[...candidate.evidence].sort().join(",")}`
+  ).sort(compareText7).join("|");
+}
+function compareText7(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+// ../../packages/jit/src/compiler/strategy/family.ts
+function createStrategyFamily(id, candidates) {
+  if (id.length === 0) throw new TypeError("strategy families require a stable id");
+  const ids = /* @__PURE__ */ new Set();
+  for (const candidate of candidates) {
+    if (candidate.id.length === 0 || candidate.family !== id)
+      throw new TypeError(`strategy ${candidate.id || "<anonymous>"} must declare family ${id}`);
+    if (candidate.portability !== "portable" && candidate.portability !== "target-specific")
+      throw new TypeError(`strategy ${id}.${candidate.id} must declare target portability`);
+    if (ids.has(candidate.id)) throw new TypeError(`strategy family ${id} has duplicate candidate ${candidate.id}`);
+    ids.add(candidate.id);
+    if (candidate.optimized && candidate.evidence.length === 0)
+      throw new TypeError(`optimized strategy ${id}.${candidate.id} requires performance evidence`);
+    if (typeof candidate.legality !== "function" || typeof candidate.targetSupport !== "function")
+      throw new TypeError(`strategy ${id}.${candidate.id} must declare semantic legality and target support`);
+  }
+  return Object.freeze({ id, candidates: Object.freeze([...candidates]) });
+}
+
+// ../../packages/jit/src/compiler/strategy/families/array-validation.ts
+var loop = Object.freeze({
+  id: "indexed-loop",
+  family: "array.validate",
+  optimized: false,
+  portability: "portable",
+  evidence: Object.freeze([]),
+  legality: (context) => ({
+    supported: context.cardinality !== void 0,
+    reason: context.cardinality === void 0 ? "requires proven fixed cardinality" : "fixed cardinality is proven"
+  }),
+  targetSupport: () => ({ supported: true, reason: "indexed loops are supported by every target" }),
+  estimate: (context) => {
+    const count = context.cardinality ?? 0;
+    const body = context.bodyCost ?? 1;
+    return {
+      runtime: (count * body + 3) * 1e3,
+      allocation: 0,
+      setup: 0,
+      codeSize: 4e3,
+      cold: 1e3,
+      branches: (count + 1) * 1e3
+    };
+  },
+  lower: (context) => Object.freeze({ family: context.family, strategy: "indexed-loop" })
+});
+var unrolled = Object.freeze({
+  id: "unrolled",
+  family: "array.validate",
+  optimized: true,
+  portability: "portable",
+  evidence: Object.freeze(["PERF-ARRAY-001"]),
+  legality: (context) => {
+    const supported = context.cardinality !== void 0 && context.bodyCost !== void 0 && (context.mode === "predicate" || context.mode === "is");
+    return {
+      supported,
+      reason: supported ? "fixed cardinality, element cost, and fail-fast predicate mode are proven" : "requires fixed cardinality, element cost, and fail-fast predicate mode"
+    };
+  },
+  targetSupport: (context, profile) => {
+    const supported = context.cardinality !== void 0 && context.bodyCost !== void 0 && context.cardinality <= profile.limits.arrayUnrollMaxLength && context.bodyCost <= profile.limits.arrayUnrollMaxBodyCost;
+    return {
+      supported,
+      reason: supported ? `within ${profile.id} unroll limits` : `exceeds ${profile.id} unroll limits`
+    };
+  },
+  estimate: (context) => {
+    const count = context.cardinality ?? 0;
+    const body = context.bodyCost ?? 1;
+    return {
+      runtime: count * body * 1e3,
+      allocation: 0,
+      setup: 0,
+      codeSize: Math.max(1, count * body * 400),
+      cold: count * 50,
+      branches: count * 1e3
+    };
+  },
+  lower: (context) => Object.freeze({ family: context.family, strategy: "unrolled" })
+});
+var arrayValidationFamily = createStrategyFamily("array.validate", [loop, unrolled]);
+function resolveArrayValidationStrategy(schema, profile, mode = "is", performance) {
+  if (schema.type !== TypeName.array) return void 0;
+  const model = normalizeConstraints(schema);
+  const exact = model.cardinality?.exact;
+  if (exact === void 0) return void 0;
+  const element = schema.def.element;
+  const bodyCost = elementCost(element);
+  const context = {
+    family: arrayValidationFamily.id,
+    schema,
+    facts: [],
+    mode,
+    cardinality: exact,
+    bodyCost,
+    equality: "strict"
+  };
+  return createStrategyCatalog([arrayValidationFamily], performance ?? resolvePerformanceProfile(profile)).resolve(
+    arrayValidationFamily,
+    context,
+    profile
+  );
+}
+function elementCost(schema) {
+  switch (schema.type) {
+    case TypeName.string:
+    case TypeName.number:
+    case TypeName.int:
+    case TypeName.boolean:
+    case TypeName.literal:
+    case TypeName.enum:
+      return 1;
+    case TypeName.object:
+      return 4;
+    default:
+      return 6;
+  }
+}
+
+// ../../packages/jit/src/compiler/strategy/families/enum-membership.ts
+var directChain = Object.freeze({
+  id: "direct-chain",
+  family: "enum.membership",
+  optimized: false,
+  portability: "portable",
+  evidence: Object.freeze([]),
+  legality: (context) => {
+    const cardinality = context.cardinality ?? 0;
+    const supported = cardinality > 0 && hasSupportedEnumValues(context.schema);
+    return {
+      supported,
+      reason: supported ? "all enum values use supported primitive comparison" : "enum values are not statically available"
+    };
+  },
+  targetSupport: () => ({ supported: true, reason: "direct comparisons are supported by every target" }),
+  estimate: (context) => ({
+    runtime: (context.cardinality ?? 0) * 1e3,
+    allocation: 0,
+    setup: 0,
+    codeSize: (context.cardinality ?? 0) * 500,
+    cold: 2e3,
+    branches: (context.cardinality ?? 0) * 1e3
+  }),
+  lower: (context) => Object.freeze({ family: context.family, strategy: "direct-chain" })
+});
+var switchCandidate = Object.freeze({
+  id: "switch",
+  family: "enum.membership",
+  optimized: true,
+  portability: "portable",
+  evidence: Object.freeze(["PERF-ENUM-003"]),
+  legality: (context) => {
+    const values = enumValues2(context.schema);
+    const supported = values?.every((value) => typeof value === "number" && !Number.isNaN(value)) === true;
+    return {
+      supported,
+      reason: supported ? "numeric values support switch case equality" : "requires finite numeric enum values"
+    };
+  },
+  targetSupport: (context, profile) => {
+    const cardinality = context.cardinality ?? 0;
+    const supported = cardinality > profile.limits.enumChainMaxCardinality && cardinality <= profile.limits.enumSwitchMaxCardinality;
+    return {
+      supported,
+      reason: supported ? `cardinality is within ${profile.id} switch limits` : `cardinality is outside ${profile.id} switch limits`
+    };
+  },
+  estimate: (context) => {
+    const cardinality = context.cardinality ?? 0;
+    return {
+      runtime: 250,
+      allocation: 0,
+      setup: 0,
+      codeSize: cardinality * 250 + 1e3,
+      cold: 1500,
+      branches: cardinality * 100
+    };
+  },
+  lower: (context) => Object.freeze({ family: context.family, strategy: "switch" })
+});
+var lookup = Object.freeze({
+  id: "lookup-object",
+  family: "enum.membership",
+  optimized: true,
+  portability: "portable",
+  evidence: Object.freeze(["PERF-ENUM-002"]),
+  legality: (context) => {
+    const supported = lookupSafe(context.schema);
+    return {
+      supported,
+      reason: supported ? "homogeneous primitive keys can use a null-prototype lookup" : "lookup key coercion would change membership semantics"
+    };
+  },
+  targetSupport: () => ({ supported: true, reason: "null-prototype objects are supported by every target" }),
+  estimate: (context) => ({
+    runtime: 200,
+    allocation: 0,
+    setup: 500,
+    codeSize: (context.cardinality ?? 0) * 250 + 500,
+    cold: 1500,
+    branches: 100
+  }),
+  lower: (context) => Object.freeze({ family: context.family, strategy: "lookup-object" })
+});
+var enumMembershipFamily = createStrategyFamily("enum.membership", [directChain, switchCandidate, lookup]);
+function resolveEnumMembershipStrategy(schema, profile, performance = void 0, mode = "is") {
+  if (schema.type !== TypeName.enum) return void 0;
+  const model = normalizeConstraints(schema);
+  const cardinality = model.enumValues?.length;
+  if (cardinality === void 0) return void 0;
+  const context = { family: enumMembershipFamily.id, schema, facts: [], cardinality, mode };
+  return createStrategyCatalog([enumMembershipFamily], performance ?? resolvePerformanceProfile(profile)).resolve(
+    enumMembershipFamily,
+    context,
+    profile
+  );
+}
+function lookupSafe(schema) {
+  if (typeof schema !== "object" || schema === null || !("def" in schema)) return false;
+  const def = schema.def;
+  const values = def?.values;
+  if (typeof values !== "object" || values === null) return false;
+  const entries = Object.values(values).filter(
+    (value) => typeof value === "string" || typeof value === "number"
+  );
+  if (entries.length === 0 || entries.some((value) => typeof value === "number" && Number.isNaN(value))) return false;
+  const type = typeof entries[0];
+  return entries.every((value) => typeof value === type);
+}
+function hasSupportedEnumValues(schema) {
+  const values = enumValues2(schema);
+  return values !== void 0 && values.length > 0;
+}
+function enumValues2(schema) {
+  if (typeof schema !== "object" || schema === null || !("def" in schema)) return void 0;
+  const values = schema.def?.values;
+  if (Array.isArray(values))
+    return values.filter((value) => typeof value === "string" || typeof value === "number");
+  if (typeof values !== "object" || values === null) return void 0;
+  return Object.values(values).filter(
+    (value) => typeof value === "string" || typeof value === "number"
+  );
+}
+
+// ../../packages/jit/src/compiler/strategy/families/tuple-validation.ts
+var positional = Object.freeze({
+  id: "positional-checks",
+  family: "tuple.fixed.validate",
+  optimized: false,
+  portability: "portable",
+  evidence: Object.freeze([]),
+  legality: (context) => ({
+    supported: context.cardinality !== void 0,
+    reason: context.cardinality === void 0 ? "requires a fixed tuple shape" : "each tuple position has a known schema"
+  }),
+  targetSupport: () => ({ supported: true, reason: "static positional checks are supported by every target" }),
+  estimate: (context) => {
+    const count = context.cardinality ?? 0;
+    const body = context.bodyCost ?? 1;
+    return Object.freeze({
+      runtime: body * 1e3,
+      allocation: 0,
+      setup: 0,
+      codeSize: count * body * 400,
+      cold: count * 50,
+      branches: count * 1e3
+    });
+  },
+  lower: (context) => Object.freeze({ family: context.family, strategy: "positional-checks" })
+});
+var tupleValidationFamily = createStrategyFamily("tuple.fixed.validate", [positional]);
+function resolveTupleValidationStrategy(schema, profile, mode = "is", performance) {
+  if (schema.type !== TypeName.tuple) return void 0;
+  const exact = normalizeConstraints(schema).cardinality?.exact;
+  if (exact === void 0) return void 0;
+  const items = schema.def.items;
+  const bodyCost = items.reduce((total, item) => total + schemaCost(item), 0);
+  const context = {
+    family: tupleValidationFamily.id,
+    schema,
+    facts: [],
+    mode,
+    cardinality: exact,
+    bodyCost
+  };
+  return createStrategyCatalog([tupleValidationFamily], performance ?? resolvePerformanceProfile(profile)).resolve(
+    tupleValidationFamily,
+    context,
+    profile
+  );
+}
+function schemaCost(schema) {
+  switch (schema.type) {
+    case TypeName.string:
+    case TypeName.number:
+    case TypeName.int:
+    case TypeName.boolean:
+    case TypeName.literal:
+    case TypeName.enum:
+      return 1;
+    case TypeName.object:
+      return 4;
+    default:
+      return 6;
+  }
+}
+
+// ../../packages/jit/src/compiler/target/portable-profile.ts
+var portableProfile = Object.freeze({
+  id: "portable-1",
+  runtime: "portable",
+  engine: "portable",
+  weights: Object.freeze({ runtime: 1e3, allocation: 8e3, setup: 3e3, codeSize: 4e3, cold: 2e3, branches: 500 }),
+  limits: Object.freeze({
+    arrayUnrollMaxLength: 4,
+    arrayUnrollMaxBodyCost: 2,
+    enumChainMaxCardinality: 4,
+    enumSwitchMaxCardinality: 16
+  }),
+  confidence: "fallback",
+  digest: targetProfileDigest({
+    id: "portable-1",
+    runtime: "portable",
+    engine: "portable",
+    weights: { runtime: 1e3, allocation: 8e3, setup: 3e3, codeSize: 4e3, cold: 2e3, branches: 500 },
+    limits: {
+      arrayUnrollMaxLength: 4,
+      arrayUnrollMaxBodyCost: 2,
+      enumChainMaxCardinality: 4,
+      enumSwitchMaxCardinality: 16
+    }
+  })
+});
+
+// ../../packages/jit/src/compiler/target/v8/profile.ts
+function createV8Profile(fingerprint, major) {
+  const id = `v8-${major}`;
+  return Object.freeze({
+    id,
+    runtime: "node",
+    engine: "v8",
+    engineVersion: major,
+    fingerprint,
+    weights: Object.freeze({
+      runtime: 1e3,
+      allocation: 1e4,
+      setup: 3e3,
+      codeSize: 2e3,
+      cold: 2e3,
+      branches: 250
+    }),
+    limits: Object.freeze({
+      arrayUnrollMaxLength: 8,
+      arrayUnrollMaxBodyCost: 4,
+      enumChainMaxCardinality: 6,
+      enumSwitchMaxCardinality: 32
+    }),
+    confidence: "medium",
+    digest: targetProfileDigest({
+      id,
+      runtime: "node",
+      engine: "v8",
+      weights: { runtime: 1e3, allocation: 1e4, setup: 3e3, codeSize: 2e3, cold: 2e3, branches: 250 },
+      limits: {
+        arrayUnrollMaxLength: 8,
+        arrayUnrollMaxBodyCost: 4,
+        enumChainMaxCardinality: 6,
+        enumSwitchMaxCardinality: 32
+      }
+    })
+  });
+}
+function createNodeProfile(major, fingerprint) {
+  const id = `node-${major}`;
+  const v8 = fingerprint?.v8?.match(/^(\d+)/)?.[1];
+  return Object.freeze({
+    id,
+    runtime: "node",
+    engine: "v8",
+    runtimeVersion: major,
+    ...v8 === void 0 ? {} : { engineVersion: v8 },
+    ...fingerprint === void 0 ? {} : { fingerprint },
+    weights: Object.freeze({
+      runtime: 1e3,
+      allocation: 1e4,
+      setup: 3e3,
+      codeSize: 2e3,
+      cold: 2e3,
+      branches: 250
+    }),
+    limits: Object.freeze({
+      arrayUnrollMaxLength: 8,
+      arrayUnrollMaxBodyCost: 4,
+      enumChainMaxCardinality: 6,
+      enumSwitchMaxCardinality: 32
+    }),
+    confidence: "medium",
+    digest: targetProfileDigest({
+      id,
+      runtime: "node",
+      engine: "v8",
+      runtimeVersion: major,
+      weights: { runtime: 1e3, allocation: 1e4, setup: 3e3, codeSize: 2e3, cold: 2e3, branches: 250 },
+      limits: {
+        arrayUnrollMaxLength: 8,
+        arrayUnrollMaxBodyCost: 4,
+        enumChainMaxCardinality: 6,
+        enumSwitchMaxCardinality: 32
+      }
+    })
+  });
+}
+
+// ../../packages/jit/src/compiler/target/node-range.ts
+var reviewedMajors = Object.freeze(["22", "24", "26"]);
+function resolveNodeVersionRange(input) {
+  const range = parseNodeMajorRange(input);
+  if (range === void 0 || !Number.isFinite(range.maximum) || range.minimum < Number(reviewedMajors[0]))
+    return portableProfile;
+  const matched = reviewedMajors.filter((major) => range.minimum <= Number(major) && Number(major) < range.maximum);
+  if (matched.length === 0 || !matched.every((major) => range.covers(Number(major)))) return portableProfile;
+  const profiles = matched.map((major) => createNodeProfile(major));
+  return profiles.length === 1 ? profiles[0] ?? portableProfile : combineRangeProfiles(matched, profiles);
+}
+function parseNodeMajorRange(input) {
+  const value = input.trim();
+  const exact = exactMajor(value);
+  if (exact !== void 0) return exact;
+  const terms = readRangeTerms(value);
+  if (terms === void 0) return void 0;
+  const bounds = applyRangeTerms(terms);
+  if (bounds === void 0) return void 0;
+  return parsedBounds(bounds);
+}
+function exactMajor(value) {
+  const match2 = /^(\d+)(?:\.x)?$/.exec(value);
+  if (match2?.[1] === void 0) return void 0;
+  const major = Number(match2[1]);
+  return { minimum: major, maximum: major + 1, covers: (candidate) => candidate === major };
+}
+function readRangeTerms(value) {
+  const matcher = /(>=|>|<=|<|=|\^|~)?\s*(\d+)(?:\.\d+(?:\.\d+)?)?/g;
+  const terms = [];
+  let cursor = 0;
+  for (const match2 of value.matchAll(matcher)) {
+    if (value.slice(cursor, match2.index).trim().length > 0) return void 0;
+    terms.push(match2);
+    cursor = (match2.index ?? 0) + match2[0].length;
+  }
+  return terms.length > 0 && value.slice(cursor).trim().length === 0 ? terms : void 0;
+}
+function applyRangeTerms(terms) {
+  const bounds = { minimum: 0, maximum: Number.POSITIVE_INFINITY };
+  for (const term of terms) {
+    if (!applyRangeTerm(bounds, term)) return void 0;
+  }
+  if (bounds.exact !== void 0 && !(bounds.minimum <= bounds.exact && bounds.exact < bounds.maximum))
+    return void 0;
+  return bounds.minimum < bounds.maximum ? bounds : void 0;
+}
+function applyRangeTerm(bounds, term) {
+  const operator = term[1] ?? "=";
+  const major = Number(term[2]);
+  switch (operator) {
+    case ">=":
+      bounds.minimum = Math.max(bounds.minimum, major);
+      return true;
+    case ">":
+      bounds.minimum = Math.max(bounds.minimum, major + 1);
+      return true;
+    case "<":
+      bounds.maximum = Math.min(bounds.maximum, major);
+      return true;
+    case "<=":
+      bounds.maximum = Math.min(bounds.maximum, major + 1);
+      return true;
+    case "^":
+      bounds.minimum = Math.max(bounds.minimum, major);
+      bounds.maximum = Math.min(bounds.maximum, major + 1);
+      return true;
+    case "=":
+    case "~":
+      if (bounds.exact !== void 0 && bounds.exact !== major) return false;
+      bounds.exact = major;
+      bounds.minimum = Math.max(bounds.minimum, major);
+      bounds.maximum = Math.min(bounds.maximum, major + 1);
+      return true;
+    default:
+      return false;
+  }
+}
+function parsedBounds(bounds) {
+  const minimum = Number.isFinite(bounds.minimum) ? bounds.minimum : 0;
+  const maximum = Number.isFinite(bounds.maximum) ? bounds.maximum : Number.POSITIVE_INFINITY;
+  return { minimum, maximum, covers: (major) => minimum <= major && major < maximum };
+}
+function combineRangeProfiles(majors, profiles) {
+  const id = `node-range-${majors.join("-")}`;
+  const runtimeVersion = majors.join("-");
+  const weights = Object.freeze({
+    runtime: extremeWeight(profiles, "runtime", Math.max),
+    allocation: extremeWeight(profiles, "allocation", Math.max),
+    setup: extremeWeight(profiles, "setup", Math.max),
+    codeSize: extremeWeight(profiles, "codeSize", Math.max),
+    cold: extremeWeight(profiles, "cold", Math.max),
+    branches: extremeWeight(profiles, "branches", Math.max)
+  });
+  const limits = Object.freeze({
+    arrayUnrollMaxLength: extremeLimit(profiles, "arrayUnrollMaxLength", Math.min),
+    arrayUnrollMaxBodyCost: extremeLimit(profiles, "arrayUnrollMaxBodyCost", Math.min),
+    enumChainMaxCardinality: extremeLimit(profiles, "enumChainMaxCardinality", Math.min),
+    enumSwitchMaxCardinality: extremeLimit(profiles, "enumSwitchMaxCardinality", Math.min)
+  });
+  return Object.freeze({
+    id,
+    runtime: "node",
+    engine: "v8",
+    runtimeVersion,
+    weights,
+    limits,
+    confidence: "medium",
+    digest: targetProfileDigest({ id, runtime: "node", engine: "v8", runtimeVersion, weights, limits })
+  });
+}
+function extremeWeight(profiles, key, select) {
+  return profiles.reduce((result, profile) => select(result, profile.weights[key] ?? 0), select(0, 0));
+}
+function extremeLimit(profiles, key, select) {
+  const first = profiles[0]?.limits[key] ?? 0;
+  return profiles.slice(1).reduce((result, profile) => select(result, profile.limits[key]), first);
+}
+
+// ../../packages/jit/src/compiler/target/runtime-detector.ts
+function detectRuntimeFingerprint() {
+  const runtime = globalThis;
+  const processValue = runtime.process;
+  const versions = processValue?.versions;
+  return Object.freeze({
+    ...processValue?.version === void 0 ? {} : { node: processValue.version },
+    ...versions?.v8 === void 0 ? {} : { v8: versions.v8 },
+    ...versions?.uv === void 0 ? {} : { uv: versions.uv },
+    ...processValue?.arch === void 0 ? {} : { arch: processValue.arch },
+    ...processValue?.platform === void 0 ? {} : { platform: processValue.platform }
+  });
+}
+
+// ../../packages/jit/src/compiler/target/resolve-target.ts
+var nodeProfileMajors = Object.freeze(["22", "24", "26"]);
+function resolveTargetProfile(target, fingerprint = detectRuntimeFingerprint()) {
+  if (target?.profile !== void 0) return resolveNamedProfile(target.profile, fingerprint);
+  if (target?.runtime === "portable" || target?.runtime === "browser") return portableProfile;
+  if (target?.versions !== void 0) return resolveDeploymentTargetProfile(target);
+  const nodeMajor = majorNode(fingerprint.node);
+  if ((target === void 0 || target.runtime === "node") && nodeMajor !== void 0)
+    return nodeProfileMajors.includes(nodeMajor) ? createNodeProfile(nodeMajor, fingerprint) : portableProfile;
+  return portableProfile;
+}
+function resolveDeploymentTargetProfile(target) {
+  if (target?.profile !== void 0) return resolveNamedProfile(target.profile);
+  if (target?.runtime === "portable" || target?.runtime === "browser" || target?.runtime === void 0)
+    return portableProfile;
+  if (target.runtime !== "node" || target.versions === void 0) return portableProfile;
+  return resolveNodeVersionRange(target.versions);
+}
+function resolveNamedProfile(id, fingerprint) {
+  if (id === "portable-1") return portableProfile;
+  const node = /^node-(22|24|26)$/.exec(id);
+  if (node?.[1] !== void 0) return createNodeProfile(node[1], fingerprint);
+  const v8 = /^v8-(\d+)$/.exec(id);
+  if (v8?.[1] !== void 0) return createV8Profile(fingerprint ?? {}, v8[1]);
+  return portableProfile;
+}
+function majorNode(version) {
+  return version?.match(/^v?(\d+)/)?.[1];
 }
 
 // ../../packages/jit/src/compiler/facts/contradictions.ts
@@ -2612,23 +4944,6 @@ function chain(steps) {
 }
 var ops = chain([]);
 
-// ../../packages/jit/src/compiler/source/literal.ts
-function emitLiteral(value) {
-  switch (typeof value) {
-    case "string":
-      return parse_exports.parseKey(value, { parseAsJson: true });
-    case "bigint":
-      return `${value}n`;
-    case "undefined":
-      return "undefined";
-    default:
-      return String(value);
-  }
-}
-function emitObjectKey(key) {
-  return parse_exports.parseKey(key);
-}
-
 // ../../packages/jit/src/compiler/validate/emit-validate-helpers.ts
 function isShallowOption(schema) {
   let current = schema;
@@ -2663,7 +4978,7 @@ var SHALLOW_LEAVES = /* @__PURE__ */ new Set([
 function buildTemplateLiteralRegex(parts) {
   return new RegExp(`^${parts.map(templateLiteralPartSource).join("")}$`, "u");
 }
-function temporalConstructorName(kind) {
+function temporalConstructorName2(kind) {
   switch (kind) {
     case "instant":
       return "Instant";
@@ -3137,449 +5452,6 @@ function rootHasReadonlyInner(schema, seen) {
   return rootHasReadonly(schema.def.innerType, seen);
 }
 
-// ../../packages/jit/src/compiler/ir/ir.ts
-function irVar(name) {
-  return { kind: "var", name };
-}
-function literal2(value) {
-  return { kind: "literal", value };
-}
-function not(expr) {
-  return { kind: "not", expr };
-}
-function strictEqual(left, right) {
-  return { kind: "binary", op: "strictEqual", left, right };
-}
-function notStrictEqual(left, right) {
-  return { kind: "binary", op: "notStrictEqual", left, right };
-}
-function sameValue(left, right) {
-  return { kind: "sameValue", left, right };
-}
-function sameNumber(left, right) {
-  return { kind: "sameNumber", left, right };
-}
-function schemaGuard(schema, value) {
-  return { kind: "schema_guard", schema, value };
-}
-function loadProp(base, key) {
-  return { kind: "load_prop", base, key };
-}
-function loadIndex(base, index2) {
-  return { kind: "load_index", base, index: index2 };
-}
-function call(callee, args = []) {
-  return { kind: "call", callee, args };
-}
-function binary(op, left, right) {
-  return { kind: "binary", op, left, right };
-}
-function allOf(operands) {
-  return { kind: "nary", op: "and", operands };
-}
-function objectLiteral(entries) {
-  return { kind: "object_literal", entries };
-}
-function arrayLiteral(elements = []) {
-  return { kind: "array_literal", elements };
-}
-function construct(ctor, args = []) {
-  return { kind: "construct", ctor, args };
-}
-function letDecl(target, expr) {
-  return expr === void 0 ? { kind: "let", target } : { kind: "let", target, expr };
-}
-function store(target, expr) {
-  return { kind: "store", target, expr };
-}
-function exprStmt(expr) {
-  return { kind: "expr_stmt", expr };
-}
-function forRange(index2, length, body) {
-  return { kind: "for_range", index: index2, length, body };
-}
-function forOf(item, iterable, body) {
-  return { kind: "for_of", item, iterable, body };
-}
-function append(target, cursor, value) {
-  return { kind: "append", target, cursor, value };
-}
-function sortByKey(target, ordering) {
-  return { kind: "sort_by_key", target, ordering };
-}
-function mapExprChildren(expr, mapExpr) {
-  switch (expr.kind) {
-    case "var":
-    case "literal":
-      return expr;
-    case "not":
-      return { ...expr, expr: mapExpr(expr.expr) };
-    case "binary":
-    case "sameValue":
-    case "sameNumber":
-      return { ...expr, left: mapExpr(expr.left), right: mapExpr(expr.right) };
-    case "nary":
-      return { ...expr, operands: expr.operands.map(mapExpr) };
-    case "schema_guard":
-      return { ...expr, value: mapExpr(expr.value) };
-    case "load_prop":
-      return { ...expr, base: mapExpr(expr.base) };
-    case "load_index":
-      return { ...expr, base: mapExpr(expr.base), index: mapExpr(expr.index) };
-    case "call":
-      return { ...expr, callee: mapExpr(expr.callee), args: expr.args.map(mapExpr) };
-    case "object_literal":
-      return { ...expr, entries: expr.entries.map((entry) => ({ ...entry, value: mapExpr(entry.value) })) };
-    case "array_literal":
-      return { ...expr, elements: expr.elements.map(mapExpr) };
-    case "construct":
-      return { ...expr, args: expr.args.map(mapExpr) };
-  }
-}
-function mapNodeExprs(node, mapExpr) {
-  switch (node.kind) {
-    case "assign":
-      return { ...node, expr: mapExpr(node.expr) };
-    case "let":
-      return node.expr === void 0 ? node : { ...node, expr: mapExpr(node.expr) };
-    case "store":
-      return { ...node, target: mapExpr(node.target), expr: mapExpr(node.expr) };
-    case "expr_stmt":
-      return { ...node, expr: mapExpr(node.expr) };
-    case "hash_compare":
-      return { ...node, leftHash: mapExpr(node.leftHash), rightHash: mapExpr(node.rightHash) };
-    case "map_equal":
-    case "binary_search_equal":
-      return { ...node, left: mapExpr(node.left), right: mapExpr(node.right) };
-    case "if":
-      return { ...node, test: mapExpr(node.test) };
-    case "for":
-      return { ...node, from: mapExpr(node.from) };
-    case "for_range":
-      return { ...node, length: mapExpr(node.length) };
-    case "for_of":
-      return { ...node, iterable: mapExpr(node.iterable) };
-    case "append":
-      return { ...node, value: mapExpr(node.value) };
-    case "return":
-      return { ...node, value: mapExpr(node.value) };
-    case "block":
-    case "sort_by_key":
-      return node;
-  }
-}
-function mapNodeBodies(node, mapNodes) {
-  switch (node.kind) {
-    case "block":
-      return { ...node, body: mapNodes(node.body) };
-    case "if":
-      return {
-        ...node,
-        then: mapNodes(node.then),
-        ...node.otherwise ? { otherwise: mapNodes(node.otherwise) } : {}
-      };
-    case "for":
-    case "for_range":
-    case "for_of":
-    case "map_equal":
-    case "binary_search_equal":
-      return { ...node, body: mapNodes(node.body) };
-    default:
-      return node;
-  }
-}
-
-// ../../packages/jit/src/compiler/defaults.ts
-var NO_DEFAULT = /* @__PURE__ */ Symbol("jit.no-static-default");
-function emitStaticDefaultSource(schema) {
-  const value = getStaticDefaultValue(schema);
-  if (value === NO_DEFAULT) return void 0;
-  return emitStaticDefaultValueSource(value, /* @__PURE__ */ new Set());
-}
-function staticDefaultIRExpr(schema) {
-  const value = getStaticDefaultValue(schema);
-  if (value === NO_DEFAULT) return void 0;
-  return staticValueIRExpr(value, /* @__PURE__ */ new Set());
-}
-function emitDefaultedValue(schema, valueExpr) {
-  const defaultSource = emitStaticDefaultSource(schema);
-  return defaultSource === void 0 ? valueExpr : `(${valueExpr} === undefined ? ${defaultSource} : ${valueExpr})`;
-}
-function getStaticDefaultValue(schema) {
-  let current = schema;
-  while (true) {
-    switch (current.type) {
-      case TypeName.default: {
-        const value = current.def.defaultValue;
-        return typeof value === "function" ? NO_DEFAULT : value;
-      }
-      case TypeName.optional:
-      case TypeName.nullish:
-        return NO_DEFAULT;
-      case TypeName.nullable:
-      case TypeName.brand:
-      case TypeName.readonly:
-      case TypeName.refine:
-      case TypeName.coerce:
-      case TypeName.pipe:
-      case TypeName.transform:
-        current = current.def.innerType;
-        continue;
-      case TypeName.lazy:
-        current = current.def.getter?.();
-        continue;
-      default:
-        return NO_DEFAULT;
-    }
-  }
-}
-function emitStaticDefaultValueSource(value, seen) {
-  if (value instanceof Date) return `new Date(${value.getTime()})`;
-  if (value === null) return "null";
-  switch (typeof value) {
-    case "string":
-    case "number":
-    case "bigint":
-    case "boolean":
-    case "undefined":
-      return emitLiteral(value);
-    case "object":
-      return emitStaticObjectDefaultSource(value, seen);
-    default:
-      return void 0;
-  }
-}
-function staticValueIRExpr(value, seen) {
-  if (value instanceof Date) return construct("Date", [literal2(value.getTime())]);
-  if (value === null) return literal2(null);
-  switch (typeof value) {
-    case "string":
-    case "number":
-    case "bigint":
-    case "boolean":
-    case "undefined":
-      return literal2(value);
-    case "object":
-      return staticObjectDefaultIRExpr(value, seen);
-    default:
-      return void 0;
-  }
-}
-function emitStaticObjectDefaultSource(value, seen) {
-  if (seen.has(value)) return void 0;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    const elements = value.map((element) => emitStaticDefaultValueSource(element, seen));
-    seen.delete(value);
-    return elements.every((element) => element !== void 0) ? `[${elements.join(", ")}]` : void 0;
-  }
-  if (!isPlainObject(value)) {
-    seen.delete(value);
-    return void 0;
-  }
-  const entries = [];
-  for (const key of Object.keys(value)) {
-    const emitted = emitStaticDefaultValueSource(value[key], seen);
-    if (emitted === void 0) {
-      seen.delete(value);
-      return void 0;
-    }
-    entries.push(`${emitObjectKey(key)}: ${emitted}`);
-  }
-  seen.delete(value);
-  return `{ ${entries.join(", ")} }`;
-}
-function staticObjectDefaultIRExpr(value, seen) {
-  if (seen.has(value)) return void 0;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    const elements = value.map((element) => staticValueIRExpr(element, seen));
-    seen.delete(value);
-    return elements.every((element) => element !== void 0) ? arrayLiteral(elements) : void 0;
-  }
-  if (!isPlainObject(value)) {
-    seen.delete(value);
-    return void 0;
-  }
-  const entries = [];
-  for (const key of Object.keys(value)) {
-    const emitted = staticValueIRExpr(value[key], seen);
-    if (emitted === void 0) {
-      seen.delete(value);
-      return void 0;
-    }
-    entries.push({ key, value: emitted });
-  }
-  seen.delete(value);
-  return objectLiteral(entries);
-}
-function isPlainObject(value) {
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-// ../../packages/jit/src/compiler/source/guard.ts
-function emitSchemaGuard(schema, value) {
-  const resolved = resolveWrappers(schema);
-  const base = resolved.base;
-  const inner = emitBaseGuard(base, value);
-  const defaultable = emitStaticDefaultSource(schema) !== void 0;
-  if (resolved.optional && resolved.nullable) return `(${value} == null || (${inner}))`;
-  if (resolved.optional) return `(${value} === undefined || (${inner}))`;
-  if (resolved.nullable) {
-    return defaultable ? `(${value} === undefined || ${value} === null || (${inner}))` : `(${value} === null || (${inner}))`;
-  }
-  if (defaultable) return `(${value} === undefined || (${inner}))`;
-  return inner;
-}
-function emitBaseGuard(schema, value) {
-  switch (schema.type) {
-    case TypeName.any:
-    case TypeName.unknown:
-      return "true";
-    case TypeName.never:
-      return "false";
-    case TypeName.void:
-    case TypeName.undefined:
-      return `${value} === undefined`;
-    case TypeName.null:
-      return `${value} === null`;
-    case TypeName.string:
-      return `typeof ${value} === "string"`;
-    case TypeName.number:
-    case TypeName.int:
-    case TypeName.nan:
-      return `typeof ${value} === "number"`;
-    case TypeName.boolean:
-      return `typeof ${value} === "boolean"`;
-    case TypeName.bigint:
-      return `typeof ${value} === "bigint"`;
-    case TypeName.symbol:
-      return `typeof ${value} === "symbol"`;
-    case TypeName.date:
-      return `${value} instanceof Date`;
-    case TypeName.regex:
-      return `${value} instanceof RegExp`;
-    case TypeName.file:
-      return `(typeof File !== "undefined" && ${value} instanceof File)`;
-    case TypeName.json:
-      return "true";
-    case TypeName.custom:
-      return "true";
-    case TypeName.templateLiteral:
-      return `typeof ${value} === "string"`;
-    case TypeName.function:
-      return `typeof ${value} === "function"`;
-    case TypeName.temporal:
-      return emitTemporalGuard(schema, value);
-    case TypeName.codec:
-      return emitSchemaGuard(schema.def.input, value);
-    case TypeName.literal:
-      return emitLiteralGuard(schema, value);
-    case TypeName.enum:
-      return emitEnumGuard(schema, value);
-    case TypeName.array:
-      return `Array.isArray(${value})`;
-    case TypeName.set:
-      return `${value} instanceof Set`;
-    case TypeName.map:
-      return `${value} instanceof Map`;
-    case TypeName.record:
-      return `${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})`;
-    case TypeName.object:
-      return emitObjectGuard(schema, value);
-    case TypeName.tuple:
-      return `Array.isArray(${value})`;
-    case TypeName.union:
-      return `(${schema.def.options.map((option) => emitSchemaGuard(option, value)).join(" || ")})`;
-    case TypeName.xor:
-      return emitXorGuard(schema, value);
-    case TypeName.not:
-      return `!(${emitSchemaGuard(schema.def.innerType, value)})`;
-    case TypeName.when:
-      return `((${emitSchemaGuard(schema.def.thenType, value)}) || (${emitSchemaGuard(schema.def.otherwiseType, value)}))`;
-    case TypeName.discriminatedUnion:
-      return emitDiscriminatedUnionGuard(schema, value);
-    case TypeName.intersection:
-      return `(${schema.def.options.map((option) => emitSchemaGuard(option, value)).join(" && ")})`;
-    case TypeName.instanceof:
-      return emitInstanceOfGuard(schema, value);
-    default:
-      return "true";
-  }
-}
-function emitXorGuard(schema, value) {
-  const tests = schema.def.options.map((option) => emitSchemaGuard(option, value));
-  if (tests.length === 0) return "false";
-  return `(${tests.map((test) => `((${test}) ? 1 : 0)`).join(" + ")} === 1)`;
-}
-function emitObjectGuard(schema, value) {
-  const props = schema.def.props;
-  const checks = Object.entries(props).map(([key, prop]) => emitSchemaGuard(prop, emitPropertyAccess(value, key)));
-  const objectCheck = `${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})`;
-  return checks.length === 0 ? objectCheck : `(${objectCheck} && ${checks.join(" && ")})`;
-}
-function emitLiteralGuard(schema, value) {
-  const literal4 = schema.def.value;
-  if (typeof literal4 === "number") {
-    return `${value} === ${emitLiteral(literal4)} || (${value} !== ${value} && ${emitLiteral(literal4)} !== ${emitLiteral(literal4)})`;
-  }
-  return `${value} === ${emitLiteral(literal4)}`;
-}
-function emitEnumGuard(schema, value) {
-  const values = Object.values(schema.def.values);
-  if (values.length === 0) return "false";
-  return `(${values.map((enumValue) => `${value} === ${emitLiteral(enumValue)}`).join(" || ")})`;
-}
-function emitDiscriminatedUnionGuard(schema, value) {
-  const discriminator = schema.def.discriminator;
-  const tags = schema.def.options.map((option) => {
-    const tag = literalDiscriminatorValue(option, discriminator);
-    return tag === void 0 ? void 0 : `${emitPropertyAccess(value, discriminator)} === ${emitLiteral(tag)}`;
-  });
-  const filtered = tags.filter((tag) => tag !== void 0);
-  return filtered.length === 0 ? "false" : `(${filtered.join(" || ")})`;
-}
-function emitInstanceOfGuard(schema, value) {
-  const name = schema.def.ctor.name;
-  if (!name) return `${value} !== null && typeof ${value} === "object"`;
-  return `(typeof ${name} !== "undefined" && ${value} instanceof ${name})`;
-}
-function emitTemporalGuard(schema, value) {
-  const ctor = temporalConstructorName2(schema.def.kind);
-  return `(globalThis.Temporal !== undefined && ${value} instanceof globalThis.Temporal.${ctor})`;
-}
-function temporalConstructorName2(kind) {
-  switch (kind) {
-    case "instant":
-      return "Instant";
-    case "plainDate":
-      return "PlainDate";
-    case "plainTime":
-      return "PlainTime";
-    case "plainDateTime":
-      return "PlainDateTime";
-    case "zonedDateTime":
-      return "ZonedDateTime";
-    case "plainYearMonth":
-      return "PlainYearMonth";
-    case "plainMonthDay":
-      return "PlainMonthDay";
-    case "duration":
-      return "Duration";
-  }
-}
-function literalDiscriminatorValue(schema, discriminator) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.object) return void 0;
-  const props = resolved.def.props;
-  const prop = props[discriminator];
-  const propBase = prop ? resolveWrappers(prop).base : void 0;
-  if (propBase?.type !== TypeName.literal) return void 0;
-  const value = propBase.def.value;
-  return typeof value === "string" || typeof value === "number" ? value : void 0;
-}
-
 // ../../packages/jit/src/compiler/validate/emit-validate-array-checks.ts
 function emitArrayCheck(emitter2, check, value, path) {
   switch (check.kind) {
@@ -3644,7 +5516,12 @@ function emitArray2(emitter2, schema, value, path) {
         emitArrayCheck(emitter2, check, value, path);
       }
       if (build) emitter2.writer.line(`${out} = new Array(${value}.length);`);
-      const decision = build ? void 0 : resolveArrayValidationStrategy(schema, emitter2.targetProfile ?? resolveTargetProfile(), emitter2.mode);
+      const decision = build ? void 0 : resolveArrayValidationStrategy(
+        schema,
+        emitter2.targetProfile ?? resolveTargetProfile(),
+        emitter2.mode,
+        emitter2.performanceProfile
+      );
       if (decision?.strategy === "unrolled") {
         const count = normalizeConstraints(schema).cardinality?.exact;
         if (count !== void 0) {
@@ -4205,7 +6082,7 @@ function emitDate(emitter2, schema, value, path) {
 }
 function emitTemporal(emitter2, schema, value, path) {
   const kind = schema.def.kind;
-  const ctor = temporalConstructorName(kind);
+  const ctor = temporalConstructorName2(kind);
   const expected = `Temporal.${ctor}`;
   emitter2.typeGate(
     `!(globalThis.Temporal !== undefined && ${value} instanceof globalThis.Temporal.${ctor})`,
@@ -4903,12 +6780,12 @@ function emitStringFormatChecks(emitter2, checks, value, path) {
   }
 }
 function emitCaseValidation(emitter2, style, value, path, message) {
-  const expression = emitCaseExpression(value, style);
+  const expression2 = emitCaseExpression(value, style);
   const runtimeSource = emitter2.typescript ? CASE_RUNTIME_TYPESCRIPT_SOURCE : CASE_RUNTIME_SOURCE;
   if (style !== "lower" && style !== "upper" && !emitter2.helperSources.includes(runtimeSource)) {
     emitter2.helperSources.push(runtimeSource);
   }
-  emitter2.failIf(`${expression} !== ${value}`, path, "invalid_case", style, message ?? `expected ${style} case`, {
+  emitter2.failIf(`${expression2} !== ${value}`, path, "invalid_case", style, message ?? `expected ${style} case`, {
     style
   });
 }
@@ -4942,11 +6819,11 @@ function emitStringTransforms(emitter2, checks, value) {
   for (const check of checks) {
     const casePlan = caseTransformPlan(check.kind);
     if (casePlan?.operation === "transform") {
-      const expression = emitCaseExpression(value, casePlan.style);
+      const expression2 = emitCaseExpression(value, casePlan.style);
       if (casePlan.style !== "lower" && casePlan.style !== "upper" && !emitter2.helperSources.includes(runtimeSource)) {
         emitter2.helperSources.push(runtimeSource);
       }
-      emitter2.writer.line(`${value} = ${expression};`);
+      emitter2.writer.line(`${value} = ${expression2};`);
     }
     if (check.kind === "format") emitFormatTransform(emitter2, check, value);
     if (check.kind === "phoneBR") emitPhoneTransform(emitter2, value);
@@ -5112,12 +6989,13 @@ function emitCheckParams(params) {
   return `{ ${entries.join(", ")} }`;
 }
 var ValidatorEmitter = class {
-  constructor(mode, awaited = false, resolveDefaults = true, materializeRuntimeTypes = true, maxIssues = void 0, validationEnabled = true, typescript = false, targetProfile) {
+  constructor(mode, awaited = false, resolveDefaults = true, materializeRuntimeTypes = true, maxIssues = void 0, validationEnabled = true, typescript = false, targetProfile, performanceProfile = resolvePerformanceProfile(targetProfile ?? resolveTargetProfile())) {
     this.resolveDefaults = resolveDefaults;
     this.materializeRuntimeTypes = materializeRuntimeTypes;
     this.maxIssues = maxIssues;
     this.typescript = typescript;
     this.targetProfile = targetProfile;
+    this.performanceProfile = performanceProfile;
     this.writer = new CodeWriter();
     this.bindingNames = [];
     this.bindingValues = [];
@@ -5536,10 +7414,16 @@ var ValidatorEmitter = class {
             )
           )
         ];
-        const decision = resolveEnumMembershipStrategy(schema, this.targetProfile ?? resolveTargetProfile());
+        const decision = resolveEnumMembershipStrategy(
+          schema,
+          this.targetProfile ?? resolveTargetProfile(),
+          this.performanceProfile,
+          this.mode
+        );
         const lookup3 = decision?.strategy === "lookup-object" ? this.enumLookup(values) : void 0;
         const matched = decision?.strategy === "switch" ? this.enumSwitch(values, value) : void 0;
-        const test = lookup3 ? `!${lookup3}[${value}]` : matched ? `!${matched}` : values.map((option) => `${value} !== ${emitLiteral(option)}`).join(" && ");
+        const lookupType = values.length === 0 ? void 0 : typeof values[0];
+        const test = lookup3 ? `typeof ${value} !== ${JSON.stringify(lookupType)} || !${lookup3}[${value}]` : matched ? `!${matched}` : values.map((option) => `${value} !== ${emitLiteral(option)}`).join(" && ");
         this.failIf(
           values.length === 0 ? "true" : test,
           path,
@@ -5699,14 +7583,17 @@ function emitFreezeOutput(writer, output) {
 }
 function emitValidator(schema, options = {}) {
   assertSatisfiable(schema);
-  const settings = resolveValidatorSettings(options);
+  const settings = resolveValidatorSettings(schema, options);
   const recursive = findRecursiveSchemas(schema);
   const parseEmitter = createParseEmitter(schema, recursive, settings);
   const asyncEmitter = createAsyncEmitter(schema, recursive, settings, parseEmitter);
   const isEmitter = createIsEmitter(schema, recursive, settings, asyncEmitter ?? parseEmitter);
   return assembleValidator(isEmitter, parseEmitter, asyncEmitter, settings.emitFastParse, settings.maxIssues);
 }
-function resolveValidatorSettings(options) {
+function resolveValidatorSettings(schema, options) {
+  const environment = environmentForSchema(schema);
+  const semanticPredicates = environment === void 0 || !(options.validateChecks ?? true) ? [] : resolveSemanticExtensionPlans(schema, environment.extensions).map(({ expression: expression2 }) => emitExpr(expression2));
+  const target = isTargetProfile(options.target) ? options.target : resolveTargetProfile(options.target);
   return {
     emitIs: options.is ?? true,
     emitSafeParse: options.safeParse ?? true,
@@ -5717,7 +7604,9 @@ function resolveValidatorSettings(options) {
     validateChecks: options.validateChecks ?? true,
     maxIssues: options.maxIssues,
     typescript: options.typescript ?? false,
-    target: isTargetProfile(options.target) ? options.target : resolveTargetProfile(options.target)
+    target,
+    performance: options.performance ?? resolvePerformanceProfile(target),
+    semanticPredicates: Object.freeze(semanticPredicates)
   };
 }
 function createParseEmitter(schema, recursive, settings) {
@@ -5729,7 +7618,9 @@ function createParseEmitter(schema, recursive, settings) {
       settings.materializeRuntimeTypes,
       settings.validateChecks,
       settings.typescript,
-      settings.target
+      settings.target,
+      settings.performance,
+      settings.semanticPredicates
     );
   if (!settings.emitSafeParse) return void 0;
   return emitDiagnosticEmitter(
@@ -5743,7 +7634,9 @@ function createParseEmitter(schema, recursive, settings) {
     void 0,
     false,
     settings.typescript,
-    settings.target
+    settings.target,
+    settings.performance,
+    settings.semanticPredicates
   );
 }
 function createAsyncEmitter(schema, recursive, settings, parseEmitter) {
@@ -5759,7 +7652,9 @@ function createAsyncEmitter(schema, recursive, settings, parseEmitter) {
     parseEmitter,
     true,
     settings.typescript,
-    settings.target
+    settings.target,
+    settings.performance,
+    settings.semanticPredicates
   );
 }
 function createIsEmitter(schema, recursive, settings, sourceEmitter) {
@@ -5772,13 +7667,15 @@ function createIsEmitter(schema, recursive, settings, sourceEmitter) {
     void 0,
     settings.validateChecks,
     settings.typescript,
-    settings.target
+    settings.target,
+    settings.performance
   );
   emitter2.markRecursive(recursive);
   for (const value of sourceEmitter?.bindings().values ?? []) emitter2.bind(value);
   emitter2.writer.line(`function is(value${settings.typescript ? ": __JitValue" : ""}) {`);
   emitter2.writer.indent(() => {
     emitter2.emitNode(schema, "value", rootPath());
+    emitSemanticPredicates(emitter2, settings.semanticPredicates, false);
     emitter2.writer.line("return true;");
   });
   emitter2.writer.line("}");
@@ -5805,7 +7702,7 @@ function assembleValidator(isEmitter, parseEmitter, asyncEmitter, emitFastParse,
     bindings
   };
 }
-function emitParseEmitter(schema, recursive, resolveDefaults, materializeRuntimeTypes, validateChecks, typescript, target) {
+function emitParseEmitter(schema, recursive, resolveDefaults, materializeRuntimeTypes, validateChecks, typescript, target, performance, semanticPredicates) {
   const emitter2 = new ValidatorEmitter(
     "fast",
     false,
@@ -5814,18 +7711,20 @@ function emitParseEmitter(schema, recursive, resolveDefaults, materializeRuntime
     void 0,
     validateChecks,
     typescript,
-    target
+    target,
+    performance
   );
   emitter2.markRecursive(recursive);
   emitter2.writer.line(`function parse(value${typescript ? ": __JitValue" : ""})${typescript ? ": __JitValue" : ""} {`);
   emitter2.writer.indent(() => {
     const output = emitter2.emitNode(schema, "value", rootPath());
+    emitSemanticPredicates(emitter2, semanticPredicates, false);
     emitter2.writer.line(`return ${output};`);
   });
   emitter2.writer.line("}");
   return emitter2;
 }
-function emitDiagnosticEmitter(schema, recursive, resolveDefaults, materializeRuntimeTypes, validateChecks, maxIssues, freezesOutput, sourceEmitter, awaited = false, typescript = false, target = resolveTargetProfile()) {
+function emitDiagnosticEmitter(schema, recursive, resolveDefaults, materializeRuntimeTypes, validateChecks, maxIssues, freezesOutput, sourceEmitter, awaited = false, typescript = false, target = resolveTargetProfile(), performance = resolvePerformanceProfile(target), semanticPredicates = []) {
   const emitter2 = new ValidatorEmitter(
     "parse",
     awaited,
@@ -5834,7 +7733,8 @@ function emitDiagnosticEmitter(schema, recursive, resolveDefaults, materializeRu
     maxIssues,
     validateChecks,
     typescript,
-    target
+    target,
+    performance
   );
   emitter2.markRecursive(recursive);
   if (sourceEmitter) for (const value of sourceEmitter.bindings().values) emitter2.bind(value);
@@ -5848,6 +7748,7 @@ function emitDiagnosticEmitter(schema, recursive, resolveDefaults, materializeRu
     if (maxIssues !== void 0) emitter2.writer.line("try {");
     const emitBody2 = () => {
       const output = emitter2.emitNode(schema, "value", rootPath());
+      emitSemanticPredicates(emitter2, semanticPredicates, true);
       emitter2.writer.line("if (issues !== undefined) {");
       emitter2.writer.indent(() => {
         emitter2.writer.line("return { success: false, issues: issues };");
@@ -5869,6 +7770,29 @@ function emitDiagnosticEmitter(schema, recursive, resolveDefaults, materializeRu
   });
   emitter2.writer.line("}");
   return emitter2;
+}
+function emitSemanticPredicates(emitter2, predicates, awaitBaseValidation) {
+  if (predicates.length === 0) return;
+  const emitChecks = () => {
+    const previous = emitter2.validationEnabled;
+    emitter2.validationEnabled = true;
+    for (const predicate of predicates)
+      emitter2.failIf(
+        `!(${predicate})`,
+        rootPath(),
+        "custom",
+        "semantic extension",
+        "semantic extension rejected the value"
+      );
+    emitter2.validationEnabled = previous;
+  };
+  if (awaitBaseValidation) {
+    emitter2.writer.line("if (issues === undefined || issues.length === 0) {");
+    emitter2.writer.indent(emitChecks);
+    emitter2.writer.line("}");
+  } else {
+    emitChecks();
+  }
 }
 function isTargetProfile(value) {
   return value !== void 0 && "weights" in value && "limits" in value;
@@ -6020,7 +7944,11 @@ function compileValidatorSelection(schema, ops2, options) {
 function cacheOptions(schema, options) {
   const environment = environmentForSchema(schema) ?? getActiveEnvironment();
   const target = resolveTargetProfile();
-  return { ...options, compilerDigest: `${environment.extensions.digest}:${target.digest}` };
+  const performance = resolvePerformanceProfile(target);
+  return {
+    ...options,
+    compilerDigest: `${environment.extensions.digest}:${target.digest}:${performance.digest}`
+  };
 }
 function registerValidatorArtifact(fn, schema, op, maxIssues) {
   registerArtifact(fn, { kind: "validator", schema, op, ...maxIssues === void 0 ? {} : { maxIssues } });
@@ -6045,8 +7973,17 @@ function emitOptionsForValidatorOps(ops2, fastParse = false) {
 }
 
 // ../../packages/jit/src/compiler/physical/physical-plan.ts
-function resolvePhysicalPlan(plan, target) {
-  const profile = isTargetProfile2(target) ? target : resolveTargetProfile(target);
+function resolvePhysicalPlan(plan, target, options = {}) {
+  const profile = isTargetProfile2(target) ? assertTargetProfile(target) : resolveTargetProfile(target);
+  const environment = environmentForSchema(plan.schema) ?? getActiveEnvironment();
+  const capabilities = physicalCapabilities(plan);
+  const optimization = createOptimizationContext(
+    plan,
+    profile,
+    capabilities,
+    options.extensions ?? environment.extensions,
+    options.performance ?? resolvePerformanceProfile(profile)
+  );
   const decisions = [];
   for (const stage of plan.stages) {
     if (stage.kind !== "validate") continue;
@@ -6055,17 +7992,20 @@ function resolvePhysicalPlan(plan, target) {
       profile,
       validationMode(stage.operation),
       decisions,
-      /* @__PURE__ */ new Set()
+      /* @__PURE__ */ new Set(),
+      optimization.performance
     );
   }
   const frozenDecisions = Object.freeze(decisions);
-  const capabilities = physicalCapabilities(plan);
   return Object.freeze({
     execution: plan,
     target: profile,
+    optimization,
+    strategyCatalogVersion: STRATEGY_CATALOG_VERSION,
+    performanceProfileVersion: `${optimization.performance.id}@${optimization.performance.version}`,
     decisions: frozenDecisions,
     capabilities,
-    digest: physicalDigest(plan, profile, frozenDecisions, capabilities)
+    digest: physicalDigest(plan, optimization, frozenDecisions, capabilities)
   });
 }
 function resolveValidationPhysicalPlan(schema, operation, target) {
@@ -6085,27 +8025,106 @@ function resolveValidationPhysicalPlan(schema, operation, target) {
   };
   return resolvePhysicalPlan(Object.freeze({ version: 1, schema, stages: Object.freeze([stage]) }), target);
 }
-function collectValidationDecisions(schema, profile, operation, decisions, seen) {
+function collectValidationDecisions(schema, profile, operation, decisions, seen, performance) {
   const base = resolveWrappers(schema).base;
   if (seen.has(base)) return;
   seen.add(base);
-  const array2 = resolveArrayValidationStrategy(base, profile, operation);
-  if (array2 !== void 0) decisions.push(array2);
-  const enumeration = resolveEnumMembershipStrategy(base, profile);
+  const collection2 = base.type === TypeName.tuple ? resolveTupleValidationStrategy(base, profile, operation, performance) : resolveArrayValidationStrategy(base, profile, operation, performance);
+  if (collection2 !== void 0) decisions.push(collection2);
+  const enumeration = resolveEnumMembershipStrategy(base, profile, performance, operation);
   if (enumeration !== void 0) decisions.push(enumeration);
-  for (const child of schemaChildren(base)) collectValidationDecisions(child, profile, operation, decisions, seen);
+  for (const child of schemaChildren(base))
+    collectValidationDecisions(child, profile, operation, decisions, seen, performance);
 }
 function isTargetProfile2(value) {
   return value !== void 0 && "weights" in value && "limits" in value;
 }
-function physicalDigest(plan, profile, decisions, capabilities) {
-  let hash4 = 2166136261;
-  const source = `${profile.digest}|${plan.stages.map((stage) => stage.kind).join(",")}|${decisions.map((decision) => `${decision.family}:${decision.strategy}`).join(",")}|${capabilities.map((capability2) => `${capability2.kind}:${capability2.key ?? ""}`).join(",")}`;
+function physicalDigest(plan, optimization, decisions, capabilities) {
+  const source = stableString({
+    contract: executionContract(plan),
+    semanticFacts: optimization.semanticFacts,
+    optimizationFacts: optimization.optimizationFacts,
+    target: { id: optimization.target.id, digest: optimization.target.digest },
+    strategyCatalogVersion: STRATEGY_CATALOG_VERSION,
+    performanceProfile: {
+      id: optimization.performance.id,
+      version: optimization.performance.version,
+      digest: optimization.performance.digest
+    },
+    extensions: optimization.extensions.digest,
+    semanticExtensions: optimization.semanticExtensions,
+    decisions,
+    capabilities
+  });
+  let first = 2166136261;
+  let second = 2246822519;
   for (let index2 = 0; index2 < source.length; index2++) {
-    hash4 ^= source.charCodeAt(index2);
-    hash4 = Math.imul(hash4, 16777619);
+    const code = source.charCodeAt(index2);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code + index2, 3266489917);
   }
-  return `physical-${(hash4 >>> 0).toString(16).padStart(8, "0")}`;
+  return `physical-${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+}
+function executionContract(plan) {
+  return {
+    version: plan.version,
+    schema: stableValue3(plan.schema, /* @__PURE__ */ new Map()),
+    stages: plan.stages.map((stage) => stableValue3(stage, /* @__PURE__ */ new Map()))
+  };
+}
+function stableString(value) {
+  return JSON.stringify(value);
+}
+function stableValue3(value, seen, preserveEntryOrder = false) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") return stableNumber(value);
+  if (typeof value === "bigint") return `${value}n`;
+  if (typeof value === "undefined") return "$undefined";
+  if (typeof value === "function") return `$external:${value.name || "anonymous"}`;
+  if (typeof value !== "object") return String(value);
+  const previous = seen.get(value);
+  if (previous !== void 0) return { $ref: previous };
+  seen.set(value, seen.size);
+  if (value instanceof RegExp) return { $regexp: value.source, flags: value.flags };
+  if (Array.isArray(value)) return stableArray(value, seen);
+  if (isSchemaValue(value)) return stableSchema(value, seen);
+  return stableRecord(value, seen, preserveEntryOrder);
+}
+function stableNumber(value) {
+  if (Number.isNaN(value)) return "$NaN";
+  return Object.is(value, -0) ? "$-0" : value;
+}
+function stableArray(value, seen) {
+  return value.map((entry) => stableValue3(entry, seen));
+}
+function stableSchema(value, seen) {
+  const extensionIdentities = isRecord2(value.annotations) ? value.annotations.extensions : void 0;
+  const annotations = Array.isArray(extensionIdentities) && extensionIdentities.length > 0 ? { extensions: stableValue3(extensionIdentities, seen) } : {};
+  return { $schema: true, type: String(value.type), def: stableValue3(value.def, seen), annotations };
+}
+function stableRecord(record2, seen, preserveEntryOrder) {
+  const keys = Object.keys(record2).filter((key) => !ignoredDigestKey(key));
+  keys.sort((left, right) => compareDigestKey(left, right, preserveEntryOrder));
+  return Object.fromEntries(keys.map((key) => [key, stableValue3(record2[key], seen, key === "props")]));
+}
+function ignoredDigestKey(key) {
+  return key === "metadata" || key === "meta" || key === "annotations";
+}
+function compareDigestKey(left, right, preserveEntryOrder) {
+  if (left === right) return 0;
+  if (preserveEntryOrder) return 0;
+  if (left === "props") return -1;
+  if (right === "props") return 1;
+  return compareText8(left, right);
+}
+function isSchemaValue(value) {
+  return "type" in value && "def" in value;
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function compareText8(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 function physicalCapabilities(plan) {
   const capabilities = [];
@@ -8354,7 +10373,7 @@ function canonicalValue(value, seen = /* @__PURE__ */ new Set()) {
 
 // ../../packages/jit/src/aot/artifact-manifest-validation.ts
 function isArtifactManifest(value) {
-  if (!isRecord2(value)) return false;
+  if (!isRecord3(value)) return false;
   const structural = isManifestIdentity(value) && isArrayOf(value.files, isManifestFile) && isArrayOf(value.symbols, isManifestSymbol) && isArrayOf(value.types, isManifestType) && isArrayOf(value.protocols, isManifestProtocol) && isSemanticMap(value.semanticMap);
   return structural && isManifestComplete(value);
 }
@@ -8391,7 +10410,7 @@ function isManifestHeader(value) {
   return value.manifestVersion === 1 && isManifestCompiler(value.compiler);
 }
 function isManifestCompiler(value) {
-  return isRecord2(value) && isString(value.name) && isString(value.version);
+  return isRecord3(value) && isString(value.name) && isString(value.version);
 }
 function isManifestDigests(value) {
   return isDigest(value.declarationDigest) && isDigest(value.programDigest) && isDigest(value.artifactDigest) && isDigest(value.manifestDigest);
@@ -8400,42 +10419,45 @@ function isManifestOwnership(value) {
   return value.ownership === "managed" || value.ownership === "detached";
 }
 function isManifestEmission(value) {
-  if (!isRecord2(value.emission)) return false;
-  return (value.emission.format === "ts" || value.emission.format === "js") && (value.emission.naming === "compact" || value.emission.naming === "semantic") && (value.target === void 0 || isManifestTarget(value.target)) && (value.physicalPlanDigest === void 0 || isDigest(value.physicalPlanDigest)) && (value.physicalPlans === void 0 || isArrayOf(value.physicalPlans, isManifestPhysicalPlan));
+  if (!isRecord3(value.emission)) return false;
+  return (value.emission.format === "ts" || value.emission.format === "js") && (value.emission.naming === "compact" || value.emission.naming === "semantic") && (value.target === void 0 || isManifestTarget(value.target)) && (value.performanceProfileVersion === void 0 || isString(value.performanceProfileVersion)) && (value.strategyCatalogVersion === void 0 || isString(value.strategyCatalogVersion)) && (value.physicalPlanDigest === void 0 || isDigest(value.physicalPlanDigest)) && (value.physicalPlans === void 0 || isArrayOf(value.physicalPlans, isManifestPhysicalPlan));
 }
 function isManifestPhysicalPlan(value) {
-  if (!isRecord2(value) || !isString(value.symbol) || !isString(value.target) || !isPhysicalDigest(value.digest))
+  if (!isRecord3(value) || !isString(value.symbol) || !isString(value.target) || !isPhysicalDigest(value.digest))
     return false;
-  return (value.capabilities === void 0 || isArrayOf(value.capabilities, isManifestCapability)) && isArrayOf(value.decisions, isManifestDecision);
+  return (value.strategyCatalogVersion === void 0 || isString(value.strategyCatalogVersion)) && (value.performanceProfileVersion === void 0 || isString(value.performanceProfileVersion)) && (value.extensions === void 0 || isArrayOf(value.extensions, isManifestPhysicalExtension)) && (value.capabilities === void 0 || isArrayOf(value.capabilities, isManifestCapability)) && isArrayOf(value.decisions, isManifestDecision);
+}
+function isManifestPhysicalExtension(value) {
+  return isRecord3(value) && isString(value.id) && isString(value.version) && typeof value.irDigest === "string" && /^extension-ir-[a-f0-9]{16}$/.test(value.irDigest);
 }
 function isManifestCapability(value) {
-  return isRecord2(value) && isString(value.kind) && (value.key === void 0 || isString(value.key)) && Number.isInteger(value.sourceStage) && typeof value.reusable === "boolean";
+  return isRecord3(value) && isString(value.kind) && (value.key === void 0 || isString(value.key)) && Number.isInteger(value.sourceStage) && typeof value.reusable === "boolean";
 }
 function isManifestDecision(value) {
-  if (!isRecord2(value)) return false;
+  if (!isRecord3(value)) return false;
   return isString(value.family) && isString(value.strategy) && isArrayOf(value.reason, isString) && isArrayOf(value.evidence, isString) && isNumberRecord(value.estimated);
 }
 function isNumberRecord(value) {
-  return isRecord2(value) && Object.values(value).every((entry) => typeof entry === "number" && Number.isFinite(entry));
+  return isRecord3(value) && Object.values(value).every((entry) => typeof entry === "number" && Number.isFinite(entry));
 }
 function isManifestTarget(value) {
-  if (!isRecord2(value)) return false;
-  return isString(value.profile) && isString(value.runtime) && isString(value.engine) && (value.engineVersion === void 0 || isString(value.engineVersion));
+  if (!isRecord3(value)) return false;
+  return isString(value.profile) && isString(value.runtime) && isString(value.engine) && (value.runtimeVersion === void 0 || isString(value.runtimeVersion)) && (value.performanceProfileVersion === void 0 || isString(value.performanceProfileVersion)) && (value.engineVersion === void 0 || isString(value.engineVersion));
 }
 function isCompilationReceipt(value) {
-  if (!isRecord2(value)) return false;
-  return isString(value.compilerVersion) && isDigest(value.declarationDigest) && isDigest(value.programDigest) && isDigest(value.manifestDigest) && isDigest(value.artifactDigest) && Number.isInteger(value.files) && Number.isInteger(value.symbols) && isArrayOf(value.checks, isCompilationCheck);
+  if (!isRecord3(value)) return false;
+  return isString(value.compilerVersion) && isDigest(value.declarationDigest) && isDigest(value.programDigest) && isDigest(value.manifestDigest) && isDigest(value.artifactDigest) && (value.performanceProfileVersion === void 0 || isString(value.performanceProfileVersion)) && Number.isInteger(value.files) && Number.isInteger(value.symbols) && isArrayOf(value.checks, isCompilationCheck);
 }
 function isManifestFile(value) {
-  if (!isRecord2(value) || !isString(value.path) || !isDigest(value.hash) || !Number.isInteger(value.bytes))
+  if (!isRecord3(value) || !isString(value.path) || !isDigest(value.hash) || !Number.isInteger(value.bytes))
     return false;
   return isArrayOf(value.exports, isString) && isArrayOf(
     value.imports,
-    (item) => isRecord2(item) && isString(item.module) && isArrayOf(item.symbols, isString)
+    (item) => isRecord3(item) && isString(item.module) && isArrayOf(item.symbols, isString)
   );
 }
 function isManifestSymbol(value) {
-  return isRecord2(value) && isManifestSymbolIdentity(value) && isManifestSymbolShape(value);
+  return isRecord3(value) && isManifestSymbolIdentity(value) && isManifestSymbolShape(value);
 }
 function isManifestSymbolIdentity(value) {
   return isString(value.id) && isString(value.name) && isString(value.module) && isString(value.file) && isString(value.exportName) && isString(value.declaration);
@@ -8445,7 +10467,7 @@ function isManifestSymbolShape(value) {
 }
 function isManifestMetadata(value) {
   if (value === void 0) return true;
-  if (!isRecord2(value)) return false;
+  if (!isRecord3(value)) return false;
   return (value.id === void 0 || isString(value.id)) && (value.title === void 0 || isString(value.title)) && (value.description === void 0 || isString(value.description)) && (value.deprecated === void 0 || typeof value.deprecated === "boolean") && (value.tags === void 0 || isArrayOf(value.tags, isString));
 }
 function isValidClassMetadata(value) {
@@ -8455,38 +10477,38 @@ function isManifestSymbolCollections(value) {
   return isString(value.kind) && isArrayOf(value.capabilities, isString) && isArrayOf(value.protocols, isString) && isArrayOf(value.dependencies, isString) && isArrayOf(value.effects, isManifestEffect) && (value.extensions === void 0 || isArrayOf(value.extensions, isManifestExtension));
 }
 function isManifestExtension(value) {
-  if (!isRecord2(value) || !isString(value.id) || !isString(value.version)) return false;
+  if (!isRecord3(value) || !isString(value.id) || !isString(value.version)) return false;
   const abi = value.abi;
   return typeof abi === "number" && Number.isSafeInteger(abi) && abi > 0;
 }
 function isManifestEffect(value) {
-  return isRecord2(value) && isString(value.kind) && (value.target === void 0 || isString(value.target));
+  return isRecord3(value) && isString(value.kind) && (value.target === void 0 || isString(value.target));
 }
 function isFactories(value) {
-  return isRecord2(value) && (typeof value.create === "string" || value.create === false) && (typeof value.hydrate === "string" || value.hydrate === false);
+  return isRecord3(value) && (typeof value.create === "string" || value.create === false) && (typeof value.hydrate === "string" || value.hydrate === false);
 }
 function isEvent(value) {
-  return isRecord2(value) && isString(value.type) && Number.isInteger(value.version);
+  return isRecord3(value) && isString(value.type) && Number.isInteger(value.version);
 }
 function isManifestType(value) {
-  return isRecord2(value) && isString(value.name) && isString(value.file) && isString(value.exportName) && isString(value.declaration);
+  return isRecord3(value) && isString(value.name) && isString(value.file) && isString(value.exportName) && isString(value.declaration);
 }
 function isManifestProtocol(value) {
-  return isRecord2(value) && isString(value.protocol) && Number.isInteger(value.version) && isString(value.input) && isString(value.output) && isArrayOf(value.symbols, isString);
+  return isRecord3(value) && isString(value.protocol) && Number.isInteger(value.version) && isString(value.input) && isString(value.output) && isArrayOf(value.symbols, isString);
 }
 function isSemanticMap(value) {
-  return isRecord2(value) && isArrayOf(
+  return isRecord3(value) && isArrayOf(
     value.declarations,
-    (item) => isRecord2(item) && isString(item.declaration) && isArrayOf(item.symbols, isString)
+    (item) => isRecord3(item) && isString(item.declaration) && isArrayOf(item.symbols, isString)
   );
 }
 function isCompilationCheck(value) {
-  return isRecord2(value) && isString(value.name) && (value.status === "passed" || value.status === "warning" || value.status === "skipped") && (value.detail === void 0 || isString(value.detail));
+  return isRecord3(value) && isString(value.name) && (value.status === "passed" || value.status === "warning" || value.status === "skipped") && (value.detail === void 0 || isString(value.detail));
 }
 function isArrayOf(value, guard) {
   return Array.isArray(value) && value.every(guard);
 }
-function isRecord2(value) {
+function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isString(value) {
@@ -8496,7 +10518,7 @@ function isDigest(value) {
   return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 }
 function isPhysicalDigest(value) {
-  return typeof value === "string" && /^physical-[a-f0-9]{8}$/.test(value);
+  return typeof value === "string" && /^physical-(?:[a-f0-9]{8}|[a-f0-9]{16})$/.test(value);
 }
 
 // ../../packages/jit/src/aot/hash.ts
@@ -8691,7 +10713,7 @@ function verifyFiles(outputDir, manifest, receipt) {
   }
   const generatedFiles = new Set(manifest.files.map((file2) => file2.path));
   const extras = findGeneratedExtras(outputDir, "", generatedFiles);
-  const files2 = [...changed3, ...extras].sort(compareText);
+  const files2 = [...changed3, ...extras].sort(compareText9);
   return files2.length > 0 ? {
     status: "modified",
     manifest,
@@ -8741,7 +10763,7 @@ function receiptMatchesManifest(receipt, manifest) {
 function errorMessage(error2) {
   return error2 instanceof Error ? error2.message : String(error2);
 }
-function compareText(left, right) {
+function compareText9(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 function safePath(root, path) {
@@ -8764,7 +10786,7 @@ function declarationDigest(input) {
   return sha2562(stableJson2(input));
 }
 function createArtifactManifest(input) {
-  const files2 = [...input.fileHashes].sort((left, right) => compareText2(left.path, right.path));
+  const files2 = [...input.fileHashes].sort((left, right) => compareText10(left.path, right.path));
   const artifactDigest = sha2562(stableJson2(files2.map(({ path, hash: hash4, bytes }) => ({ path, hash: hash4, bytes }))));
   const base = {
     manifestVersion: ARTIFACT_MANIFEST_VERSION,
@@ -8779,7 +10801,7 @@ function createArtifactManifest(input) {
     symbols: [...input.program.symbols].map((symbol2) => ({
       ...symbol2,
       file: input.program.modules.find((module) => module.id === symbol2.module)?.path ?? symbol2.module
-    })).sort((left, right) => compareText2(left.name, right.name) || compareText2(left.id, right.id)),
+    })).sort((left, right) => compareText10(left.name, right.name) || compareText10(left.id, right.id)),
     types: collectTypes(input.program),
     protocols: collectProtocols(input.program),
     semanticMap: collectSemanticMap(input.program),
@@ -8788,9 +10810,13 @@ function createArtifactManifest(input) {
         profile: input.target.id,
         runtime: input.target.runtime,
         engine: input.target.engine,
-        ...input.target.engineVersion === void 0 ? {} : { engineVersion: input.target.engineVersion }
+        ...input.target.runtimeVersion === void 0 ? {} : { runtimeVersion: input.target.runtimeVersion },
+        ...input.target.engineVersion === void 0 ? {} : { engineVersion: input.target.engineVersion },
+        ...input.performanceProfileVersion === void 0 ? {} : { performanceProfileVersion: input.performanceProfileVersion }
       }
     },
+    ...input.performanceProfileVersion === void 0 ? {} : { performanceProfileVersion: input.performanceProfileVersion },
+    ...input.strategyCatalogVersion === void 0 ? {} : { strategyCatalogVersion: input.strategyCatalogVersion },
     ...input.physicalPlanDigest === void 0 ? {} : { physicalPlanDigest: input.physicalPlanDigest },
     ...input.physicalPlans === void 0 ? {} : { physicalPlans: input.physicalPlans }
   };
@@ -8804,6 +10830,7 @@ function createCompilationReceipt(manifest, compilerVersion, checks = []) {
     programDigest: manifest.programDigest,
     manifestDigest: manifest.manifestDigest,
     artifactDigest: manifest.artifactDigest,
+    ...manifest.performanceProfileVersion === void 0 ? {} : { performanceProfileVersion: manifest.performanceProfileVersion },
     files: manifest.files.length,
     symbols: manifest.symbols.length,
     checks: Object.freeze([...checks])
@@ -8830,7 +10857,7 @@ function collectTypes(program) {
     file: modulePath(program, symbol2.module),
     exportName: symbol2.exportName,
     declaration: symbol2.declaration
-  })).sort((left, right) => compareText2(left.name, right.name));
+  })).sort((left, right) => compareText10(left.name, right.name));
 }
 function collectProtocols(program) {
   const groups = /* @__PURE__ */ new Map();
@@ -8846,7 +10873,7 @@ function collectProtocols(program) {
     group.symbols.add(binding.symbolId);
     groups.set(key, group);
   }
-  return [...groups.values()].map(({ capability: capability2, symbols }) => ({ ...capability2, symbols: [...symbols].sort() })).sort((left, right) => compareText2(`${left.protocol}:${left.version}`, `${right.protocol}:${right.version}`));
+  return [...groups.values()].map(({ capability: capability2, symbols }) => ({ ...capability2, symbols: [...symbols].sort() })).sort((left, right) => compareText10(`${left.protocol}:${left.version}`, `${right.protocol}:${right.version}`));
 }
 function collectSemanticMap(program) {
   const groups = /* @__PURE__ */ new Map();
@@ -8856,13 +10883,13 @@ function collectSemanticMap(program) {
     groups.set(symbol2.declaration, symbols);
   }
   return {
-    declarations: [...groups.entries()].map(([declaration, symbols]) => ({ declaration, symbols: [...symbols].sort() })).sort((left, right) => compareText2(left.declaration, right.declaration))
+    declarations: [...groups.entries()].map(([declaration, symbols]) => ({ declaration, symbols: [...symbols].sort() })).sort((left, right) => compareText10(left.declaration, right.declaration))
   };
 }
 function modulePath(program, id) {
   return program.modules.find((module) => module.id === id)?.path ?? id;
 }
-function compareText2(left, right) {
+function compareText10(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 function safePath2(root, path) {
@@ -8876,18 +10903,18 @@ function safePath2(root, path) {
 
 // ../../packages/jit/src/aot/artifact-program.ts
 function createArtifactProgram(input) {
-  const modules = input.modules.map((module) => normalizeModule(module)).sort((left, right) => compareText3(left.id, right.id));
+  const modules = input.modules.map((module) => normalizeModule(module)).sort((left, right) => compareText11(left.id, right.id));
   const moduleIds = new Set(modules.map((module) => module.id));
   validateModuleIds(modules, moduleIds);
   validateModuleDependencies(modules, moduleIds);
-  const symbols = input.symbols.map((symbol2) => normalizeSymbol(symbol2)).sort((left, right) => compareText3(left.id, right.id));
+  const symbols = input.symbols.map((symbol2) => normalizeSymbol(symbol2)).sort((left, right) => compareText11(left.id, right.id));
   const symbolIds = /* @__PURE__ */ new Set();
   validateSymbols(symbols, symbolIds, moduleIds);
   validateSymbolDependencies(symbols, symbolIds);
   validateExports(modules, symbolIds);
   const protocols = [...input.protocols ?? []].sort((left, right) => {
-    const protocol = compareText3(left.protocol, right.protocol);
-    return protocol !== 0 ? protocol : compareText3(left.symbolId, right.symbolId);
+    const protocol = compareText11(left.protocol, right.protocol);
+    return protocol !== 0 ? protocol : compareText11(left.symbolId, right.symbolId);
   });
   validateProtocols(protocols, symbolIds);
   validateDependencySymbols(modules, symbolIds);
@@ -8973,7 +11000,7 @@ function topologicalModuleOrder(program) {
     const module = byId.get(id);
     if (!module) throw new Error(`ArtifactProgram references missing module ${JSON.stringify(id)}.`);
     visiting.add(id);
-    for (const dependency of [...module.dependencies].sort((left, right) => compareText3(left.module, right.module))) {
+    for (const dependency of [...module.dependencies].sort((left, right) => compareText11(left.module, right.module))) {
       visit2(dependency.module);
     }
     visiting.delete(id);
@@ -8995,12 +11022,12 @@ function normalizeModule(module) {
       [...module.dependencies].map((dependency) => ({
         module: dependency.module,
         symbols: Object.freeze([...dependency.symbols].sort())
-      })).sort((left, right) => compareText3(left.module, right.module))
+      })).sort((left, right) => compareText11(left.module, right.module))
     ),
     declarations: Object.freeze(
-      [...module.declarations].sort((left, right) => compareText3(left.symbolId, right.symbolId))
+      [...module.declarations].sort((left, right) => compareText11(left.symbolId, right.symbolId))
     ),
-    exports: Object.freeze([...module.exports].sort((left, right) => compareText3(left.name, right.name)))
+    exports: Object.freeze([...module.exports].sort((left, right) => compareText11(left.name, right.name)))
   };
 }
 function normalizeSymbol(symbol2) {
@@ -9017,19 +11044,19 @@ function normalizeSymbol(symbol2) {
     dependencies: Object.freeze([...symbol2.dependencies].sort()),
     effects: Object.freeze(
       [...symbol2.effects].sort(
-        (left, right) => compareText3(`${left.kind}:${left.target ?? ""}`, `${right.kind}:${right.target ?? ""}`)
+        (left, right) => compareText11(`${left.kind}:${left.target ?? ""}`, `${right.kind}:${right.target ?? ""}`)
       )
     ),
     ...symbol2.extensions === void 0 ? {} : {
       extensions: Object.freeze(
         [...symbol2.extensions].sort(
-          (left, right) => compareText3(`${left.id}@${left.version}`, `${right.id}@${right.version}`)
+          (left, right) => compareText11(`${left.id}@${left.version}`, `${right.id}@${right.version}`)
         )
       )
     }
   };
 }
-function compareText3(left, right) {
+function compareText11(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 function detectModuleCycles(modules) {
@@ -9548,7 +11575,7 @@ function buildArtifactProgram(options) {
   }
   const finalizedSymbols = symbols.map((symbol2) => ({
     ...symbol2,
-    protocols: Object.freeze([...protocolNames.get(symbol2.id) ?? []].sort(compareText4))
+    protocols: Object.freeze([...protocolNames.get(symbol2.id) ?? []].sort(compareText12))
   }));
   return createArtifactProgram({ modules, symbols: finalizedSymbols, protocols: bindings });
 }
@@ -9625,18 +11652,18 @@ function declarationRevisionDigest(options) {
   const declarations = options.modules.map((module) => ({
     name: module.name,
     artifacts: Object.fromEntries(
-      Object.entries(module.artifacts).sort(([left], [right]) => compareText4(left, right)).map(([name, value]) => [name, declarationFingerprint(value)])
+      Object.entries(module.artifacts).sort(([left], [right]) => compareText12(left, right)).map(([name, value]) => [name, declarationFingerprint(value)])
     ),
     groups: Object.fromEntries(
-      Object.entries(module.groups).sort(([left], [right]) => compareText4(left, right)).map(([name, group]) => [
+      Object.entries(module.groups).sort(([left], [right]) => compareText12(left, right)).map(([name, group]) => [
         name,
         Object.fromEntries(
-          Object.entries(group).sort(([left], [right]) => compareText4(left, right)).map(([member, value]) => [member, declarationFingerprint(value)])
+          Object.entries(group).sort(([left], [right]) => compareText12(left, right)).map(([member, value]) => [member, declarationFingerprint(value)])
         )
       ])
     ),
     schemas: Object.fromEntries(
-      Object.entries(module.schemas).sort(([left], [right]) => compareText4(left, right)).map(([name, schema]) => [name, declarationFingerprint(schema)])
+      Object.entries(module.schemas).sort(([left], [right]) => compareText12(left, right)).map(([name, schema]) => [name, declarationFingerprint(schema)])
     )
   }));
   return declarationDigest({ declarations });
@@ -9700,7 +11727,7 @@ function schemaExtensions(input) {
     collectSchemaExtensions(unwrapSchema(input), identities, /* @__PURE__ */ new Set());
     if (identities.size === 0) return void 0;
     return Object.freeze(
-      [...identities.values()].sort((left, right) => compareText4(`${left.id}@${left.version}`, `${right.id}@${right.version}`)).map((identity) => Object.freeze(identity))
+      [...identities.values()].sort((left, right) => compareText12(`${left.id}@${left.version}`, `${right.id}@${right.version}`)).map((identity) => Object.freeze(identity))
     );
   } catch {
     return void 0;
@@ -9710,13 +11737,13 @@ function collectSchemaExtensions(schema, identities, seen) {
   if (seen.has(schema)) return;
   seen.add(schema);
   const annotations = schema.annotations;
-  if (isRecord3(annotations) && Array.isArray(annotations.extensions)) {
+  if (isRecord4(annotations) && Array.isArray(annotations.extensions)) {
     for (const value of annotations.extensions) {
       if (!isArtifactExtension(value)) continue;
       identities.set(`${value.id}@${value.version}@${value.abi}`, value);
     }
   }
-  if (!isRecord3(schema.def)) return;
+  if (!isRecord4(schema.def)) return;
   for (const value of Object.values(schema.def)) {
     if (Array.isArray(value)) {
       for (const item of value) {
@@ -9728,13 +11755,13 @@ function collectSchemaExtensions(schema, identities, seen) {
   }
 }
 function isArtifactExtension(value) {
-  return isRecord3(value) && typeof value.id === "string" && typeof value.version === "string" && typeof value.abi === "number" && Number.isSafeInteger(value.abi) && value.abi > 0;
+  return isRecord4(value) && typeof value.id === "string" && typeof value.version === "string" && typeof value.abi === "number" && Number.isSafeInteger(value.abi) && value.abi > 0;
 }
-function isRecord3(value) {
+function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isNestedSchemaRecord(value) {
-  return isRecord3(value) && typeof value.type === "string" && "_type" in value && "def" in value && "annotations" in value;
+  return isRecord4(value) && typeof value.type === "string" && "_type" in value && "def" in value && "annotations" in value;
 }
 function schemaMetadata(input) {
   if (input === void 0) return void 0;
@@ -9772,7 +11799,7 @@ function schemaDependenciesForSymbol(input, name, artifact, owners) {
         dependencies.add(dependency);
     }
   }
-  return [...dependencies].sort(compareText4);
+  return [...dependencies].sort(compareText12);
 }
 function artifactSchema(artifact, value) {
   if (artifact === void 0) return void 0;
@@ -9799,7 +11826,7 @@ function schemaDependencies(_module, input, owners) {
     for (const child of schemaChildren(current)) walk(child);
   };
   walk(unwrapSchema(input), true);
-  return [...dependencies].sort(compareText4);
+  return [...dependencies].sort(compareText12);
 }
 function moduleDependencies(module, symbols) {
   const byModule = /* @__PURE__ */ new Map();
@@ -9814,7 +11841,7 @@ function moduleDependencies(module, symbols) {
       byModule.set(targetModule, names);
     }
   }
-  return [...byModule.entries()].sort(([left], [right]) => compareText4(left, right)).map(([targetModule, names]) => ({ module: targetModule, symbols: [...names].sort(compareText4) }));
+  return [...byModule.entries()].sort(([left], [right]) => compareText12(left, right)).map(([targetModule, names]) => ({ module: targetModule, symbols: [...names].sort(compareText12) }));
 }
 function addProtocolBindings(bindings, module, name, symbolId, protocols) {
   for (const capability2 of protocols?.[name] ?? protocols?.[`${module}:${name}`] ?? []) {
@@ -9902,7 +11929,7 @@ function stripMetadataAnnotation(annotations) {
 function isSchemaRecord(value) {
   return typeof value.type === "string" && "def" in value && "_type" in value;
 }
-function compareText4(left, right) {
+function compareText12(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
@@ -10955,470 +12982,6 @@ function expectObjectSchema(schema, label) {
     throw new JITError("INVALID_MAPPER", `${label} must be an object schema`);
   }
   return resolved;
-}
-
-// ../../packages/jit/src/compiler/row-keys.ts
-function resolveRowObjectSchema(schema, operation) {
-  let base = resolveWrappers(schema).base;
-  if (base.type === TypeName.array || base.type === TypeName.set) {
-    base = resolveWrappers(base.def.element).base;
-  }
-  if (base.type === TypeName.runtimeType) {
-    base = resolveWrappers(base.def.innerType).base;
-  }
-  if (base.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", `${operation} expects an object or collection-of-objects schema`);
-  }
-  return base;
-}
-function resolveRowField(object2, key, operation) {
-  if (typeof key !== "string" || key.length === 0) {
-    throw new JITError("INVALID_OPERATION", `${operation} keys must be non-empty strings`);
-  }
-  const field = object2.def.props[key];
-  if (!field) {
-    throw new JITError("INVALID_OPERATION", `${operation} received unknown key ${JSON.stringify(key)}`, {
-      path: [key]
-    });
-  }
-  return field;
-}
-function resolveScalarKeyKind(schema, key, operation) {
-  let base = resolveWrappers(schema).base;
-  if (base.type === TypeName.runtimeType) {
-    base = resolveWrappers(base.def.innerType).base;
-  }
-  if (base.type === TypeName.date) return "date";
-  if (base.type === TypeName.number || base.type === TypeName.int) return "numeric";
-  if (base.type === TypeName.union) {
-    const options = base.def.options;
-    if (options.length > 0) {
-      const kinds = options.map((option) => resolveScalarKeyKind(option, key, operation));
-      if (kinds.every((kind) => kind === kinds[0])) return kinds[0];
-    }
-  }
-  if (base.type === TypeName.string || base.type === TypeName.bigint || base.type === TypeName.boolean || base.type === TypeName.literal || base.type === TypeName.enum) {
-    return "direct";
-  }
-  throw new JITError(
-    "INVALID_OPERATION",
-    `${operation} key ${JSON.stringify(key)} must resolve to a statically comparable scalar`,
-    { path: [key] }
-  );
-}
-function resolveScalarKeyDomain(schema, key, operation) {
-  let base = resolveWrappers(schema).base;
-  if (base.type === TypeName.runtimeType) {
-    base = resolveWrappers(base.def.innerType).base;
-  }
-  if (base.type === TypeName.string) return "string";
-  if (base.type === TypeName.number || base.type === TypeName.int || base.type === TypeName.nan) return "number";
-  if (base.type === TypeName.bigint) return "bigint";
-  if (base.type === TypeName.boolean) return "boolean";
-  if (base.type === TypeName.date) return "date";
-  if (base.type === TypeName.literal) {
-    const value = base.def.value;
-    if (typeof value === "string") return "string";
-    if (typeof value === "number") return "number";
-    if (typeof value === "bigint") return "bigint";
-    if (typeof value === "boolean") return "boolean";
-  }
-  if (base.type === TypeName.enum) {
-    const domains = new Set(Object.values(base.def.values).map((value) => typeof value));
-    if (domains.size === 1) {
-      const domain2 = domains.values().next().value;
-      if (domain2 === "string" || domain2 === "number") return domain2;
-    }
-  }
-  if (base.type === TypeName.union) {
-    const domains = base.def.options.map(
-      (option) => resolveScalarKeyDomain(option, key, operation)
-    );
-    if (domains.length > 0 && domains.every((domain2) => domain2 === domains[0])) return domains[0];
-  }
-  throw new JITError("INVALID_OPERATION", `${operation} key ${JSON.stringify(key)} has no scalar equality domain`, {
-    path: [key]
-  });
-}
-function isNullishField(schema) {
-  const resolved = resolveWrappers(schema);
-  return resolved.optional || resolved.nullable;
-}
-
-// ../../packages/jit/src/compiler/ordering.ts
-function resolveOrderingDescriptor(schema, criteria) {
-  const object2 = resolveRowObjectSchema(schema, "ordering");
-  if (criteria.length === 0) {
-    throw new JITError("INVALID_OPERATION", "ordering requires at least one criterion");
-  }
-  const seen = /* @__PURE__ */ new Set();
-  const resolved = criteria.map((criterion) => {
-    if (criterion.direction !== "asc" && criterion.direction !== "desc") {
-      throw new JITError("INVALID_OPERATION", "ordering direction must be asc or desc");
-    }
-    const field = resolveRowField(object2, criterion.key, "ordering");
-    if (seen.has(criterion.key)) {
-      throw new JITError("INVALID_OPERATION", `ordering repeats key ${JSON.stringify(criterion.key)}`, {
-        path: [criterion.key]
-      });
-    }
-    seen.add(criterion.key);
-    return Object.freeze({
-      key: criterion.key,
-      direction: criterion.direction,
-      valueKind: resolveScalarKeyKind(field, criterion.key, "ordering"),
-      nullish: isNullishField(field)
-    });
-  });
-  return Object.freeze({ criteria: Object.freeze(resolved) });
-}
-function emitOrderingComparatorBody(writer, descriptor2, left = "left", right = "right") {
-  const last2 = descriptor2.criteria.length - 1;
-  let terminated = false;
-  descriptor2.criteria.forEach((criterion, index2) => {
-    const suffix = descriptor2.criteria.length === 1 ? "" : String(index2);
-    const date3 = criterion.valueKind === "date";
-    const leftRaw = `left${date3 ? "Raw" : "Value"}${suffix}`;
-    const rightRaw = `right${date3 ? "Raw" : "Value"}${suffix}`;
-    const leftValue = `leftValue${suffix}`;
-    const rightValue = `rightValue${suffix}`;
-    const leftPresentWins = criterion.direction === "desc" ? "-1" : "1";
-    const rightPresentWins = criterion.direction === "desc" ? "1" : "-1";
-    const subtract = criterion.valueKind === "numeric" && index2 === last2;
-    const emitCompare2 = () => {
-      if (date3) {
-        writer.line(`const ${leftValue} = ${leftRaw}.getTime();`);
-        writer.line(`const ${rightValue} = ${rightRaw}.getTime();`);
-      }
-      if (subtract) {
-        writer.line(
-          criterion.direction === "desc" ? `return ${rightValue} - ${leftValue};` : `return ${leftValue} - ${rightValue};`
-        );
-        return;
-      }
-      writer.line(`if (${leftValue} !== ${rightValue}) {`);
-      writer.indent(() => {
-        writer.line(
-          criterion.direction === "desc" ? `return ${leftValue} < ${rightValue} ? 1 : -1;` : `return ${leftValue} < ${rightValue} ? -1 : 1;`
-        );
-      });
-      writer.line("}");
-    };
-    writer.line(`const ${leftRaw} = ${emitPropertyAccess(left, criterion.key)};`);
-    writer.line(`const ${rightRaw} = ${emitPropertyAccess(right, criterion.key)};`);
-    if (!criterion.nullish) {
-      emitCompare2();
-      terminated = subtract;
-      return;
-    }
-    writer.line(`if (${leftRaw} == null || ${rightRaw} == null) {`);
-    writer.indent(() => {
-      writer.line(`if (${leftRaw} != null) return ${leftPresentWins};`);
-      writer.line(`if (${rightRaw} != null) return ${rightPresentWins};`);
-    });
-    writer.line("} else {");
-    writer.indent(emitCompare2);
-    writer.line("}");
-  });
-  if (!terminated) writer.line("return 0;");
-}
-function emitOrderingComparatorBodySource(descriptor2) {
-  const writer = new CodeWriter();
-  emitOrderingComparatorBody(writer, descriptor2);
-  return writer.toString();
-}
-
-// ../../packages/jit/src/compiler/emitter/emit-expr.ts
-var BINARY_OPERATORS = {
-  strictEqual: "===",
-  notStrictEqual: "!==",
-  or: "||",
-  and: "&&",
-  add: "+",
-  divide: "/",
-  greaterThan: ">",
-  greaterThanOrEqual: ">=",
-  lessThan: "<",
-  lessThanOrEqual: "<="
-};
-var COMPARISON_OPERATORS = /* @__PURE__ */ new Set([
-  "strictEqual",
-  "notStrictEqual",
-  "greaterThan",
-  "greaterThanOrEqual",
-  "lessThan",
-  "lessThanOrEqual"
-]);
-function emitExpr(expr) {
-  switch (expr.kind) {
-    case "var":
-      return expr.name;
-    case "literal":
-      return emitLiteral(expr.value);
-    case "not":
-      return `!(${emitExpr(expr.expr)})`;
-    case "binary":
-      return `(${emitExpr(expr.left)} ${BINARY_OPERATORS[expr.op]} ${emitExpr(expr.right)})`;
-    case "nary":
-      return `(${expr.operands.map(emitConditionRaw).join(expr.op === "and" ? " && " : " || ")})`;
-    case "sameValue":
-      return `Object.is(${emitExpr(expr.left)}, ${emitExpr(expr.right)})`;
-    case "sameNumber": {
-      const left = emitExpr(expr.left);
-      const right = emitExpr(expr.right);
-      return `(${left} === ${right} || (${left} !== ${left} && ${right} !== ${right}))`;
-    }
-    case "schema_guard":
-      return emitSchemaGuard(expr.schema, emitExpr(expr.value));
-    case "load_prop":
-      return emitPropertyAccess(emitExpr(expr.base), expr.key);
-    case "load_index":
-      return emitIndexAccess(emitExpr(expr.base), emitExpr(expr.index));
-    case "call":
-      return `${emitExpr(expr.callee)}(${expr.args.map(emitExpr).join(", ")})`;
-    case "object_literal": {
-      if (expr.entries.length === 0) return "{}";
-      const entries = expr.entries.map((entry) => `${emitLiteral(entry.key)}: ${emitExpr(entry.value)}`);
-      return `{ ${entries.join(", ")} }`;
-    }
-    case "array_literal":
-      return `[${expr.elements.map(emitExpr).join(", ")}]`;
-    case "construct":
-      return `new ${expr.ctor}(${expr.args.map(emitExpr).join(", ")})`;
-  }
-}
-function emitConditionRaw(expr) {
-  if (expr.kind === "binary" && COMPARISON_OPERATORS.has(expr.op)) {
-    return `${emitExpr(expr.left)} ${BINARY_OPERATORS[expr.op]} ${emitExpr(expr.right)}`;
-  }
-  if (expr.kind === "not") {
-    return `!(${emitConditionRaw(expr.expr)})`;
-  }
-  return emitExpr(expr);
-}
-
-// ../../packages/jit/src/compiler/emitter/emit-node.ts
-function emitNode(writer, node) {
-  switch (node.kind) {
-    case "block":
-      for (const child of node.body) emitNode(writer, child);
-      return;
-    case "assign":
-      writer.line(`const ${node.target.name} = ${emitExpr(node.expr)};`);
-      return;
-    case "let":
-      if (node.expr === void 0) {
-        writer.line(`let ${node.target.name};`);
-      } else {
-        writer.line(`let ${node.target.name} = ${emitExpr(node.expr)};`);
-      }
-      return;
-    case "store":
-      writer.line(`${emitExpr(node.target)} = ${emitExpr(node.expr)};`);
-      return;
-    case "expr_stmt":
-      writer.line(`${emitExpr(node.expr)};`);
-      return;
-    case "hash_compare":
-      writer.line(`if (${emitExpr(node.leftHash)} !== ${emitExpr(node.rightHash)}) {`);
-      writer.indent(() => {
-        writer.line("return false;");
-      });
-      writer.line("}");
-      return;
-    case "map_equal":
-      emitMapEqual(writer, node);
-      return;
-    case "binary_search_equal":
-      emitBinarySearchEqual(writer, node);
-      return;
-    case "if":
-      writer.line(`if (${emitTestExpr(node.test)}) {`);
-      writer.indent(() => {
-        for (const child of node.then) emitNode(writer, child);
-      });
-      if (node.otherwise && node.otherwise.length > 0) {
-        writer.line("} else {");
-        writer.indent(() => {
-          for (const child of node.otherwise ?? []) emitNode(writer, child);
-        });
-      }
-      writer.line("}");
-      return;
-    case "for":
-      writer.line(`for (let ${node.index.name} = ${emitExpr(node.from)}; ${node.index.name}-- !== 0;) {`);
-      writer.indent(() => {
-        for (const child of node.body) emitNode(writer, child);
-      });
-      writer.line("}");
-      return;
-    case "for_range": {
-      const index2 = node.index.name;
-      writer.line(`for (let ${index2} = 0; ${index2} < ${emitExpr(node.length)}; ${index2}++) {`);
-      writer.indent(() => {
-        for (const child of node.body) emitNode(writer, child);
-      });
-      writer.line("}");
-      return;
-    }
-    case "for_of":
-      writer.line(`for (const ${node.item.name} of ${emitExpr(node.iterable)}) {`);
-      writer.indent(() => {
-        for (const child of node.body) emitNode(writer, child);
-      });
-      writer.line("}");
-      return;
-    case "append":
-      writer.line(`${node.target.name}[${node.cursor.name}++] = ${emitExpr(node.value)};`);
-      return;
-    case "sort_by_key":
-      writer.line(`${node.target.name}.sort((left, right) => {`);
-      writer.indent(() => emitOrderingComparatorBody(writer, node.ordering));
-      writer.line("});");
-      return;
-    case "return":
-      writer.line(`return ${emitExpr(node.value)};`);
-      return;
-  }
-}
-function emitTestExpr(expr) {
-  if (expr.kind === "binary") {
-    const left = emitExpr(expr.left);
-    const right = emitExpr(expr.right);
-    if (expr.op === "strictEqual") return `${left} === ${right}`;
-    if (expr.op === "notStrictEqual") return `${left} !== ${right}`;
-  }
-  if (expr.kind === "nary") {
-    const op = expr.op === "and" ? " && " : " || ";
-    return expr.operands.map((operand) => `(${emitConditionRaw(operand)})`).join(op);
-  }
-  if (expr.kind === "not") {
-    const inner = expr.expr;
-    if (inner.kind === "sameNumber") {
-      const left = emitExpr(inner.left);
-      const right = emitExpr(inner.right);
-      return `${left} !== ${right} && (${left} === ${left} || ${right} === ${right})`;
-    }
-    if (inner.kind === "sameValue") {
-      return `!Object.is(${emitExpr(inner.left)}, ${emitExpr(inner.right)})`;
-    }
-    if (inner.kind === "binary" && inner.op === "strictEqual") {
-      return `${emitExpr(inner.left)} !== ${emitExpr(inner.right)}`;
-    }
-    if (inner.kind === "call") {
-      return `!${emitExpr(inner)}`;
-    }
-    if (inner.kind === "nary") {
-      return `!(${emitTestExpr(inner)})`;
-    }
-  }
-  return emitExpr(expr);
-}
-function emitMapEqual(writer, node) {
-  writer.line(`const ${node.length.name} = ${emitExpr(node.left)}.length;`);
-  writer.line(`if (${node.length.name} !== ${emitExpr(node.right)}.length) {`);
-  writer.indent(() => {
-    writer.line("return false;");
-  });
-  writer.line("}");
-  writer.line(`if (${node.length.name} < 64) {`);
-  writer.indent(() => {
-    writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
-    writer.indent(() => {
-      writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
-      writer.line("let found = false;");
-      writer.line(`for (let j = 0; j < ${node.length.name}; j++) {`);
-      writer.indent(() => {
-        writer.line(`const ${node.rightItem.name} = ${emitExpr(node.right)}[j];`);
-        writer.line(
-          `if (${emitPropertyAccess(node.rightItem.name, node.key)} === ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
-        );
-        writer.indent(() => {
-          writer.line("found = true;");
-          for (const child of node.body) emitNode(writer, child);
-          writer.line("break;");
-        });
-        writer.line("}");
-      });
-      writer.line("}");
-      writer.line("if (!found) {");
-      writer.indent(() => {
-        writer.line("return false;");
-      });
-      writer.line("}");
-    });
-    writer.line("}");
-  });
-  writer.line("} else {");
-  writer.indent(() => {
-    writer.line(`let ${node.rightIndex.name};`);
-    writer.line(`${node.rightIndex.name} = __getIndex(${emitExpr(node.right)}, ${emitLiteral(node.key)});`);
-    writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
-    writer.indent(() => {
-      writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
-      writer.line(
-        `const ${node.rightItem.name} = ${node.rightIndex.name}.get(${emitPropertyAccess(node.leftItem.name, node.key)});`
-      );
-      writer.line(
-        `if (${node.rightItem.name} === undefined && !${node.rightIndex.name}.has(${emitPropertyAccess(node.leftItem.name, node.key)})) {`
-      );
-      writer.indent(() => {
-        writer.line("return false;");
-      });
-      writer.line("}");
-      for (const child of node.body) emitNode(writer, child);
-    });
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitBinarySearchEqual(writer, node) {
-  const compareLeft = node.direction === "desc" ? ">" : "<";
-  writer.line(`const ${node.length.name} = ${emitExpr(node.left)}.length;`);
-  writer.line(`if (${node.length.name} !== ${emitExpr(node.right)}.length) {`);
-  writer.indent(() => {
-    writer.line("return false;");
-  });
-  writer.line("}");
-  writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
-  writer.indent(() => {
-    writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
-    writer.line(`let ${node.searchLow.name} = 0;`);
-    writer.line(`let ${node.searchHigh.name} = ${node.length.name} - 1;`);
-    writer.line(`let ${node.rightItem.name};`);
-    writer.line(`while (${node.searchLow.name} <= ${node.searchHigh.name}) {`);
-    writer.indent(() => {
-      writer.line(`const ${node.searchMid.name} = (${node.searchLow.name} + ${node.searchHigh.name}) >> 1;`);
-      writer.line(`const ${node.found.name} = ${emitExpr(node.right)}[${node.searchMid.name}];`);
-      writer.line(
-        `if (${emitPropertyAccess(node.found.name, node.key)} === ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
-      );
-      writer.indent(() => {
-        writer.line(`${node.rightItem.name} = ${node.found.name};`);
-        writer.line("break;");
-      });
-      writer.line("}");
-      writer.line(
-        `if (${emitPropertyAccess(node.found.name, node.key)} ${compareLeft} ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
-      );
-      writer.indent(() => {
-        writer.line(`${node.searchLow.name} = ${node.searchMid.name} + 1;`);
-      });
-      writer.line("} else {");
-      writer.indent(() => {
-        writer.line(`${node.searchHigh.name} = ${node.searchMid.name} - 1;`);
-      });
-      writer.line("}");
-    });
-    writer.line("}");
-    writer.line(`if (${node.rightItem.name} === undefined) {`);
-    writer.indent(() => {
-      writer.line("return false;");
-    });
-    writer.line("}");
-    for (const child of node.body) emitNode(writer, child);
-  });
-  writer.line("}");
 }
 
 // ../../packages/jit/src/compiler/mapper/build-mapper-ir.ts
@@ -13002,9 +14565,9 @@ function emitRulesPredicateSource(descriptor2, ruleId, options = {}) {
 function emitRulesSomeSource(descriptor2, options = {}) {
   const rules2 = descriptor2.rules.filter((rule) => rule.constant !== false);
   const always = rules2.some((rule) => rule.constant === true);
-  const expression = always ? "true" : rules2.length === 0 ? "false" : rules2.map((rule) => `(${emitCondition3(rule, EMPTY_PLAN)})`).join(" || ");
+  const expression2 = always ? "true" : rules2.length === 0 ? "false" : rules2.map((rule) => `(${emitCondition3(rule, EMPTY_PLAN)})`).join(" || ");
   return `function rulesSome(${paramList(descriptor2, SUBJECT, void 0, options)}) {
-  return ${expression};
+  return ${expression2};
 }
 `;
 }
@@ -15736,6 +17299,9 @@ function isPureExpr(expr) {
       return isPureExpr(expr.left) && isPureExpr(expr.right);
     case "sameNumber":
       return false;
+    case "typeof":
+    case "array_isArray":
+      return isPureExpr(expr.value);
     case "nary":
       return expr.operands.every(isPureExpr);
     case "schema_guard":
@@ -15770,6 +17336,10 @@ function exprCost(expr) {
       return 1 + exprCost(expr.left) + exprCost(expr.right);
     case "sameNumber":
       return 20;
+    case "typeof":
+      return 2 + exprCost(expr.value);
+    case "array_isArray":
+      return 5 + exprCost(expr.value);
     case "nary":
       return 1 + expr.operands.reduce((total, operand) => total + exprCost(operand), 0);
     case "schema_guard":
@@ -15892,6 +17462,10 @@ function collectExprUsages(expr, usages) {
     case "not":
       collectExprUsages(expr.expr, usages);
       return;
+    case "typeof":
+    case "array_isArray":
+      collectExprUsages(expr.value, usages);
+      return;
     case "binary":
     case "sameValue":
       collectExprUsages(expr.left, usages);
@@ -15943,6 +17517,9 @@ function replaceExpr(expr, replacements) {
     case "sameValue":
     case "sameNumber":
       return { ...expr, left: replaceExpr(expr.left, replacements), right: replaceExpr(expr.right, replacements) };
+    case "typeof":
+    case "array_isArray":
+      return { ...expr, value: replaceExpr(expr.value, replacements) };
     case "schema_guard":
       return { ...expr, value: replaceExpr(expr.value, replacements) };
     case "load_prop":
@@ -15981,6 +17558,9 @@ function isInlineSafe(expr) {
       return isInlineSafe(expr.base) && isInlineSafe(expr.index);
     case "not":
       return isInlineSafe(expr.expr);
+    case "typeof":
+    case "array_isArray":
+      return isInlineSafe(expr.value);
     case "binary":
     case "sameValue":
     case "sameNumber":
@@ -16100,6 +17680,10 @@ function exprKey(expr) {
       return `sv(${exprKey(expr.left)},${exprKey(expr.right)})`;
     case "sameNumber":
       return `sn(${exprKey(expr.left)},${exprKey(expr.right)})`;
+    case "typeof":
+      return `typeof:${expr.type}(${exprKey(expr.value)})`;
+    case "array_isArray":
+      return `array_isArray(${exprKey(expr.value)})`;
     case "schema_guard":
       return `g${opaqueKey(expr.schema)}(${exprKey(expr.value)})`;
     case "load_prop":
@@ -16167,6 +17751,9 @@ function isPureExpr2(expr) {
       return true;
     case "not":
       return isPureExpr2(expr.expr);
+    case "typeof":
+    case "array_isArray":
+      return isPureExpr2(expr.value);
     case "binary":
     case "sameValue":
     case "sameNumber":
@@ -16203,6 +17790,10 @@ function exprCost2(expr) {
     case "sameValue":
     case "sameNumber":
       return 1 + exprCost2(expr.left) + exprCost2(expr.right);
+    case "typeof":
+      return 2 + exprCost2(expr.value);
+    case "array_isArray":
+      return 5 + exprCost2(expr.value);
     case "nary":
       return 1 + expr.operands.reduce((total, operand) => total + exprCost2(operand), 0);
     case "schema_guard":
@@ -16233,6 +17824,10 @@ function exprCost3(expr) {
       return 1 + exprCost3(expr.left) + exprCost3(expr.right);
     case "sameNumber":
       return 20;
+    case "typeof":
+      return 2 + exprCost3(expr.value);
+    case "array_isArray":
+      return 5 + exprCost3(expr.value);
     case "nary":
       return 1 + expr.operands.reduce((total, operand) => total + exprCost3(operand), 0);
     case "schema_guard":
@@ -16803,8 +18398,8 @@ function emitAssertionFailureDispatch(policy, assertions) {
   ).join(" ");
   return `  const __assertFailure = (outcome, value) => { ${policyPriority} ${customFailures} const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path?.[0] === undefined ? undefined : String(first.path[0]), issues: outcome.issues }); };`;
 }
-function skipPolicy(context, schema, operation, reason2) {
-  context.skipped.push({ schema, operation, reason: reason2 });
+function skipPolicy(context, schema, operation, reason) {
+  context.skipped.push({ schema, operation, reason });
 }
 
 // ../../packages/jit/src/aot/emit-class-setup.ts
@@ -16960,8 +18555,8 @@ function emitUnvalidatedHydrateMaterializer(context, binding, artifact, reportNa
 function isUnvalidatedDdd(artifact) {
   return artifact.domainEvent === void 0 && artifact.factoryValidationOptIn === true && artifact.policy?.validationConfigured !== true;
 }
-function skipClass(context, schema, operation, reason2) {
-  context.skipped.push({ schema, operation, reason: reason2 });
+function skipClass(context, schema, operation, reason) {
+  context.skipped.push({ schema, operation, reason });
   return true;
 }
 
@@ -20431,11 +22026,11 @@ var ExecutionArtifactEmitter = class {
     this.#host.js.push("})());");
     return this.#emitted();
   }
-  #skip(operation, reason2) {
-    this.#host.skipped.push({ schema: this.#reportName, operation, reason: reason2 });
+  #skip(operation, reason) {
+    this.#host.skipped.push({ schema: this.#reportName, operation, reason });
   }
-  #skipAndReturn(operation, reason2) {
-    this.#skip(operation, reason2);
+  #skipAndReturn(operation, reason) {
+    this.#skip(operation, reason);
     return void 0;
   }
 };
@@ -21078,8 +22673,8 @@ var JsonSchemaEmitter = class {
   shape(schema, path) {
     const current = schema;
     const checks = current.def.checks ?? [];
-    const reason2 = UNSUPPORTED_TYPES[current.type];
-    if (reason2) return this.unsupported(schema, path, reason2);
+    const reason = UNSUPPORTED_TYPES[current.type];
+    if (reason) return this.unsupported(schema, path, reason);
     switch (current.type) {
       case TypeName.string:
       case TypeName.templateLiteral:
@@ -24073,7 +25668,7 @@ var JIT_COMPILER_VERSION = "2.0.0";
 var CALL_HELPER = "type __JitCall<TFunction> = TFunction extends (...args: infer A) => infer R ? (...args: A) => R : never;";
 function generate(options) {
   const layout = resolveOutputLayout(assertOutputFormat(options.format ?? "js"));
-  const target = options.target === void 0 ? portableProfile : resolveTargetProfile(options.target);
+  const target = options.target === void 0 ? portableProfile : resolveDeploymentTargetProfile(options.target);
   const naming = options.naming ?? "compact";
   const skipped = [];
   const modules = [];
@@ -24136,9 +25731,11 @@ function generate(options) {
     ownership: options.ownership ?? "managed",
     format: layout.format,
     naming,
-    ...options.target === void 0 ? {} : { target },
-    ...options.target === void 0 ? {} : { physicalPlanDigest: physicalPlanDigest(options, target) },
-    ...options.target === void 0 ? {} : { physicalPlans: physicalPlans(options, target) }
+    target,
+    performanceProfileVersion: performanceVersion(target),
+    strategyCatalogVersion: STRATEGY_CATALOG_VERSION,
+    physicalPlanDigest: physicalPlanDigest(options, target),
+    physicalPlans: physicalPlans(options, target)
   });
   const receipt = createCompilationReceipt(manifest, JIT_COMPILER_VERSION, [
     { name: "artifact-program", status: "passed" },
@@ -24150,8 +25747,12 @@ function generate(options) {
   return { files: [...files2, manifestFile, receiptFile], skipped, program, manifest, receipt };
 }
 function physicalPlanDigest(options, target) {
-  const plans = physicalPlans(options, target).map(({ symbol: symbol2, digest: digest2 }) => ({ name: symbol2, digest: digest2 }));
+  const plans = physicalPlans(options, target).map(({ symbol: symbol2, digest: digest3 }) => ({ name: symbol2, digest: digest3 }));
   return sha2562(stableJson2({ target: target.digest, plans }));
+}
+function performanceVersion(target) {
+  const profile = resolvePerformanceProfile(target);
+  return `${profile.id}@${profile.version}`;
 }
 function physicalPlans(options, target) {
   const plans = [];
@@ -24175,6 +25776,9 @@ function physicalPlanForArtifact(symbol2, value, target) {
     symbol: symbol2,
     target: physical.target.id,
     digest: physical.digest,
+    strategyCatalogVersion: physical.strategyCatalogVersion,
+    performanceProfileVersion: physical.performanceProfileVersion,
+    extensions: physical.optimization.semanticExtensions,
     capabilities: physical.capabilities.map((capability2) => ({
       kind: capability2.kind,
       ...capability2.key === void 0 ? {} : { key: capability2.key },
@@ -24272,7 +25876,7 @@ function referencedClasses(plan, index2) {
   }
   for (const schema of Object.values(plan.schemas)) visitValue(schema);
   return [...result.values()].sort(
-    (left, right) => compareText5(left.module, right.module) || compareText5(left.name, right.name)
+    (left, right) => compareText13(left.module, right.module) || compareText13(left.name, right.name)
   );
 }
 function pick2(record2, selected) {
@@ -24938,7 +26542,7 @@ function assertOutputFormat(value) {
   if (value === "ts" || value === "js") return value;
   throw new Error(`unknown AOT output format ${JSON.stringify(value)}; expected "ts" or "js"`);
 }
-function compareText5(left, right) {
+function compareText13(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 function indentBlock(source) {
@@ -25551,12 +27155,12 @@ function writesOrderingKey(row, ordering) {
   return row.writes.some((write) => write.path.length === 1 && write.path[0] === ordering.key);
 }
 function explainCollectionMutation(descriptor2) {
-  const positional = POSITIONAL_KINDS.has(descriptor2.kind);
+  const positional2 = POSITIONAL_KINDS.has(descriptor2.kind);
   return Object.freeze({
     operation: descriptor2.kind,
     key: descriptor2.key,
     physical: Object.freeze({
-      strategy: positional ? "DirectPosition" : descriptor2.choice.strategy,
+      strategy: positional2 ? "DirectPosition" : descriptor2.choice.strategy,
       reason: descriptor2.choice.reason,
       complexity: descriptor2.choice.complexity,
       facts: descriptor2.choice.facts
@@ -25938,7 +27542,7 @@ function createEnvironmentApi(namespace, environment) {
     registry: (id) => createRegistry(id),
     locales,
     error: createErrorApi(environment),
-    $extends: (plugin2) => createEnvironmentFacade(namespace, extendEnvironment(environment, plugin2))
+    $extends: (plugin3) => createEnvironmentFacade(namespace, extendEnvironment(environment, plugin3))
   };
 }
 function createErrorApi(environment) {
@@ -27462,7 +29066,7 @@ function createConditionBuilder(startIndex) {
     bindings[bindings.length] = value;
     return { kind: "binding", name: `__q${index2}` };
   };
-  const compare4 = (op, key, value) => ({
+  const compare3 = (op, key, value) => ({
     kind: "compare",
     op,
     left: { kind: "field", key },
@@ -27472,12 +29076,12 @@ function createConditionBuilder(startIndex) {
     bindings,
     builder: {
       constant,
-      eq: (key, value) => compare4("eq", key, value),
-      neq: (key, value) => compare4("neq", key, value),
-      gt: (key, value) => compare4("gt", key, value),
-      gte: (key, value) => compare4("gte", key, value),
-      lt: (key, value) => compare4("lt", key, value),
-      lte: (key, value) => compare4("lte", key, value),
+      eq: (key, value) => compare3("eq", key, value),
+      neq: (key, value) => compare3("neq", key, value),
+      gt: (key, value) => compare3("gt", key, value),
+      gte: (key, value) => compare3("gte", key, value),
+      lt: (key, value) => compare3("lt", key, value),
+      lte: (key, value) => compare3("lte", key, value),
       and: (left, right, ...rest) => fold("and", left, right, rest),
       or: (left, right, ...rest) => fold("or", left, right, rest),
       not: (inner) => ({ kind: "not", inner })
@@ -27986,11 +29590,11 @@ function emitExecutionPlan(plan) {
     return name;
   };
   const helper = (prefix) => `__${prefix}${helperIndex++}`;
-  const emitBoundBlock = (prefix, localNames, values, source, expression = false) => {
+  const emitBoundBlock = (prefix, localNames, values, source, expression2 = false) => {
     const name = helper(prefix);
     const args = values.map(bind);
     setup.push(`const ${name} = ((${localNames.join(", ")}) => {`);
-    if (expression) setup.push(...indent(`return (${source});`));
+    if (expression2) setup.push(...indent(`return (${source});`));
     else setup.push(...indent(source));
     setup.push(`})(${args.join(", ")});`);
     return name;
@@ -31426,7 +33030,7 @@ __export(factories_exports, {
   clone: () => clone,
   codec: () => codec,
   coerce: () => coerce2,
-  compare: () => compare3,
+  compare: () => compare2,
   config: () => config,
   cqrs: () => cqrs,
   create: () => create,
@@ -31472,7 +33076,7 @@ __export(factories_exports, {
   ops: () => ops,
   optional: () => optional2,
   pipe: () => pipe2,
-  plugin: () => plugin,
+  plugin: () => plugin2,
   process: () => process,
   project: () => project,
   promise: () => promise2,
@@ -31521,8 +33125,12 @@ function $extends(extension) {
   const namespace = resolvePublicNamespace(this);
   return createEnvironmentFacade(namespace, extendEnvironment(getDefaultEnvironment(), extension));
 }
+var plugin2 = plugin;
 function resolvePublicNamespace(receiver) {
-  return receiver !== null && typeof receiver === "object" ? receiver : factories_exports;
+  if (receiver === null || typeof receiver !== "object") {
+    throw new TypeError("JIT.create() and JIT.$extends() must be called as namespace members");
+  }
+  return receiver;
 }
 
 // ../../packages/jit/src/factories/json-schema.ts
@@ -33732,7 +35340,7 @@ function createConditionBuilder2(startIndex) {
     bindings[bindings.length] = value;
     return { kind: "binding", name: `__q${index2}` };
   };
-  const compare4 = (op, key, value) => ({
+  const compare3 = (op, key, value) => ({
     kind: "compare",
     op,
     left: { kind: "field", key },
@@ -33742,12 +35350,12 @@ function createConditionBuilder2(startIndex) {
     bindings,
     builder: {
       constant,
-      eq: (key, value) => compare4("eq", key, value),
-      neq: (key, value) => compare4("neq", key, value),
-      gt: (key, value) => compare4("gt", key, value),
-      gte: (key, value) => compare4("gte", key, value),
-      lt: (key, value) => compare4("lt", key, value),
-      lte: (key, value) => compare4("lte", key, value),
+      eq: (key, value) => compare3("eq", key, value),
+      neq: (key, value) => compare3("neq", key, value),
+      gt: (key, value) => compare3("gt", key, value),
+      gte: (key, value) => compare3("gte", key, value),
+      lt: (key, value) => compare3("lt", key, value),
+      lte: (key, value) => compare3("lte", key, value),
       and: (left, right) => ({ kind: "logical", op: "and", left, right }),
       or: (left, right) => ({ kind: "logical", op: "or", left, right }),
       not: (inner) => ({ kind: "not", inner })
@@ -33922,7 +35530,7 @@ function toValue(value, subjectField) {
   if (subjectField) return { kind: "field", key: value };
   return { kind: "literal", value };
 }
-function compare2(op, left, right) {
+function compare(op, left, right) {
   return {
     kind: "compare",
     op,
@@ -33935,12 +35543,12 @@ function fold3(op, left, right, rest) {
   return { kind: "logical", op, left, right: tail };
 }
 var CONDITION2 = Object.freeze({
-  eq: (left, right) => compare2("eq", left, right),
-  neq: (left, right) => compare2("neq", left, right),
-  gt: (left, right) => compare2("gt", left, right),
-  gte: (left, right) => compare2("gte", left, right),
-  lt: (left, right) => compare2("lt", left, right),
-  lte: (left, right) => compare2("lte", left, right),
+  eq: (left, right) => compare("eq", left, right),
+  neq: (left, right) => compare("neq", left, right),
+  gt: (left, right) => compare("gt", left, right),
+  gte: (left, right) => compare("gte", left, right),
+  lt: (left, right) => compare("lt", left, right),
+  lte: (left, right) => compare("lte", left, right),
   and: (left, right, ...rest) => fold3("and", left, right, rest),
   or: (left, right, ...rest) => fold3("or", left, right, rest),
   not: (inner) => ({ kind: "not", inner })
@@ -34898,7 +36506,7 @@ function mask(schema) {
 function sanitize2(schema) {
   return operationArtifact(schema, "sanitize", "value", "value", compileSanitize);
 }
-var compare3 = Object.freeze({ equal, diff, hash: hash2, changed });
+var compare2 = Object.freeze({ equal, diff, hash: hash2, changed });
 var security = Object.freeze({ mask, sanitize: sanitize2 });
 function mapCapability(source, target, ...overrides) {
   const sourceSchema = unwrapSchema(source);
@@ -36471,10 +38079,12 @@ function format3(schema) {
   return operationStub(schema, "format", "value");
 }
 function validationStub(schema, operation, options) {
-  return executionStub(schema, [
-    createExecutionStage("value", "value", "value"),
+  const unwrapped = unwrapSchema(schema);
+  return executionStub(unwrapped, [
+    { ...createExecutionStage("value", "value", "value"), schema: unwrapped },
     {
       ...createExecutionStage("validate", "value", operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value"),
+      schema: unwrapped,
       operation,
       ...options?.maxIssues === void 0 ? {} : { maxIssues: options.maxIssues },
       provides: operation === "is" ? [] : ["schema-validated"]

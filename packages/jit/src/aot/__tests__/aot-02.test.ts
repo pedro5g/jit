@@ -396,6 +396,33 @@ it("should preserve a define-host diagnostic issue limit in standalone AOT", asy
   expect(parsed.issues).toHaveLength(1);
 });
 
+it("keeps the schema on define validation stages for physical planning", async () => {
+  const Schema = DefineJIT.object({ name: DefineJIT.string() });
+  const artifact = DefineJIT.validate.is(Schema);
+  const validation = artifact.plan.stages.find((stage) => stage.kind === "validate");
+
+  expect(validation?.schema).toBe(artifact.plan.schema);
+  expect(validation?.schema).toMatchObject({ type: "object" });
+
+  const result = AOT.generate({
+    groups: {},
+    artifacts: { isValue: artifact },
+    outDir,
+    format: "js",
+    emitManifest: true,
+    target: { runtime: "node", versions: "24" },
+  });
+  const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+    readonly isValue: (value: unknown) => boolean;
+  };
+
+  expect(result.skipped).toEqual([]);
+  expect(result.manifest?.physicalPlans?.[0]?.target).toBe("node-24");
+  expect(result.manifest?.physicalPlanDigest).toBeDefined();
+  expect(generated.isValue({ name: "Ada" })).toBe(true);
+  expect(generated.isValue({ name: 42 })).toBe(false);
+});
+
 it("should preserve a factory diagnostic issue limit in standalone AOT", async () => {
   const Schema = JIT.object({
     first: JIT.string(),

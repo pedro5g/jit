@@ -149,6 +149,10 @@ vite.config.ts.timestamp-*
 # Internal agent docs and bench results (never pushed)
 docs/internal/
 bench/results/
+perf/results/*
+!perf/results/.gitkeep
+perf/engine-watch/*
+!perf/engine-watch/.gitkeep
 
 # AOT modules generated at bench time
 bench/**/.generated/

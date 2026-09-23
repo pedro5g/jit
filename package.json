@@ -109,13 +109,19 @@
     "examples:check": "pnpm --filter @jit/examples run check:generated && pnpm --filter @jit/examples run typecheck && pnpm --filter @jit/examples run test",
     "bench:coldstart": "pnpm build && tsx bench/coldstart/index.ts",
     "bench:stream": "tsx --conditions @jit/source bench/stream/index.ts",
+    "optimizer:test": "vitest run packages/jit/src/compiler/strategy/__tests__ packages/jit/src/compiler/target/__tests__ packages/jit/src/extensions/__tests__",
+    "optimizer:determinism": "vitest run packages/jit/src/compiler/__tests__/adaptive-compiler.test.ts -t 'repeats the same physical plan|includes semantic schema constraints|keeps descriptive annotation metadata'",
+    "optimizer:conformance": "vitest run packages/jit/src/compiler/__tests__/adaptive-compiler.test.ts packages/jit/src/extensions/__tests__ packages/jit/src/aot/__tests__/artifact-contracts.test.ts",
     "perf:assumptions": "tsx --conditions @jit/source perf/assumptions.ts",
     "perf:codegen": "tsx --conditions @jit/source perf/codegen.ts",
     "perf:engines": "tsx --conditions @jit/source perf/engines.ts",
     "perf:critical": "tsx --conditions @jit/source perf/critical.ts",
+    "perf:strategies": "tsx --conditions @jit/source perf/strategies.ts",
+    "perf:scenario": "tsx --conditions @jit/source perf/scenario.ts",
     "perf:report": "tsx --conditions @jit/source perf/report.ts",
     "perf:baseline:check": "tsx perf/baseline-check.ts",
-    "perf:baseline:update": "pnpm exec tsx --conditions @jit/source perf/critical.ts | pnpm exec tsx perf/baseline-update.ts"
+    "perf:baseline:update": "pnpm run perf:critical && pnpm exec tsx perf/baseline-update.ts",
+    "perf:profile:propose": "tsx perf/profile-propose.ts"
   },
   "lint-staged": {
     "packages/*/src/**/*.ts": [

@@ -4,6 +4,7 @@ import { JITValidationError, type ValidationIssue } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { assertSatisfiable } from "./facts/contradictions.js";
+import { resolvePerformanceProfile } from "./performance/profile.js";
 import { resolveTargetProfile } from "./target/resolve-target.js";
 import { canUseFastParse } from "./validate/emit-validate-support.js";
 import { emitValidator } from "./validate/emit-validator-entry.js";
@@ -326,7 +327,11 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
 function cacheOptions(schema: ATS.AnyTypeSchema, options: CompileCacheOptions | undefined): CompileCacheOptions {
   const environment = environmentForSchema(schema) ?? getActiveEnvironment();
   const target = resolveTargetProfile();
-  return { ...options, compilerDigest: `${environment.extensions.digest}:${target.digest}` };
+  const performance = resolvePerformanceProfile(target);
+  return {
+    ...options,
+    compilerDigest: `${environment.extensions.digest}:${target.digest}:${performance.digest}`,
+  };
 }
 
 function registerValidatorArtifact<TSchema extends ATS.AnyTypeSchema>(

@@ -18,12 +18,19 @@ export interface StrategyContext {
 
 /** Separate dimensions retained before target weights collapse a decision. */
 export interface StrategyEstimate {
+  /** Normalized integer cost units. One unit is one thousandth of a baseline unit. */
   readonly runtime: number;
   readonly allocation: number;
   readonly setup: number;
   readonly codeSize: number;
-  readonly cold?: number;
-  readonly branches?: number;
+  readonly cold: number;
+  readonly branches: number;
+}
+
+/** Explainable result of checking one independent strategy constraint. */
+export interface StrategyCheck {
+  readonly supported: boolean;
+  readonly reason: string;
 }
 
 /** Physical operation returned by a candidate; it contains no source text. */
@@ -36,8 +43,13 @@ export interface PhysicalOperation {
 /** One semantically legal strategy candidate. */
 export interface StrategyCandidate {
   readonly id: string;
+  readonly family: string;
+  /** False only for an intentionally unoptimized semantic baseline. */
+  readonly optimized: boolean;
+  readonly portability: "portable" | "target-specific";
   readonly evidence: readonly string[];
-  supports(context: StrategyContext, profile: TargetProfile): boolean;
+  legality(context: StrategyContext): StrategyCheck;
+  targetSupport(context: StrategyContext, profile: TargetProfile): StrategyCheck;
   estimate(context: StrategyContext, profile: TargetProfile): StrategyEstimate;
   lower(context: StrategyContext): PhysicalOperation;
 }

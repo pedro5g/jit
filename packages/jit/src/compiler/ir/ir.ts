@@ -37,6 +37,12 @@ export type IRExpr =
   | { readonly kind: "nary"; readonly op: "and" | "or"; readonly operands: readonly IRExpr[] }
   | { readonly kind: "sameValue"; readonly left: IRExpr; readonly right: IRExpr }
   | { readonly kind: "sameNumber"; readonly left: IRExpr; readonly right: IRExpr }
+  | {
+      readonly kind: "typeof";
+      readonly value: IRExpr;
+      readonly type: "string" | "number" | "boolean" | "bigint" | "symbol" | "function";
+    }
+  | { readonly kind: "array_isArray"; readonly value: IRExpr }
   | { readonly kind: "schema_guard"; readonly schema: ATS.AnyTypeSchema; readonly value: IRExpr }
   | { readonly kind: "load_prop"; readonly base: IRExpr; readonly key: string }
   | { readonly kind: "load_index"; readonly base: IRExpr; readonly index: IRExpr }
@@ -174,6 +180,16 @@ export function sameNumber(left: IRExpr, right: IRExpr): IRExpr {
   return { kind: "sameNumber", left, right };
 }
 
+/** Creates a typeof comparison expression used by restricted extension IR. */
+export function typeOfIs(value: IRExpr, type: Extract<IRExpr, { readonly kind: "typeof" }>["type"]): IRExpr {
+  return { kind: "typeof", value, type };
+}
+
+/** Creates an Array.isArray intrinsic expression. */
+export function arrayIsArray(value: IRExpr): IRExpr {
+  return { kind: "array_isArray", value };
+}
+
 /** Creates an expression that validates a value against a schema. */
 export function schemaGuard(schema: ATS.AnyTypeSchema, value: IRExpr): IRExpr {
   return { kind: "schema_guard", schema, value };
@@ -274,6 +290,9 @@ export function mapExprChildren(expr: IRExpr, mapExpr: (child: IRExpr) => IRExpr
     case "sameValue":
     case "sameNumber":
       return { ...expr, left: mapExpr(expr.left), right: mapExpr(expr.right) };
+    case "typeof":
+    case "array_isArray":
+      return { ...expr, value: mapExpr(expr.value) };
     case "nary":
       return { ...expr, operands: expr.operands.map(mapExpr) };
     case "schema_guard":

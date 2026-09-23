@@ -2,6 +2,7 @@ import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
 import { emitOpChain, type OpChain } from "../../core/ops.js";
 import { CodeWriter } from "../emitter/code-writer.js";
+import { type PerformanceProfile, resolvePerformanceProfile } from "../performance/profile.js";
 import { resolveLazySchema } from "../schema-recursion.js";
 import { emitSchemaGuard } from "../source/guard.js";
 import { emitLiteral, emitObjectKey } from "../source/literal.js";
@@ -147,7 +148,8 @@ export class ValidatorEmitter {
     readonly maxIssues: number | undefined = undefined,
     validationEnabled = true,
     readonly typescript = false,
-    readonly targetProfile?: TargetProfile
+    readonly targetProfile?: TargetProfile,
+    readonly performanceProfile: PerformanceProfile = resolvePerformanceProfile(targetProfile ?? resolveTargetProfile())
   ) {
     this.mode = mode;
     this.awaited = awaited;
@@ -646,11 +648,17 @@ export class ValidatorEmitter {
             )
           ),
         ];
-        const decision = resolveEnumMembershipStrategy(schema, this.targetProfile ?? resolveTargetProfile());
+        const decision = resolveEnumMembershipStrategy(
+          schema,
+          this.targetProfile ?? resolveTargetProfile(),
+          this.performanceProfile,
+          this.mode
+        );
         const lookup = decision?.strategy === "lookup-object" ? this.enumLookup(values) : undefined;
         const matched = decision?.strategy === "switch" ? this.enumSwitch(values, value) : undefined;
+        const lookupType = values.length === 0 ? undefined : typeof values[0];
         const test = lookup
-          ? `!${lookup}[${value}]`
+          ? `typeof ${value} !== ${JSON.stringify(lookupType)} || !${lookup}[${value}]`
           : matched
             ? `!${matched}`
             : values.map((option) => `${value} !== ${emitLiteral(option)}`).join(" && ");

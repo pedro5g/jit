@@ -1,3 +1,6 @@
+import type { SemanticFact } from "../compiler/facts/schema-facts.js";
+import type { StrategyCheck, StrategyContext, StrategyEstimate } from "../compiler/strategy/candidate.js";
+import type { TargetProfile } from "../compiler/target/target-profile.js";
 import type { ExtensionIR } from "./extension-ir.js";
 import type { ExtensionGrammar } from "./grammar.js";
 
@@ -6,6 +9,8 @@ export interface PluginIdentity {
   readonly id: string;
   readonly version: string;
   readonly abi: number;
+  /** Schema metadata keys this extension is allowed to inspect during lowering. */
+  readonly metadataDependencies?: readonly string[];
 }
 
 /** Composition-level operator: built-in schemas remain the lowering boundary. */
@@ -22,17 +27,31 @@ export interface SemanticOperator extends PluginIdentity {
   readonly kind: "semantic";
   readonly name: string;
   readonly grammar: ExtensionGrammar;
-  readonly lower: (context: unknown) => ExtensionIR;
+  readonly lower: (context: SemanticExtensionContext) => ExtensionIR;
 }
 
-/** Advanced physical candidate contract; it cannot emit source directly. */
+/** Schema facts available to semantic lowering; no target or emitter is exposed. */
+export interface SemanticExtensionContext {
+  readonly schema: unknown;
+  readonly facts: readonly SemanticFact[];
+  /** Metadata filtered to the extension's declared dependencies. */
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly operation?: string;
+}
+
+/** Advanced physical candidate contract; it contributes a core-validated IR body. */
 export interface StrategyOperator extends PluginIdentity {
   readonly kind: "strategy";
   readonly family: string;
+  readonly candidate: string;
+  readonly optimized: boolean;
+  readonly portability: "portable" | "target-specific";
+  readonly evidence: readonly string[];
   readonly grammar: ExtensionGrammar;
-  readonly supports: (context: unknown) => boolean;
-  readonly estimate: (context: unknown, profile: unknown) => unknown;
-  readonly lower: (context: unknown) => unknown;
+  readonly legality: (context: StrategyContext) => StrategyCheck;
+  readonly targetSupport: (context: StrategyContext, profile: TargetProfile) => StrategyCheck;
+  readonly estimate: (context: StrategyContext, profile: TargetProfile) => StrategyEstimate;
+  readonly lower: (context: StrategyContext) => ExtensionIR;
 }
 
 /** A plugin contribution accepted by an isolated JIT environment. */

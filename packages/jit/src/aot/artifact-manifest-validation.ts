@@ -93,6 +93,8 @@ function isManifestEmission(value: Record<string, unknown>): boolean {
     (value.emission.format === "ts" || value.emission.format === "js") &&
     (value.emission.naming === "compact" || value.emission.naming === "semantic") &&
     (value.target === undefined || isManifestTarget(value.target)) &&
+    (value.performanceProfileVersion === undefined || isString(value.performanceProfileVersion)) &&
+    (value.strategyCatalogVersion === undefined || isString(value.strategyCatalogVersion)) &&
     (value.physicalPlanDigest === undefined || isDigest(value.physicalPlanDigest)) &&
     (value.physicalPlans === undefined || isArrayOf(value.physicalPlans, isManifestPhysicalPlan))
   );
@@ -102,8 +104,21 @@ function isManifestPhysicalPlan(value: unknown): value is ManifestPhysicalPlan {
   if (!isRecord(value) || !isString(value.symbol) || !isString(value.target) || !isPhysicalDigest(value.digest))
     return false;
   return (
+    (value.strategyCatalogVersion === undefined || isString(value.strategyCatalogVersion)) &&
+    (value.performanceProfileVersion === undefined || isString(value.performanceProfileVersion)) &&
+    (value.extensions === undefined || isArrayOf(value.extensions, isManifestPhysicalExtension)) &&
     (value.capabilities === undefined || isArrayOf(value.capabilities, isManifestCapability)) &&
     isArrayOf(value.decisions, isManifestDecision)
+  );
+}
+
+function isManifestPhysicalExtension(value: unknown): value is NonNullable<ManifestPhysicalPlan["extensions"]>[number] {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.version) &&
+    typeof value.irDigest === "string" &&
+    /^extension-ir-[a-f0-9]{16}$/.test(value.irDigest)
   );
 }
 
@@ -138,6 +153,8 @@ function isManifestTarget(value: unknown): boolean {
     isString(value.profile) &&
     isString(value.runtime) &&
     isString(value.engine) &&
+    (value.runtimeVersion === undefined || isString(value.runtimeVersion)) &&
+    (value.performanceProfileVersion === undefined || isString(value.performanceProfileVersion)) &&
     (value.engineVersion === undefined || isString(value.engineVersion))
   );
 }
@@ -150,6 +167,7 @@ export function isCompilationReceipt(value: unknown): value is CompilationReceip
     isDigest(value.programDigest) &&
     isDigest(value.manifestDigest) &&
     isDigest(value.artifactDigest) &&
+    (value.performanceProfileVersion === undefined || isString(value.performanceProfileVersion)) &&
     Number.isInteger(value.files) &&
     Number.isInteger(value.symbols) &&
     isArrayOf(value.checks, isCompilationCheck)
@@ -299,5 +317,5 @@ function isDigest(value: unknown): value is string {
 }
 
 function isPhysicalDigest(value: unknown): value is string {
-  return typeof value === "string" && /^physical-[a-f0-9]{8}$/.test(value);
+  return typeof value === "string" && /^physical-(?:[a-f0-9]{8}|[a-f0-9]{16})$/.test(value);
 }

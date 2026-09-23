@@ -259,6 +259,16 @@ pnpm knowledge:rescore    # re-score saved transcripts with today's detectors, n
 - Benchmark before accepting complexity.
 - Distinguish compile-time cost from execution-time cost.
 
+## Adaptive Optimizer
+
+- Never introduce a physical optimization directly in an emitter; every choice belongs to a strategy family.
+- Every strategy declares semantic legality, target support, deterministic integer cost, and evidence when optimized.
+- Performance evidence never changes compiler behavior automatically.
+- Runtime detection selects an immutable target profile before code generation; AOT targets deployment and never the build host.
+- Benchmarks never replace semantic, differential, or runtime/AOT tests, and a single run never promotes a strategy.
+- Do not use absolute nanoseconds as a portable CI gate; compare relative results on a stable runner and report noise separately.
+- Third-party extensions lower through validated core IR and never receive raw source-emission capabilities.
+
 ## Feature Acceptance
 
 Every new public operation must solve a measured problem.

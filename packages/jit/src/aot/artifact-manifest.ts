@@ -34,7 +34,9 @@ export interface ManifestTarget {
   readonly profile: string;
   readonly runtime: string;
   readonly engine: string;
+  readonly runtimeVersion?: string;
   readonly engineVersion?: string;
+  readonly performanceProfileVersion?: string;
 }
 
 /** Hash and module-export information for one generated file. */
@@ -85,6 +87,14 @@ export interface ManifestPhysicalPlan {
   readonly symbol: string;
   readonly target: string;
   readonly digest: string;
+  readonly strategyCatalogVersion?: string;
+  readonly performanceProfileVersion?: string;
+  /** Semantic plugin identity and normalized IR digest without runtime code. */
+  readonly extensions?: readonly {
+    readonly id: string;
+    readonly version: string;
+    readonly irDigest: string;
+  }[];
   readonly capabilities?: readonly {
     readonly kind: string;
     readonly key?: string;
@@ -146,6 +156,10 @@ export interface ArtifactManifestV1 {
   readonly semanticMap: SemanticMap;
   /** Target profile selected for physical planning, when explicitly configured. */
   readonly target?: ManifestTarget;
+  /** Versioned performance knowledge used by the optimizer. */
+  readonly performanceProfileVersion?: string;
+  /** Versioned candidate and tie-breaking contract. */
+  readonly strategyCatalogVersion?: string;
   /** Digest of the physical decisions represented by the artifact declarations. */
   readonly physicalPlanDigest?: string;
   /** Optional details used only by explicit optimization explain tooling. */
@@ -174,6 +188,8 @@ export interface CompilationReceipt {
   readonly manifestDigest: string;
   /** Digest of the emitted files. */
   readonly artifactDigest: string;
+  /** Performance profile version recorded by the manifest, when present. */
+  readonly performanceProfileVersion?: string;
   /** Number of generated files covered by the receipt. */
   readonly files: number;
   /** Number of generated symbols covered by the receipt. */
@@ -232,6 +248,10 @@ export interface ArtifactManifestInput {
   readonly naming: "compact" | "semantic";
   /** Optional target profile used for this AOT compilation. */
   readonly target?: TargetProfile;
+  /** Version of the evidence-backed optimizer profile. */
+  readonly performanceProfileVersion?: string;
+  /** Version of the strategy candidate and tie-breaking contract. */
+  readonly strategyCatalogVersion?: string;
   /** Optional digest over the physical plans represented by the declarations. */
   readonly physicalPlanDigest?: string;
   /** Optional physical decisions indexed by generated symbol. */
@@ -273,9 +293,17 @@ export function createArtifactManifest(input: ArtifactManifestInput): ArtifactMa
             profile: input.target.id,
             runtime: input.target.runtime,
             engine: input.target.engine,
+            ...(input.target.runtimeVersion === undefined ? {} : { runtimeVersion: input.target.runtimeVersion }),
             ...(input.target.engineVersion === undefined ? {} : { engineVersion: input.target.engineVersion }),
+            ...(input.performanceProfileVersion === undefined
+              ? {}
+              : { performanceProfileVersion: input.performanceProfileVersion }),
           },
         }),
+    ...(input.performanceProfileVersion === undefined
+      ? {}
+      : { performanceProfileVersion: input.performanceProfileVersion }),
+    ...(input.strategyCatalogVersion === undefined ? {} : { strategyCatalogVersion: input.strategyCatalogVersion }),
     ...(input.physicalPlanDigest === undefined ? {} : { physicalPlanDigest: input.physicalPlanDigest }),
     ...(input.physicalPlans === undefined ? {} : { physicalPlans: input.physicalPlans }),
   } satisfies Omit<ArtifactManifestV1, "manifestDigest"> & { readonly manifestDigest: string };
@@ -295,6 +323,9 @@ export function createCompilationReceipt(
     programDigest: manifest.programDigest,
     manifestDigest: manifest.manifestDigest,
     artifactDigest: manifest.artifactDigest,
+    ...(manifest.performanceProfileVersion === undefined
+      ? {}
+      : { performanceProfileVersion: manifest.performanceProfileVersion }),
     files: manifest.files.length,
     symbols: manifest.symbols.length,
     checks: Object.freeze([...checks]),

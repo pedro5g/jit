@@ -68,6 +68,9 @@ function isPureExpr(expr: IRExpr): boolean {
       return true;
     case "not":
       return isPureExpr(expr.expr);
+    case "typeof":
+    case "array_isArray":
+      return isPureExpr(expr.value);
     case "binary":
     case "sameValue":
     case "sameNumber":
@@ -106,6 +109,10 @@ function exprCost(expr: IRExpr): number {
     case "sameValue":
     case "sameNumber":
       return 1 + exprCost(expr.left) + exprCost(expr.right);
+    case "typeof":
+      return 2 + exprCost(expr.value);
+    case "array_isArray":
+      return 5 + exprCost(expr.value);
     case "nary":
       return 1 + expr.operands.reduce((total, operand) => total + exprCost(operand), 0);
     case "schema_guard":

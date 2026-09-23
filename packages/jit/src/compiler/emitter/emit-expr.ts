@@ -39,6 +39,10 @@ export function emitExpr(expr: IRExpr): string {
       return `(${expr.operands.map(emitConditionRaw).join(expr.op === "and" ? " && " : " || ")})`;
     case "sameValue":
       return `Object.is(${emitExpr(expr.left)}, ${emitExpr(expr.right)})`;
+    case "typeof":
+      return `typeof ${emitExpr(expr.value)} === ${emitLiteral(expr.type)}`;
+    case "array_isArray":
+      return `Array.isArray(${emitExpr(expr.value)})`;
     case "sameNumber": {
       const left = emitExpr(expr.left);
       const right = emitExpr(expr.right);

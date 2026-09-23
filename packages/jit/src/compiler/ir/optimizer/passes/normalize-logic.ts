@@ -154,6 +154,10 @@ function exprKey(expr: IRExpr): string {
       return `sv(${exprKey(expr.left)},${exprKey(expr.right)})`;
     case "sameNumber":
       return `sn(${exprKey(expr.left)},${exprKey(expr.right)})`;
+    case "typeof":
+      return `typeof:${expr.type}(${exprKey(expr.value)})`;
+    case "array_isArray":
+      return `array_isArray(${exprKey(expr.value)})`;
     case "schema_guard":
       return `g${opaqueKey(expr.schema)}(${exprKey(expr.value)})`;
     case "load_prop":

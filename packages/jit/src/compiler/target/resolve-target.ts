@@ -1,27 +1,45 @@
+import { resolveNodeVersionRange } from "./node-range.js";
 import { portableProfile } from "./portable-profile.js";
 import { detectRuntimeFingerprint } from "./runtime-detector.js";
 import type { TargetDescriptor, TargetProfile } from "./target-profile.js";
-import { createV8Profile } from "./v8/profile.js";
+import { createNodeProfile, createV8Profile } from "./v8/profile.js";
+
+const nodeProfileMajors = Object.freeze(["22", "24", "26"]);
 
 /** Resolves an explicit target or a deterministic runtime profile. */
-export function resolveTargetProfile(target?: TargetDescriptor): TargetProfile {
-  if (target?.profile === "portable-1" || target?.runtime === "portable") return portableProfile;
+export function resolveTargetProfile(
+  target?: TargetDescriptor,
+  fingerprint: ReturnType<typeof detectRuntimeFingerprint> = detectRuntimeFingerprint()
+): TargetProfile {
+  if (target?.profile !== undefined) return resolveNamedProfile(target.profile, fingerprint);
+  if (target?.runtime === "portable" || target?.runtime === "browser") return portableProfile;
+  if (target?.versions !== undefined) return resolveDeploymentTargetProfile(target);
 
-  // A version range describes a deployment fleet, not the build machine. A
-  // range without a reviewed profile therefore resolves conservatively.
-  if (target?.versions !== undefined && target?.profile === undefined) return portableProfile;
-
-  const fingerprint = detectRuntimeFingerprint();
-  const major = majorV8(fingerprint.v8);
-  if (target?.profile?.startsWith("v8-") && target.profile.slice(3).length > 0) {
-    return createV8Profile(fingerprint, target.profile.slice(3));
-  }
-  if (target?.runtime === "node" && major !== undefined) return createV8Profile(fingerprint, major);
-  if (target === undefined && major !== undefined) return createV8Profile(fingerprint, major);
+  const nodeMajor = majorNode(fingerprint.node);
+  if ((target === undefined || target.runtime === "node") && nodeMajor !== undefined)
+    return nodeProfileMajors.includes(nodeMajor) ? createNodeProfile(nodeMajor, fingerprint) : portableProfile;
   return portableProfile;
 }
 
-function majorV8(version: string | undefined): string | undefined {
-  const match = version?.match(/^(\d+)/);
-  return match?.[1];
+/** Resolves a deployment target without consulting the process that runs AOT. */
+export function resolveDeploymentTargetProfile(target?: TargetDescriptor): TargetProfile {
+  if (target?.profile !== undefined) return resolveNamedProfile(target.profile);
+  if (target?.runtime === "portable" || target?.runtime === "browser" || target?.runtime === undefined)
+    return portableProfile;
+  if (target.runtime !== "node" || target.versions === undefined) return portableProfile;
+
+  return resolveNodeVersionRange(target.versions);
+}
+
+function resolveNamedProfile(id: string, fingerprint?: ReturnType<typeof detectRuntimeFingerprint>): TargetProfile {
+  if (id === "portable-1") return portableProfile;
+  const node = /^node-(22|24|26)$/.exec(id);
+  if (node?.[1] !== undefined) return createNodeProfile(node[1], fingerprint);
+  const v8 = /^v8-(\d+)$/.exec(id);
+  if (v8?.[1] !== undefined) return createV8Profile(fingerprint ?? {}, v8[1]);
+  return portableProfile;
+}
+
+function majorNode(version: string | undefined): string | undefined {
+  return version?.match(/^v?(\d+)/)?.[1];
 }

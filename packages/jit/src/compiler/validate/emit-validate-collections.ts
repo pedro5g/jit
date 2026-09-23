@@ -39,7 +39,12 @@ export function emitArray(emitter: ValidatorEmitter, schema: AnySchema, value: s
       if (build) emitter.writer.line(`${out} = new Array(${value}.length);`);
       const decision = build
         ? undefined
-        : resolveArrayValidationStrategy(schema, emitter.targetProfile ?? resolveTargetProfile(), emitter.mode);
+        : resolveArrayValidationStrategy(
+            schema,
+            emitter.targetProfile ?? resolveTargetProfile(),
+            emitter.mode,
+            emitter.performanceProfile
+          );
 
       if (decision?.strategy === "unrolled") {
         const count = normalizeConstraints(schema).cardinality?.exact;
