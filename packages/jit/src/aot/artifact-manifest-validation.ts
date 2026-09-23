@@ -3,6 +3,7 @@ import type {
   CompilationCheck,
   CompilationReceipt,
   ManifestFile,
+  ManifestPhysicalPlan,
   ManifestProtocol,
   ManifestSymbol,
   ManifestType,
@@ -62,15 +63,82 @@ function semanticMapReferencesSymbols(semanticMap: SemanticMap, symbolIds: Reado
 }
 
 function isManifestIdentity(value: Record<string, unknown>): boolean {
-  if (value.manifestVersion !== 1 || !isRecord(value.compiler)) return false;
-  if (!isString(value.compiler.name) || !isString(value.compiler.version)) return false;
-  if (!isDigest(value.declarationDigest) || !isDigest(value.programDigest)) return false;
-  if (!isDigest(value.artifactDigest) || !isDigest(value.manifestDigest)) return false;
-  if (value.ownership !== "managed" && value.ownership !== "detached") return false;
+  return isManifestHeader(value) && isManifestDigests(value) && isManifestOwnership(value) && isManifestEmission(value);
+}
+
+function isManifestHeader(value: Record<string, unknown>): boolean {
+  return value.manifestVersion === 1 && isManifestCompiler(value.compiler);
+}
+
+function isManifestCompiler(value: unknown): boolean {
+  return isRecord(value) && isString(value.name) && isString(value.version);
+}
+
+function isManifestDigests(value: Record<string, unknown>): boolean {
+  return (
+    isDigest(value.declarationDigest) &&
+    isDigest(value.programDigest) &&
+    isDigest(value.artifactDigest) &&
+    isDigest(value.manifestDigest)
+  );
+}
+
+function isManifestOwnership(value: Record<string, unknown>): boolean {
+  return value.ownership === "managed" || value.ownership === "detached";
+}
+
+function isManifestEmission(value: Record<string, unknown>): boolean {
   if (!isRecord(value.emission)) return false;
   return (
     (value.emission.format === "ts" || value.emission.format === "js") &&
-    (value.emission.naming === "compact" || value.emission.naming === "semantic")
+    (value.emission.naming === "compact" || value.emission.naming === "semantic") &&
+    (value.target === undefined || isManifestTarget(value.target)) &&
+    (value.physicalPlanDigest === undefined || isDigest(value.physicalPlanDigest)) &&
+    (value.physicalPlans === undefined || isArrayOf(value.physicalPlans, isManifestPhysicalPlan))
+  );
+}
+
+function isManifestPhysicalPlan(value: unknown): value is ManifestPhysicalPlan {
+  if (!isRecord(value) || !isString(value.symbol) || !isString(value.target) || !isPhysicalDigest(value.digest))
+    return false;
+  return (
+    (value.capabilities === undefined || isArrayOf(value.capabilities, isManifestCapability)) &&
+    isArrayOf(value.decisions, isManifestDecision)
+  );
+}
+
+function isManifestCapability(value: unknown): value is NonNullable<ManifestPhysicalPlan["capabilities"]>[number] {
+  return (
+    isRecord(value) &&
+    isString(value.kind) &&
+    (value.key === undefined || isString(value.key)) &&
+    Number.isInteger(value.sourceStage) &&
+    typeof value.reusable === "boolean"
+  );
+}
+
+function isManifestDecision(value: unknown): value is ManifestPhysicalPlan["decisions"][number] {
+  if (!isRecord(value)) return false;
+  return (
+    isString(value.family) &&
+    isString(value.strategy) &&
+    isArrayOf(value.reason, isString) &&
+    isArrayOf(value.evidence, isString) &&
+    isNumberRecord(value.estimated)
+  );
+}
+
+function isNumberRecord(value: unknown): boolean {
+  return isRecord(value) && Object.values(value).every((entry) => typeof entry === "number" && Number.isFinite(entry));
+}
+
+function isManifestTarget(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    isString(value.profile) &&
+    isString(value.runtime) &&
+    isString(value.engine) &&
+    (value.engineVersion === undefined || isString(value.engineVersion))
   );
 }
 
@@ -117,7 +185,19 @@ function isManifestSymbolIdentity(value: Record<string, unknown>): boolean {
 }
 
 function isManifestSymbolShape(value: Record<string, unknown>): boolean {
-  return isValidClassMetadata(value) && isManifestSymbolCollections(value);
+  return isValidClassMetadata(value) && isManifestSymbolCollections(value) && isManifestMetadata(value.metadata);
+}
+
+function isManifestMetadata(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  return (
+    (value.id === undefined || isString(value.id)) &&
+    (value.title === undefined || isString(value.title)) &&
+    (value.description === undefined || isString(value.description)) &&
+    (value.deprecated === undefined || typeof value.deprecated === "boolean") &&
+    (value.tags === undefined || isArrayOf(value.tags, isString))
+  );
 }
 
 function isValidClassMetadata(value: Record<string, unknown>): boolean {
@@ -134,8 +214,15 @@ function isManifestSymbolCollections(value: Record<string, unknown>): boolean {
     isArrayOf(value.capabilities, isString) &&
     isArrayOf(value.protocols, isString) &&
     isArrayOf(value.dependencies, isString) &&
-    isArrayOf(value.effects, isManifestEffect)
+    isArrayOf(value.effects, isManifestEffect) &&
+    (value.extensions === undefined || isArrayOf(value.extensions, isManifestExtension))
   );
+}
+
+function isManifestExtension(value: unknown): value is NonNullable<ManifestSymbol["extensions"]>[number] {
+  if (!isRecord(value) || !isString(value.id) || !isString(value.version)) return false;
+  const abi = value.abi;
+  return typeof abi === "number" && Number.isSafeInteger(abi) && abi > 0;
 }
 
 function isManifestEffect(value: unknown): value is ManifestSymbol["effects"][number] {
@@ -209,4 +296,8 @@ function isString(value: unknown): value is string {
 
 function isDigest(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function isPhysicalDigest(value: unknown): value is string {
+  return typeof value === "string" && /^physical-[a-f0-9]{8}$/.test(value);
 }

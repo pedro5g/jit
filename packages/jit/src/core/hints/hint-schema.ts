@@ -1,7 +1,7 @@
 import type { AnyTypeSchema, SchemaAnnotations } from "../ats/index.js";
 import type { CompileHints } from "./compile-hints.js";
 import { mergeHints } from "./hint-merge.js";
-import type { Metadata } from "./metadata.js";
+import { executableSchema, type Metadata, rememberDescriptiveMetadata } from "./metadata.js";
 
 export function attachHint<TSchema extends AnyTypeSchema>(schema: TSchema, hints: CompileHints): TSchema {
   const annotations = (schema.annotations as SchemaAnnotations | undefined) ?? {};
@@ -25,10 +25,12 @@ export function attachHint<TSchema extends AnyTypeSchema>(schema: TSchema, hints
 export function attachMetadata<TSchema extends AnyTypeSchema>(schema: TSchema, metadata: Metadata): TSchema {
   const annotations = (schema.annotations as SchemaAnnotations | undefined) ?? {};
 
-  return {
+  const result = {
     type: schema.type,
     _type: null,
     def: schema.def,
     annotations: { ...annotations, metadata: { ...annotations.metadata, ...metadata } },
   } as TSchema;
+  rememberDescriptiveMetadata(result, executableSchema(schema));
+  return result;
 }

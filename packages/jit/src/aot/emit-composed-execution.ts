@@ -8,6 +8,7 @@ import { emitTransformSource } from "../compiler/object-ops.js";
 import { emitQuerySource } from "../compiler/query.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
+import type { TargetProfile } from "../compiler/target/target-profile.js";
 import { emitUpdateSource } from "../compiler/update.js";
 import { canUseFastParse } from "../compiler/validate/emit-validate-support.js";
 import { emitValidator } from "../compiler/validate/emit-validator-entry.js";
@@ -17,6 +18,7 @@ import type { SkippedOperation } from "./generate.js";
 export interface AotComposedExecutionHost {
   readonly js: string[];
   readonly typescript: boolean;
+  readonly target: TargetProfile;
   readonly skipped: SkippedOperation[];
   readonly classBindings: ReadonlyMap<unknown, string>;
   markValidationError(): void;
@@ -87,6 +89,7 @@ class ComposedExecutionEmitter {
         safeParseAsync: false,
         materializeRuntimeTypes,
         typescript: this.#host.typescript,
+        target: this.#host.target,
       })
     );
 

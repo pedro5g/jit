@@ -2,6 +2,7 @@ import { resolveLazySchema, schemaChildren } from "../compiler/schema-recursion.
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
+import { metadataForSchema } from "../core/registry/index.js";
 import { type CompiledArtifact, getArtifact } from "../runtime/artifact-registry.js";
 import { declarationDigest, stableJson } from "./artifact-manifest.js";
 import type {
@@ -182,6 +183,8 @@ function createSymbol(
 ): ArtifactSymbol {
   if (typeOnly) {
     const schema = input.schemas[name];
+    const metadata = schemaMetadata(schema as SchemaInput | undefined);
+    const extensions = schemaExtensions(schema as SchemaInput | undefined);
     return {
       id: symbolId,
       name,
@@ -194,6 +197,8 @@ function createSymbol(
       protocols: [],
       dependencies: schema === undefined ? [] : schemaDependencies(input.name, schema as SchemaInput, schemaOwners),
       effects: [],
+      ...(extensions === undefined ? {} : { extensions }),
+      ...(metadata === undefined ? {} : { metadata }),
     };
   }
 
@@ -206,6 +211,9 @@ function createSymbol(
   const inputType = artifactInput(artifact);
   const outputType = artifactOutput(name, artifact);
   const classMetadata = artifact?.kind === "class" ? artifactClassMetadata(artifact) : undefined;
+  const schema = artifactSchema(artifact, value);
+  const metadata = schemaMetadata(schema);
+  const extensions = schemaExtensions(schema);
 
   return {
     id: symbolId,
@@ -222,7 +230,98 @@ function createSymbol(
     protocols: [],
     dependencies: schemaDependenciesForSymbol(input, name, artifact, schemaOwners),
     effects: artifactEffects(artifact),
+    ...(extensions === undefined ? {} : { extensions }),
+    ...(metadata === undefined ? {} : { metadata }),
   };
+}
+
+function schemaExtensions(input: SchemaInput | undefined): ArtifactSymbol["extensions"] {
+  if (input === undefined) return undefined;
+  try {
+    const identities = new Map<string, ArtifactExtension>();
+    collectSchemaExtensions(unwrapSchema(input), identities, new Set<object>());
+    if (identities.size === 0) return undefined;
+    return Object.freeze(
+      [...identities.values()]
+        .sort((left, right) => compareText(`${left.id}@${left.version}`, `${right.id}@${right.version}`))
+        .map((identity) => Object.freeze(identity))
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+type ArtifactExtension = NonNullable<ArtifactSymbol["extensions"]>[number];
+
+function collectSchemaExtensions(
+  schema: ATS.AnyTypeSchema,
+  identities: Map<string, ArtifactExtension>,
+  seen: Set<object>
+): void {
+  if (seen.has(schema)) return;
+  seen.add(schema);
+
+  const annotations = schema.annotations;
+  if (isRecord(annotations) && Array.isArray(annotations.extensions)) {
+    for (const value of annotations.extensions) {
+      if (!isArtifactExtension(value)) continue;
+      identities.set(`${value.id}@${value.version}@${value.abi}`, value);
+    }
+  }
+
+  if (!isRecord(schema.def)) return;
+  for (const value of Object.values(schema.def)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (isNestedSchemaRecord(item)) collectSchemaExtensions(item, identities, seen);
+      }
+    } else if (isNestedSchemaRecord(value)) {
+      collectSchemaExtensions(value, identities, seen);
+    }
+  }
+}
+
+function isArtifactExtension(value: unknown): value is ArtifactExtension {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.version === "string" &&
+    typeof value.abi === "number" &&
+    Number.isSafeInteger(value.abi) &&
+    value.abi > 0
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNestedSchemaRecord(value: unknown): value is ATS.AnyTypeSchema {
+  return (
+    isRecord(value) && typeof value.type === "string" && "_type" in value && "def" in value && "annotations" in value
+  );
+}
+
+function schemaMetadata(input: SchemaInput | undefined): ArtifactSymbol["metadata"] {
+  if (input === undefined) return undefined;
+  let schema: ATS.AnyTypeSchema;
+  try {
+    schema = unwrapSchema(input);
+  } catch {
+    return undefined;
+  }
+  const metadata = metadataForSchema(schema);
+  if (metadata === undefined) return undefined;
+  const projection = {
+    ...(typeof metadata.id === "string" ? { id: metadata.id } : {}),
+    ...(typeof metadata.title === "string" ? { title: metadata.title } : {}),
+    ...(typeof metadata.description === "string" ? { description: metadata.description } : {}),
+    ...(typeof metadata.deprecated === "boolean" ? { deprecated: metadata.deprecated } : {}),
+    ...(Array.isArray(metadata.tags)
+      ? { tags: metadata.tags.filter((tag): tag is string => typeof tag === "string") }
+      : {}),
+  };
+  return Object.keys(projection).length === 0 ? undefined : projection;
 }
 
 function artifactClassMetadata(
@@ -241,6 +340,10 @@ function schemaDependenciesForSymbol(
   artifact: CompiledArtifact | undefined,
   owners: WeakMap<ATS.AnyTypeSchema, string>
 ): readonly string[] {
+  // Keep executable dependency edges compatible with the established artifact
+  // protocol. Execution descriptors may expose their source schema for
+  // metadata, but their callable's generated source does not import the
+  // schema/type symbol itself.
   const dependencies = new Set(schemaDependencies(input.name, artifactSchema(artifact), owners));
   const group = input.groups[name];
   if (group !== undefined) {
@@ -253,9 +356,18 @@ function schemaDependenciesForSymbol(
   return [...dependencies].sort(compareText);
 }
 
-function artifactSchema(artifact: CompiledArtifact | undefined): SchemaInput | undefined {
-  if (artifact === undefined || !("schema" in artifact)) return undefined;
-  return artifact.schema as SchemaInput;
+function artifactSchema(artifact: CompiledArtifact | undefined, value?: unknown): SchemaInput | undefined {
+  if (artifact === undefined) return undefined;
+  if ("schema" in artifact && artifact.schema !== undefined) return artifact.schema as SchemaInput;
+  if (artifact.kind !== "execution" || (typeof value !== "function" && !isObject(value))) return undefined;
+  const plan = (value as { readonly plan?: unknown }).plan;
+  if (!isObject(plan)) return undefined;
+  const schema = (plan as { readonly schema?: unknown }).schema;
+  return isObject(schema) ? (schema as SchemaInput) : undefined;
+}
+
+function isObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null;
 }
 
 function schemaDependencies(
@@ -362,10 +474,10 @@ function artifactEffects(
 
 function declarationFingerprint(value: unknown): unknown {
   const artifact = getArtifact(value);
-  if (!artifact) return value;
+  if (!artifact) return stripDescriptiveMetadata(value);
   const descriptor: Record<string, unknown> = { kind: artifact.kind };
   if ("op" in artifact) descriptor.op = artifact.op;
-  if ("schema" in artifact) descriptor.schema = artifact.schema;
+  if ("schema" in artifact) descriptor.schema = stripDescriptiveMetadata(artifact.schema);
   if (artifact.kind === "class") {
     descriptor.capabilities = artifact.capabilities;
     descriptor.construction = artifact.construction;
@@ -373,6 +485,40 @@ function declarationFingerprint(value: unknown): unknown {
     descriptor.domainEvent = artifact.domainEvent;
   }
   return stableJson(descriptor);
+}
+
+function stripDescriptiveMetadata(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripDescriptiveMetadata);
+  if (typeof value !== "object" || value === null) return value;
+
+  const record = value as Record<string, unknown>;
+  if (isSchemaRecord(record)) {
+    const annotations = record.annotations;
+    const executableAnnotations =
+      typeof annotations === "object" && annotations !== null
+        ? stripMetadataAnnotation(annotations as Record<string, unknown>)
+        : undefined;
+    return {
+      type: record.type,
+      _type: null,
+      def: stripDescriptiveMetadata(record.def),
+      ...(executableAnnotations === undefined ? {} : { annotations: executableAnnotations }),
+    };
+  }
+  return Object.fromEntries(Object.entries(record).map(([key, nested]) => [key, stripDescriptiveMetadata(nested)]));
+}
+
+function stripMetadataAnnotation(annotations: Record<string, unknown>): Record<string, unknown> | undefined {
+  const executable = Object.fromEntries(
+    Object.entries(annotations)
+      .filter(([key]) => key !== "metadata")
+      .map(([key, value]) => [key, stripDescriptiveMetadata(value)])
+  );
+  return Object.keys(executable).length === 0 ? undefined : executable;
+}
+
+function isSchemaRecord(value: Record<string, unknown>): boolean {
+  return typeof value.type === "string" && "def" in value && "_type" in value;
 }
 
 function compareText(left: string, right: string): number {

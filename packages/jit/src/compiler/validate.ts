@@ -1,7 +1,10 @@
 import type * as ATS from "../core/ats/index.js";
+import { environmentForSchema, getActiveEnvironment } from "../core/environment/environment.js";
 import { JITValidationError, type ValidationIssue } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
+import { assertSatisfiable } from "./facts/contradictions.js";
+import { resolveTargetProfile } from "./target/resolve-target.js";
 import { canUseFastParse } from "./validate/emit-validate-support.js";
 import { emitValidator } from "./validate/emit-validator-entry.js";
 
@@ -10,6 +13,16 @@ export const VALIDATOR_OPS = ["is", "parse", "safeParse", "parseAsync", "safePar
 
 /** Describes the JIT validator op contract used by the public API. */
 export type ValidatorOp = (typeof VALIDATOR_OPS)[number];
+
+/** Physical validation contract selected from the public operation. */
+export type ValidationMode = "predicate" | "parse" | "collect" | "async";
+
+/** Resolves the diagnostic and allocation contract for one validation operation. */
+export function validationMode(operation: ValidatorOp | "issues"): ValidationMode {
+  if (operation === "is") return "predicate";
+  if (operation === "parse" || operation === "safeParse") return operation === "parse" ? "parse" : "collect";
+  return "async";
+}
 
 /** Describes the JIT validation compile options contract used by the public API. */
 export interface ValidationCompileOptions extends CompileCacheOptions {
@@ -74,6 +87,7 @@ export function emitValidatorSource(
   schema: ATS.AnyTypeSchema,
   options?: { readonly ops?: readonly ValidatorOp[]; readonly maxIssues?: number }
 ): string {
+  assertSatisfiable(schema);
   const ops = options?.ops ?? VALIDATOR_OPS;
   validateMaxIssues(options?.maxIssues);
 
@@ -146,7 +160,7 @@ export function compileHydrator<TSchema extends ATS.AnyTypeSchema>(
         }
       };
     },
-    options
+    cacheOptions(schema, options)
   );
 }
 
@@ -191,7 +205,7 @@ export function compileMaterializer<TSchema extends ATS.AnyTypeSchema>(
         }
       };
     },
-    options
+    cacheOptions(schema, options)
   );
 }
 
@@ -221,7 +235,7 @@ export function compileSafeHydrator<TSchema extends ATS.AnyTypeSchema>(
         value: unknown
       ) => SafeParseResult<ATS.TypeofSchema<TSchema>>;
     },
-    options
+    cacheOptions(schema, options)
   );
 }
 
@@ -232,6 +246,7 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
   options?: ValidationCompileOptions
 ): CompiledValidatorSelection<ATS.TypeofSchema<TSchema>, TOps> {
   type TValue = ATS.TypeofSchema<TSchema>;
+  assertSatisfiable(schema);
   const normalizedOps = normalizeValidatorOps(ops);
   validateMaxIssues(options?.maxIssues);
   // `is` is the allocation-free proof that a value is already valid. When the
@@ -304,8 +319,14 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
 
       return selection as CompiledValidatorSelection<TValue, TOps>;
     },
-    options
+    cacheOptions(schema, options)
   );
+}
+
+function cacheOptions(schema: ATS.AnyTypeSchema, options: CompileCacheOptions | undefined): CompileCacheOptions {
+  const environment = environmentForSchema(schema) ?? getActiveEnvironment();
+  const target = resolveTargetProfile();
+  return { ...options, compilerDigest: `${environment.extensions.digest}:${target.digest}` };
 }
 
 function registerValidatorArtifact<TSchema extends ATS.AnyTypeSchema>(

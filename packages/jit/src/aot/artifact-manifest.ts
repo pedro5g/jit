@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
+import type { TargetProfile } from "../compiler/target/target-profile.js";
 import { stableJson as stableJsonImpl } from "./artifact-json.js";
 import type { ArtifactModule, ArtifactProgram, ArtifactSymbol, ProtocolCapability } from "./artifact-program.js";
 import { inspectArtifactStatus as inspectArtifactStatusImpl } from "./artifact-status.js";
@@ -26,6 +27,14 @@ export interface CompilerIdentity {
   readonly name: string;
   /** Compiler version recorded for reproducibility checks. */
   readonly version: string;
+}
+
+/** Deterministic target identity used for AOT physical-plan reproduction. */
+export interface ManifestTarget {
+  readonly profile: string;
+  readonly runtime: string;
+  readonly engine: string;
+  readonly engineVersion?: string;
 }
 
 /** Hash and module-export information for one generated file. */
@@ -69,6 +78,26 @@ export interface ManifestType {
 export interface ManifestProtocol extends ProtocolCapability {
   /** Symbol ids implementing this protocol capability. */
   readonly symbols: readonly string[];
+}
+
+/** On-demand physical-plan explanation retained beside the contract manifest. */
+export interface ManifestPhysicalPlan {
+  readonly symbol: string;
+  readonly target: string;
+  readonly digest: string;
+  readonly capabilities?: readonly {
+    readonly kind: string;
+    readonly key?: string;
+    readonly sourceStage: number;
+    readonly reusable: boolean;
+  }[];
+  readonly decisions: readonly {
+    readonly family: string;
+    readonly strategy: string;
+    readonly reason: readonly string[];
+    readonly evidence: readonly string[];
+    readonly estimated: Readonly<Record<string, number>>;
+  }[];
 }
 
 /** Declaration-to-artifact traceability without generated source. */
@@ -115,6 +144,12 @@ export interface ArtifactManifestV1 {
   readonly protocols: readonly ManifestProtocol[];
   /** Traceability map from declarations to generated symbols. */
   readonly semanticMap: SemanticMap;
+  /** Target profile selected for physical planning, when explicitly configured. */
+  readonly target?: ManifestTarget;
+  /** Digest of the physical decisions represented by the artifact declarations. */
+  readonly physicalPlanDigest?: string;
+  /** Optional details used only by explicit optimization explain tooling. */
+  readonly physicalPlans?: readonly ManifestPhysicalPlan[];
 }
 
 /** One verifiable compiler check in a compilation receipt. */
@@ -195,6 +230,12 @@ export interface ArtifactManifestInput {
   readonly format: "ts" | "js";
   /** Generated file naming policy. */
   readonly naming: "compact" | "semantic";
+  /** Optional target profile used for this AOT compilation. */
+  readonly target?: TargetProfile;
+  /** Optional digest over the physical plans represented by the declarations. */
+  readonly physicalPlanDigest?: string;
+  /** Optional physical decisions indexed by generated symbol. */
+  readonly physicalPlans?: readonly ManifestPhysicalPlan[];
 }
 
 /** Computes a declaration digest without storing compiler internals in metadata. */
@@ -225,6 +266,18 @@ export function createArtifactManifest(input: ArtifactManifestInput): ArtifactMa
     types: collectTypes(input.program),
     protocols: collectProtocols(input.program),
     semanticMap: collectSemanticMap(input.program),
+    ...(input.target === undefined
+      ? {}
+      : {
+          target: {
+            profile: input.target.id,
+            runtime: input.target.runtime,
+            engine: input.target.engine,
+            ...(input.target.engineVersion === undefined ? {} : { engineVersion: input.target.engineVersion }),
+          },
+        }),
+    ...(input.physicalPlanDigest === undefined ? {} : { physicalPlanDigest: input.physicalPlanDigest }),
+    ...(input.physicalPlans === undefined ? {} : { physicalPlans: input.physicalPlans }),
   } satisfies Omit<ArtifactManifestV1, "manifestDigest"> & { readonly manifestDigest: string };
   const manifest = { ...base, manifestDigest: sha256(stableJson(base)) } satisfies ArtifactManifestV1;
   return Object.freeze(manifest);

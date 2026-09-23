@@ -103,6 +103,98 @@ describe("sovereign artifact program and naming", () => {
   });
 });
 
+describe("sovereign artifact target selection", () => {
+  const outputDir = useTemporaryOutput();
+
+  it("uses the declared AOT target instead of the build machine profile", () => {
+    const root = outputDir();
+    const Portable = join(root, "portable");
+    const V8 = join(root, "v8");
+    const Values = JIT.array(JIT.string()).length(5);
+
+    const portable = AOT.generate({
+      artifacts: { isValues: JIT.validate.is(Values) },
+      outDir: Portable,
+      format: "js",
+      target: { profile: "portable-1" },
+      emitManifest: true,
+    });
+    const v8 = AOT.generate({
+      artifacts: { isValues: JIT.validate.is(Values) },
+      outDir: V8,
+      format: "js",
+      target: { profile: "v8-99" },
+      emitManifest: true,
+    });
+
+    const portableSource = readFileSync(join(Portable, "index.js"), "utf8");
+    const v8Source = readFileSync(join(V8, "index.js"), "utf8");
+    expect(portableSource).toContain("for (let");
+    expect(v8Source).toContain("[0]");
+    expect(portable.manifest?.target?.profile).toBe("portable-1");
+    expect(v8.manifest?.target?.profile).toBe("v8-99");
+    expect(portable.manifest?.artifactDigest).not.toBe(v8.manifest?.artifactDigest);
+  });
+});
+
+describe("sovereign artifact manifest metadata", () => {
+  const outputDir = useTemporaryOutput();
+
+  it("projects descriptive registry metadata into the agent manifest", () => {
+    const outDir = outputDir();
+    const User = JIT.object({ id: JIT.number() });
+    const docs = JIT.registry<{ id: string; title: string; description: string; custom: { ignored: boolean } }>();
+    User.register(docs, {
+      id: "User",
+      title: "User",
+      description: "Application user",
+      custom: { ignored: true },
+    });
+    const result = AOT.generate({
+      artifacts: { isUser: JIT.validate.is(User) },
+      schemas: { User },
+      outDir,
+      format: "ts",
+      emitManifest: true,
+    });
+
+    expect(result.manifest?.symbols.find((symbol) => symbol.name === "User")?.metadata).toEqual({
+      id: "User",
+      title: "User",
+      description: "Application user",
+    });
+  });
+
+  it("records contributing extension identities without importing plugin code", () => {
+    const outDir = outputDir();
+    const slug = JIT.plugin.operator({
+      id: "@acme/slug-contract",
+      version: "1.0.0",
+      abi: 1,
+      name: "slug",
+      target: "string",
+      grammar: { repeat: "forbid" },
+      compose: (schema: unknown) => schema,
+    });
+    const Extended = JIT.$extends(slug);
+    const Plain = Extended.string();
+    const User = Extended.string.slug();
+    const result = AOT.generate({
+      artifacts: { isPlain: Extended.validate.is(Plain), isUser: Extended.validate.is(User) },
+      schemas: { Plain, User },
+      outDir,
+      format: "ts",
+      emitManifest: true,
+    });
+
+    expect(result.manifest?.symbols.find((symbol) => symbol.name === "User")?.extensions).toEqual([
+      { id: "@acme/slug-contract", version: "1.0.0", abi: 1 },
+    ]);
+    expect(result.manifest?.symbols.find((symbol) => symbol.name === "Plain")?.extensions).toBeUndefined();
+    expect(readFileSync(join(outDir, "index.ts"), "utf8")).not.toContain("@acme/slug-contract");
+  });
+});
+
 describe("sovereign artifact manifest drift", () => {
   const outputDir = useTemporaryOutput();
 

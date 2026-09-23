@@ -1,5 +1,6 @@
 import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
+import { metadataForSchema } from "../../core/registry/index.js";
 import { JITError } from "../../errors/index.js";
 import { registerArtifact } from "../../runtime/artifact-registry.js";
 import { casePattern, caseTransformPlan } from "../case-transform-plan.js";
@@ -603,6 +604,8 @@ function children(schema: ATS.AnyTypeSchema): readonly ATS.AnyTypeSchema[] {
 }
 
 function metadataOf(schema: ATS.AnyTypeSchema): SchemaMetadata | undefined {
+  const registered = metadataForSchema(schema);
+  if (registered !== undefined) return registered as SchemaMetadata;
   return (schema.annotations as { readonly metadata?: SchemaMetadata } | undefined)?.metadata;
 }
 

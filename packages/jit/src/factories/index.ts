@@ -13,6 +13,7 @@ export type {
 /** Deterministic mock generation and incremental stream contracts. */
 export type { Mock, MockOptions } from "../compiler/mock.js";
 export type { CompiledStream, StreamOptions } from "../compiler/stream.js";
+export * from "./environment.js";
 /** Fluent JSON Schema declaration builder. */
 export { type JsonSchemaBuilder, jsonSchema } from "./json-schema.js";
 /** Resolves the output type of a schema or builder as `JIT.Typeof<typeof User>`. */

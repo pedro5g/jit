@@ -42,6 +42,8 @@ export type Update<TSchemaLike> = import("./core/ats/input.js").Update<TSchemaLi
 /** Fluent builder chain internals (`createBuilder`, builder types). */
 export * as Builder from "./core/builder/index.js";
 export type { Strict } from "./core/builder/types.js";
+/** Isolated runtime environment contracts and presentation configuration. */
+export * as Environment from "./core/environment/index.js";
 export type {
   AnyCompiledFunction,
   AOTArtifact,
@@ -51,12 +53,17 @@ export type {
   CompiledArtifact,
   CompilerHost,
   OperationDescriptor,
+  OperationDescriptorMap,
   SchemaMetadata,
 } from "./core/host.js";
 /** Shared host contracts used by runtime JIT and AOT definition entrypoints. */
 export * as Host from "./core/host.js";
+/** Typed descriptive metadata registries. */
+export * as Registry from "./core/registry/index.js";
 /** Typed error classes thrown by compiled functions (`JITError`). */
 export * as Errors from "./errors/index.js";
+/** Contract-first extension descriptors and restricted extension IR. */
+export * as Extensions from "./extensions/index.js";
 /** The main public API: schema factories plus namespaced compiled operations. */
 export * as JIT from "./factories/index.js";
 /** Runtime helpers referenced by generated (AOT) code (`getIndex`, hash primitives). */

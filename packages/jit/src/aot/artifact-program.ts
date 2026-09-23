@@ -9,6 +9,15 @@ export type TypeRef = string;
 /** The declaration roles understood by the artifact manifest. */
 export type ArtifactSymbolKind = "function" | "class" | "type" | "constant" | "schema" | "event";
 
+/** Small descriptive metadata projection safe to expose to agents. */
+export interface ArtifactMetadata {
+  readonly id?: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly deprecated?: boolean;
+  readonly tags?: readonly string[];
+}
+
 /** A semantic capability exposed by a generated artifact. */
 export interface ProtocolCapability {
   /** Protocol name understood by the artifact consumer. */
@@ -116,6 +125,14 @@ export interface ArtifactSymbol {
     /** Optional effect target. */
     readonly target?: string;
   }[];
+  /** Extension identities that contributed to this symbol's semantics. */
+  readonly extensions?: readonly {
+    readonly id: string;
+    readonly version: string;
+    readonly abi: number;
+  }[];
+  /** Small registry metadata projection; large/custom values stay out of artifacts. */
+  readonly metadata?: ArtifactMetadata;
 }
 
 /** The source-independent program produced after semantic lowering. */
@@ -300,6 +317,14 @@ function normalizeModule(module: ArtifactModule): ArtifactModule {
 function normalizeSymbol(symbol: ArtifactSymbol): ArtifactSymbol {
   return {
     ...symbol,
+    ...(symbol.metadata === undefined
+      ? {}
+      : {
+          metadata: Object.freeze({
+            ...symbol.metadata,
+            ...(symbol.metadata.tags ? { tags: Object.freeze([...symbol.metadata.tags]) } : {}),
+          }),
+        }),
     capabilities: Object.freeze([...symbol.capabilities].sort()),
     protocols: Object.freeze([...symbol.protocols].sort()),
     dependencies: Object.freeze([...symbol.dependencies].sort()),
@@ -308,6 +333,15 @@ function normalizeSymbol(symbol: ArtifactSymbol): ArtifactSymbol {
         compareText(`${left.kind}:${left.target ?? ""}`, `${right.kind}:${right.target ?? ""}`)
       )
     ),
+    ...(symbol.extensions === undefined
+      ? {}
+      : {
+          extensions: Object.freeze(
+            [...symbol.extensions].sort((left, right) =>
+              compareText(`${left.id}@${left.version}`, `${right.id}@${right.version}`)
+            )
+          ),
+        }),
   };
 }
 

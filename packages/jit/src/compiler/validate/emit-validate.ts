@@ -5,6 +5,9 @@ import { CodeWriter } from "../emitter/code-writer.js";
 import { resolveLazySchema } from "../schema-recursion.js";
 import { emitSchemaGuard } from "../source/guard.js";
 import { emitLiteral, emitObjectKey } from "../source/literal.js";
+import { resolveEnumMembershipStrategy } from "../strategy/families/enum-membership.js";
+import { resolveTargetProfile } from "../target/resolve-target.js";
+import type { TargetProfile } from "../target/target-profile.js";
 import {
   emitArray as emitArrayImpl,
   emitDiscriminatedUnion as emitDiscriminatedUnionImpl,
@@ -129,6 +132,7 @@ export class ValidatorEmitter {
   /** Schemas that close a cycle; each becomes one named recursive helper. */
   recursive: ReadonlySet<ATS.AnyTypeSchema> = new Set();
   readonly recursiveNames = new Map<ATS.AnyTypeSchema, string>();
+  readonly enumLookups = new Map<string, string>();
   helperCounter = 0;
   varCounter = 0;
   mode: "is" | "parse" | "fast";
@@ -142,7 +146,8 @@ export class ValidatorEmitter {
     readonly materializeRuntimeTypes = true,
     readonly maxIssues: number | undefined = undefined,
     validationEnabled = true,
-    readonly typescript = false
+    readonly typescript = false,
+    readonly targetProfile?: TargetProfile
   ) {
     this.mode = mode;
     this.awaited = awaited;
@@ -177,6 +182,38 @@ export class ValidatorEmitter {
     this.bindingValues.push(value);
     this.bindingIds.set(value, name);
     return name;
+  }
+
+  /** Adds one immutable lookup table to the generated validator prelude. */
+  enumLookup(values: readonly (string | number)[]): string {
+    const key = JSON.stringify(values);
+    const existing = this.enumLookups.get(key);
+    if (existing !== undefined) return existing;
+    const name = `${this.rootMode === "is" ? "ie" : "pe"}${++this.helperCounter}`;
+    const entries = values.map((value) => `[${emitLiteral(value)}]: true`).join(", ");
+    this.helperSources.push(`const ${name} = Object.freeze(Object.assign(Object.create(null), { ${entries} }));`);
+    this.enumLookups.set(key, name);
+    return name;
+  }
+
+  /** Emits a statement-level switch while keeping failure handling mode-specific. */
+  enumSwitch(values: readonly (string | number)[], value: string): string {
+    const matched = this.nextVar("em");
+    this.writer.line(`let ${matched} = false;`);
+    this.writer.line(`switch (${value}) {`);
+    this.writer.indent(() => {
+      for (const option of values) {
+        this.writer.line(`case ${emitLiteral(option)}:`);
+      }
+      this.writer.indent(() => {
+        this.writer.line(`${matched} = true;`);
+        this.writer.line("break;");
+      });
+      this.writer.line("default:");
+      this.writer.indent(() => this.writer.line("break;"));
+    });
+    this.writer.line("}");
+    return matched;
   }
 
   bindValidation(value: unknown): string {
@@ -467,7 +504,7 @@ export class ValidatorEmitter {
       this.writer.indent(() => {
         const issuePath = path.source === "[]" ? "issue.path" : `[...${path.source}, ...issue.path]`;
         this.writer.line(
-          `(issues ||= [])[issues.length] = { path: ${issuePath}, code: issue.code, expected: issue.expected, message: issue.message };`
+          `(issues ||= [])[issues.length] = { path: ${issuePath}, code: issue.code, expected: issue.expected, message: issue.message, ...(issue.received === undefined ? {} : { received: issue.received }), ...(issue.params === undefined ? {} : { params: issue.params }) };`
         );
         if (this.maxIssues !== undefined)
           this.writer.line(`if (issues.length === ${this.maxIssues}) throw __issueLimit;`);
@@ -602,8 +639,21 @@ export class ValidatorEmitter {
         return value;
       }
       case TypeName.enum: {
-        const values = Object.values(schema.def.values as Record<string, string | number>);
-        const test = values.map((option) => `${value} !== ${emitLiteral(option)}`).join(" && ");
+        const values = [
+          ...new Set(
+            Object.values(schema.def.values as Record<string, string | number>).filter(
+              (option): option is string | number => typeof option === "string" || typeof option === "number"
+            )
+          ),
+        ];
+        const decision = resolveEnumMembershipStrategy(schema, this.targetProfile ?? resolveTargetProfile());
+        const lookup = decision?.strategy === "lookup-object" ? this.enumLookup(values) : undefined;
+        const matched = decision?.strategy === "switch" ? this.enumSwitch(values, value) : undefined;
+        const test = lookup
+          ? `!${lookup}[${value}]`
+          : matched
+            ? `!${matched}`
+            : values.map((option) => `${value} !== ${emitLiteral(option)}`).join(" && ");
 
         this.failIf(
           values.length === 0 ? "true" : test,

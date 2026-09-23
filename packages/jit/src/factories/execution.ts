@@ -9,6 +9,7 @@ import {
 } from "../compiler/execution-stage.js";
 import { compileJsonParse } from "../compiler/json-parse.js";
 import type { MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
+import { type PhysicalPlan, resolvePhysicalPlan } from "../compiler/physical/physical-plan.js";
 import { compileSerialize } from "../compiler/serialize.js";
 import type { UpdatePatch } from "../compiler/update.js";
 import { compileValidatorSelection } from "../compiler/validate.js";
@@ -41,10 +42,14 @@ const OPERATION_ARTIFACTS = new WeakMap<ATS.AnyTypeSchema, Map<string, CallableA
  */
 export type CallableArtifact<TFunction extends FunctionLike> = TFunction & {
   readonly plan: ExecutionPlan;
+  /** Target-aware physical decisions selected while lowering the semantic plan. */
+  readonly physicalPlan?: PhysicalPlan;
   /** Lowers and caches the artifact's callable implementation. */
   compile(): CallableArtifact<TFunction>;
   /** Returns the immutable execution plan without running it. */
   explain(): ExecutionPlan;
+  /** Returns the target-aware plan only when explicitly requested. */
+  explain(options: { readonly physical: true }): PhysicalPlan;
 };
 
 /**
@@ -265,9 +270,11 @@ export function createExecutionArtifact<TFunction extends FunctionLike>(
         compiled ??= lower();
         return (compiled as unknown as (left: unknown, right: unknown) => unknown)(left, right);
       }) as unknown as CallableArtifact<TFunction>;
+  const physicalPlan = resolvePhysicalPlan(plan);
 
   Object.defineProperties(artifact, {
     plan: { enumerable: true, value: plan },
+    physicalPlan: { enumerable: false, value: physicalPlan },
     compile: {
       enumerable: false,
       value: () => {
@@ -275,7 +282,10 @@ export function createExecutionArtifact<TFunction extends FunctionLike>(
         return artifact;
       },
     },
-    explain: { enumerable: false, value: () => plan },
+    explain: {
+      enumerable: false,
+      value: (options?: { readonly physical?: boolean }) => (options?.physical === true ? physicalPlan : plan),
+    },
   });
   registerArtifact(artifact as object, { kind: "execution", plan });
   return artifact;

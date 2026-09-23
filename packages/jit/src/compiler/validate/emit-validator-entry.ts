@@ -1,6 +1,9 @@
 import type * as ATS from "../../core/ats/index.js";
 import type { CodeWriter } from "../emitter/code-writer.js";
+import { assertSatisfiable } from "../facts/contradictions.js";
 import { findRecursiveSchemas } from "../schema-recursion.js";
+import { resolveTargetProfile } from "../target/resolve-target.js";
+import type { TargetDescriptor, TargetProfile } from "../target/target-profile.js";
 import type { ValidatorBindings } from "./emit-validate.js";
 import { ValidatorEmitter } from "./emit-validate.js";
 import { rootPath } from "./emit-validate-helpers.js";
@@ -27,6 +30,8 @@ export interface EmitValidatorOptions {
   readonly maxIssues?: number;
   /** Add TypeScript annotations for a standalone typed artifact. */
   readonly typescript?: boolean;
+  /** Selects the physical validation profile; AOT must pass this explicitly. */
+  readonly target?: TargetDescriptor | TargetProfile;
 }
 
 function emitFreezeOutput(writer: CodeWriter, output: string): void {
@@ -42,6 +47,7 @@ function emitFreezeOutput(writer: CodeWriter, output: string): void {
  * only when defaults/coercions/transforms require it.
  */
 export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorOptions = {}): EmittedValidator {
+  assertSatisfiable(schema);
   const settings = resolveValidatorSettings(options);
   const recursive = findRecursiveSchemas(schema);
   const parseEmitter = createParseEmitter(schema, recursive, settings);
@@ -60,6 +66,7 @@ interface ValidatorSettings {
   readonly validateChecks: boolean;
   readonly maxIssues: number | undefined;
   readonly typescript: boolean;
+  readonly target: TargetProfile;
 }
 
 function resolveValidatorSettings(options: EmitValidatorOptions): ValidatorSettings {
@@ -73,6 +80,7 @@ function resolveValidatorSettings(options: EmitValidatorOptions): ValidatorSetti
     validateChecks: options.validateChecks ?? true,
     maxIssues: options.maxIssues,
     typescript: options.typescript ?? false,
+    target: isTargetProfile(options.target) ? options.target : resolveTargetProfile(options.target),
   };
 }
 
@@ -88,7 +96,8 @@ function createParseEmitter(
       settings.resolveDefaults,
       settings.materializeRuntimeTypes,
       settings.validateChecks,
-      settings.typescript
+      settings.typescript,
+      settings.target
     );
   if (!settings.emitSafeParse) return undefined;
   return emitDiagnosticEmitter(
@@ -101,7 +110,8 @@ function createParseEmitter(
     rootHasReadonly(schema),
     undefined,
     false,
-    settings.typescript
+    settings.typescript,
+    settings.target
   );
 }
 
@@ -122,7 +132,8 @@ function createAsyncEmitter(
     rootHasReadonly(schema),
     parseEmitter,
     true,
-    settings.typescript
+    settings.typescript,
+    settings.target
   );
 }
 
@@ -140,7 +151,8 @@ function createIsEmitter(
     settings.materializeRuntimeTypes,
     undefined,
     settings.validateChecks,
-    settings.typescript
+    settings.typescript,
+    settings.target
   );
   emitter.markRecursive(recursive);
   for (const value of sourceEmitter?.bindings().values ?? []) emitter.bind(value);
@@ -186,7 +198,8 @@ function emitParseEmitter(
   resolveDefaults: boolean,
   materializeRuntimeTypes: boolean,
   validateChecks: boolean,
-  typescript: boolean
+  typescript: boolean,
+  target: TargetProfile
 ): ValidatorEmitter {
   const emitter = new ValidatorEmitter(
     "fast",
@@ -195,7 +208,8 @@ function emitParseEmitter(
     materializeRuntimeTypes,
     undefined,
     validateChecks,
-    typescript
+    typescript,
+    target
   );
   emitter.markRecursive(recursive);
   emitter.writer.line(`function parse(value${typescript ? ": __JitValue" : ""})${typescript ? ": __JitValue" : ""} {`);
@@ -217,7 +231,8 @@ function emitDiagnosticEmitter(
   freezesOutput: boolean,
   sourceEmitter?: ValidatorEmitter,
   awaited = false,
-  typescript = false
+  typescript = false,
+  target: TargetProfile = resolveTargetProfile()
 ): ValidatorEmitter {
   const emitter = new ValidatorEmitter(
     "parse",
@@ -226,7 +241,8 @@ function emitDiagnosticEmitter(
     materializeRuntimeTypes,
     maxIssues,
     validateChecks,
-    typescript
+    typescript,
+    target
   );
   emitter.markRecursive(recursive);
   if (sourceEmitter) for (const value of sourceEmitter.bindings().values) emitter.bind(value);
@@ -268,4 +284,8 @@ function emitDiagnosticEmitter(
   });
   emitter.writer.line("}");
   return emitter;
+}
+
+function isTargetProfile(value: TargetDescriptor | TargetProfile | undefined): value is TargetProfile {
+  return value !== undefined && "weights" in value && "limits" in value;
 }

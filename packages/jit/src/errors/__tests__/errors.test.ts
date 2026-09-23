@@ -43,6 +43,9 @@ describe("JITError", () => {
       "DDD_IDENTITY_AMBIGUOUS",
       "DDD_IDENTITY_MISSING",
       "DDD_CAPABILITY_SCHEMA_CONFLICT",
+      "REGISTRY_DUPLICATE_ID",
+      "UNSATISFIABLE_SCHEMA",
+      "AOT_UNSUPPORTED_EXTENSION",
     ] as const;
 
     for (const code of codes) {
@@ -62,6 +65,9 @@ describe("JITError", () => {
       | "DDD_IDENTITY_AMBIGUOUS"
       | "DDD_IDENTITY_MISSING"
       | "DDD_CAPABILITY_SCHEMA_CONFLICT"
+      | "REGISTRY_DUPLICATE_ID"
+      | "UNSATISFIABLE_SCHEMA"
+      | "AOT_UNSUPPORTED_EXTENSION"
       | "INVALID_MAPPER"
       | "INVALID_OPERATION"
       | "ACCESS_DENIED"

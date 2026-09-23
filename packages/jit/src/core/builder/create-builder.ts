@@ -16,6 +16,7 @@ import {
   type StringSanitizeSpec,
   TypeName,
 } from "../ats/index.js";
+import { environmentForSchema, getActiveEnvironment, rememberSchemaEnvironment } from "../environment/environment.js";
 import {
   attachHint,
   attachMetadata,
@@ -25,6 +26,7 @@ import {
   type OrderDirection,
 } from "../hints/index.js";
 import type { OpChain } from "../ops.js";
+import type { Registry } from "../registry/index.js";
 import { appendCheck, appendSingletonCheck } from "./checks.js";
 import type { AnyBuilder, Builder, ObjectBuilder, StandardSchemaIssue, StandardSchemaProps } from "./types.js";
 import { type SchemaInput, unwrapSchema } from "./unwrap-schema.js";
@@ -171,7 +173,19 @@ const baseBuilderPrototype = {
   },
 
   meta(this: RuntimeBuilder, metadata: Metadata): AnyBuilder {
-    return createBuilder(attachMetadata(this.schema, metadata));
+    const environment = environmentForSchema(this.schema) ?? getActiveEnvironment();
+    const previous = (this.schema.annotations as { readonly metadata?: Metadata } | undefined)?.metadata;
+    const schema = attachMetadata(this.schema, metadata);
+    // The registry is canonical. The annotation mirror preserves the legacy
+    // chain behavior while older consumers migrate to registry lookups.
+    environment.globalRegistry.register(schema, { ...previous, ...metadata });
+    rememberSchemaEnvironment(schema, environment);
+    return createBuilder(schema);
+  },
+
+  register<TMetadata>(this: RuntimeBuilder, registry: Registry<TMetadata>, metadata: TMetadata): AnyBuilder {
+    registry.register(this.schema, metadata);
+    return this as AnyBuilder;
   },
 
   entity(this: RuntimeBuilder, options: EntityHint<unknown>): AnyBuilder {
@@ -1019,5 +1033,6 @@ export function createBuilder<TSchema extends AnyTypeSchema>(schema: TSchema): B
           : baseBuilderPrototype;
   const builder = Object.create(prototype) as RuntimeBuilder;
   builder.schema = schema;
+  rememberSchemaEnvironment(schema, environmentForSchema(schema) ?? getActiveEnvironment());
   return builder as Builder<TSchema>;
 }

@@ -1,8 +1,11 @@
 import type * as ATS from "../../core/ats/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
+import { normalizeConstraints } from "../facts/constraint-model.js";
 import { emitPropertyAccess } from "../source/access.js";
 import { emitSchemaGuard } from "../source/guard.js";
 import { emitLiteral } from "../source/literal.js";
+import { resolveArrayValidationStrategy } from "../strategy/families/array-validation.js";
+import { resolveTargetProfile } from "../target/resolve-target.js";
 import type { AnySchema, PathRef, SchemaCheckRecord, ValidatorEmitter } from "./emit-validate.js";
 import { emitArrayCheck } from "./emit-validate-array-checks.js";
 import {
@@ -33,16 +36,28 @@ export function emitArray(emitter: ValidatorEmitter, schema: AnySchema, value: s
         emitArrayCheck(emitter, check, value, path);
       }
 
-      const index = emitter.nextVar("i");
-
       if (build) emitter.writer.line(`${out} = new Array(${value}.length);`);
-      emitter.writer.line(`for (let ${index} = 0; ${index} < ${value}.length; ${index}++) {`);
-      emitter.writer.indent(() => {
-        const elementOut = emitter.emitNode(element, `${value}[${index}]`, dynamicChild(path, index));
+      const decision = build
+        ? undefined
+        : resolveArrayValidationStrategy(schema, emitter.targetProfile ?? resolveTargetProfile(), emitter.mode);
 
-        if (build) emitter.writer.line(`${out}[${index}] = ${elementOut};`);
-      });
-      emitter.writer.line("}");
+      if (decision?.strategy === "unrolled") {
+        const count = normalizeConstraints(schema).cardinality?.exact;
+        if (count !== undefined) {
+          for (let position = 0; position < count; position++) {
+            emitter.emitNode(element, `${value}[${position}]`, staticChild(path, position));
+          }
+        }
+      } else {
+        const index = emitter.nextVar("i");
+        emitter.writer.line(`for (let ${index} = 0; ${index} < ${value}.length; ${index}++) {`);
+        emitter.writer.indent(() => {
+          const elementOut = emitter.emitNode(element, `${value}[${index}]`, dynamicChild(path, index));
+
+          if (build) emitter.writer.line(`${out}[${index}] = ${elementOut};`);
+        });
+        emitter.writer.line("}");
+      }
     },
     `typeof ${value}`
   );

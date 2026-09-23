@@ -11,6 +11,7 @@ import { runLocalBinary } from "./core/process.js";
 import { checkBaseline, initializeBaseline, updateBaseline, writeBaselineReport } from "./core/ratchet.js";
 import { printConsole, writeJsonReport } from "./core/reporter.js";
 import { qualityResult } from "./core/result.js";
+import { adaptiveGate } from "./gates/adaptive.js";
 import { agentGate } from "./gates/agent.js";
 import { apiChallengeGate } from "./gates/api-challenge.js";
 import { architectureGate } from "./gates/architecture.js";
@@ -70,6 +71,12 @@ const GATES: Record<string, QualityGate> = {
     tier: "B",
     description: "declaration protocol and transport-neutral agent tools",
     run: agentGate,
+  },
+  adaptive: {
+    id: "adaptive",
+    tier: "A",
+    description: "contract-first environment, optimizer, extensions and evidence invariants",
+    run: adaptiveGate,
   },
   package: {
     id: "package",
@@ -184,6 +191,7 @@ function gatesFor(commandName: string, context: ReturnType<typeof createQualityC
                             "codegen",
                             "api",
                             "api-challenge",
+                            "adaptive",
                           ]
                         : commandName === "full" || commandName === "scan"
                           ? [
@@ -202,6 +210,7 @@ function gatesFor(commandName: string, context: ReturnType<typeof createQualityC
                               "artifact",
                               "agent",
                               "protocol",
+                              "adaptive",
                               "package",
                               "mutation",
                             ]
@@ -214,6 +223,7 @@ function gatesFor(commandName: string, context: ReturnType<typeof createQualityC
 function relevantBlockGates(context: ReturnType<typeof createQualityContext>): string[] {
   const files = context.files;
   const names = new Set(["integrity", "architecture", "structure", "comments", "public-api", "tests"]);
+  names.add("adaptive");
   if (files.some((file) => file.startsWith("packages/jit/src/compiler/") || file.startsWith("packages/jit/src/aot/")))
     names.add("codegen");
   if (files.some((file) => file.startsWith("packages/jit/src/aot/"))) names.add("artifact");

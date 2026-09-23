@@ -1,3 +1,5 @@
+import { executableSchema } from "../../core/hints/metadata.js";
+
 /**
  * Compiled-function cache shared by every `compileX` entry point.
  *
@@ -9,14 +11,17 @@
  *   their bindings on every compile — each compile gets its own closure
  *   while AST lowering, optimization, emission, and parsing are skipped.
  *
- * Entries live in a `WeakMap` keyed by schema object identity: rebuilt
- * schemas never collide, and dropping a schema releases its entry. Hints
- * live on the schema wrapper chain, so identity also captures hint changes.
+ * Entries live in a `WeakMap` keyed by executable schema identity: rebuilt
+ * schemas never collide, descriptive metadata wrappers reuse their semantic
+ * entry, and dropping a schema releases its entry. Hints live on the schema
+ * wrapper chain, so identity still captures hint changes.
  */
 
 export interface CompileCacheOptions {
   /** Set to `false` to bypass the compiled-function cache for this call. */
   readonly cache?: boolean;
+  /** Semantic compiler context digest; presentation settings must not use this. */
+  readonly compilerDigest?: string;
 }
 
 let cacheStore = new WeakMap<object, Map<string, unknown>>();
@@ -30,18 +35,21 @@ export function getCompileCached<TValue>(
 ): TValue {
   if (options?.cache === false) return build();
 
-  let entry = cacheStore.get(schema);
+  const cacheKey = options?.compilerDigest === undefined ? key : `${options.compilerDigest}:${key}`;
+  const cacheSchema = executableSchema(schema);
+
+  let entry = cacheStore.get(cacheSchema);
 
   if (!entry) {
     entry = new Map();
-    cacheStore.set(schema, entry);
+    cacheStore.set(cacheSchema, entry);
   }
 
-  if (entry.has(key)) return entry.get(key) as TValue;
+  if (entry.has(cacheKey)) return entry.get(cacheKey) as TValue;
 
   const built = build();
 
-  entry.set(key, built);
+  entry.set(cacheKey, built);
   return built;
 }
 

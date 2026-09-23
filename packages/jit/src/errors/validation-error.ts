@@ -5,17 +5,36 @@ import { JITError } from "./jit-error.js";
  * schema expected. Designed to be consumed directly (logs, HTTP responses,
  * form field mapping) without any translation layer.
  */
-export interface ValidationIssue {
+export interface IssueDescriptor {
+  /** Stable machine-readable issue identity. */
+  readonly code: string;
+  /** Structured path from the root; `[]` is the root. */
+  readonly path: readonly PropertyKey[];
+  /** Human-readable description of the accepted shape, when available. */
+  readonly expected?: string;
+  /** `typeof` of the rejected value on type mismatches, when available. */
+  readonly received?: string;
+  /** Machine-readable values used by locale formatters. */
+  readonly params?: Readonly<Record<string, unknown>>;
+  /** Current presentation message, retained for compatibility/fallback. */
+  readonly message?: string;
+}
+
+/**
+ * One validation failure emitted by a compiled diagnostic operation.
+ *
+ * `code`, `path` and `params` are the stable contract. `message` is a
+ * presentation chosen by the compiler and may be replaced by `JIT.error`.
+ */
+export interface ValidationIssue extends IssueDescriptor {
   /** Structured path from the root, e.g. `["items", 2, "name"]`; `[]` is the root. */
   readonly path: readonly PropertyKey[];
   /** Stable machine-readable code, e.g. `"expected_string"`, `"too_small"`. */
-  readonly code: string;
   /** Human-readable description of the accepted shape, e.g. `"length >= 3"`. */
   readonly expected: string;
   /** Human-readable message for the failure. */
   readonly message: string;
   /** `typeof` of the rejected value on type mismatches. */
-  readonly received?: string;
   /**
    * Machine-readable detail beside the code, for the checks that have one.
    *
@@ -24,7 +43,6 @@ export interface ValidationIssue {
    * rather than carrying an empty object, and no issue ever holds the rejected
    * value: that is how a diagnostic ends up in a log with data in it.
    */
-  readonly params?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -39,9 +57,13 @@ export class JITValidationError extends JITError {
 
     const path = first === undefined ? "" : formatIssuePath(first.path);
 
-    super("VALIDATION_FAILED", first ? `${path === "" ? "" : `${path}: `}${first.message}` : "validation failed", {
-      meta: issues,
-    });
+    super(
+      "VALIDATION_FAILED",
+      first ? `${path === "" ? "" : `${path}: `}${first.message ?? first.code}` : "validation failed",
+      {
+        meta: issues,
+      }
+    );
     this.name = "JITValidationError";
     this.issues = issues;
   }

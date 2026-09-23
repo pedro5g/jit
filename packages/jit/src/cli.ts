@@ -4,7 +4,7 @@
  *
  * Usage:
  *   jit init [--force] [--out <dir>] [--format ts|js] [--entries <path-or-glob>]
- *   jit generate [files...] [--out <dir>] [--format ts|js] [--emit-manifest] [--json] [--watch] [--pattern <glob>]
+ *   jit generate [files...] [--out <dir>] [--format ts|js] [--target <profile>] [--emit-manifest] [--json] [--watch] [--pattern <glob>]
  *   jit doctor [files...] [--pattern <glob>]
  *   jit list [files...] [--pattern <glob>]
  *   jit inspect <export> [files...] [--stage source|plan]
@@ -29,6 +29,7 @@ import {
 } from "./aot/discover.js";
 import { type AotOutputFormat, generate } from "./aot/generate.js";
 import type { NamingProfile } from "./aot/semantic-name.js";
+import type { TargetDescriptor } from "./compiler/target/target-profile.js";
 import { getArtifact } from "./runtime/artifact-registry.js";
 
 /** Generated output lands beside the config file, so no `src/` tree is assumed. */
@@ -53,6 +54,7 @@ interface GenerateArguments {
   readonly portableErrors: boolean | undefined;
   readonly manifestPath: string | undefined;
   readonly receiptPath: string | undefined;
+  readonly target: TargetDescriptor | undefined;
   readonly json: boolean;
 }
 
@@ -79,7 +81,7 @@ export interface InitArguments {
 
 const USAGE = `Usage:
   jit init [--force] [--out <dir>] [--format ts|js] [--entries <path-or-glob>]
-  jit generate [files...] [--out <dir>] [--format ts|js] [--per-file] [--emit-manifest] [--ownership managed|detached] [--naming compact|semantic] [--json] [--watch] [--pattern <glob>]
+  jit generate [files...] [--out <dir>] [--format ts|js] [--target <profile>] [--per-file] [--emit-manifest] [--ownership managed|detached] [--naming compact|semantic] [--json] [--watch] [--pattern <glob>]
   jit doctor [files...] [--pattern <glob>]
   jit list [files...] [--pattern <glob>]
   jit inspect <export> [files...] [--stage source|plan]
@@ -170,6 +172,7 @@ async function runGenerate(
       ...declarations,
       outDir: resolvedOut,
       format: resolved.format,
+      ...(resolved.target === undefined ? {} : { target: resolved.target }),
       perFile: resolved.perFile === true,
       emitManifest: resolved.emitManifest,
       ownership: resolved.ownership,
@@ -344,7 +347,12 @@ async function runInspect(
     const tempDir = mkdtempSync(join(tmpdir(), "jit-inspect-"));
 
     try {
-      generate({ ...declarations, outDir: tempDir, format: resolved.format });
+      generate({
+        ...declarations,
+        outDir: tempDir,
+        format: resolved.format,
+        ...(resolved.target === undefined ? {} : { target: resolved.target }),
+      });
       stdout(readFileSync(join(tempDir, `index.${resolved.format}`), "utf8"));
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -368,6 +376,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
   let files = [...parsed.files];
   let outDir = parsed.outDir;
   let patterns = parsed.patterns;
+  let target = parsed.target;
   let format = parsed.format;
   let perFile = parsed.perFile;
   let emitManifest = parsed.emitManifest;
@@ -388,6 +397,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
 
       configDir = dirname(configFile);
       patterns = patterns ?? config.patterns;
+      target = target ?? config.target;
       files = expandSchemaEntries(config.entries, configDir, patterns);
       outDir = outDir ?? (config.output?.directory ? resolve(configDir, config.output.directory) : undefined);
       format = format ?? config.output?.format;
@@ -408,6 +418,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
     files,
     outDir,
     patterns,
+    target,
     perFile,
     emitManifest: emitManifest ?? false,
     ownership: ownership ?? "managed",
@@ -450,6 +461,7 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
   let outDir: string | undefined;
   let watchMode = false;
   let patterns: string[] | undefined;
+  let target: TargetDescriptor | undefined;
   let format: AotOutputFormat | undefined;
   let perFile: boolean | undefined;
   let emitManifest: boolean | undefined;
@@ -527,6 +539,11 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
       continue;
     }
 
+    if (argument === "--target") {
+      target = { profile: readValue(rest, ++index, "--target") };
+      continue;
+    }
+
     if (!argument.startsWith("--")) files.push(resolve(cwd, argument));
   }
 
@@ -543,6 +560,7 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
     portableErrors,
     manifestPath,
     receiptPath,
+    target,
     json,
   };
 }

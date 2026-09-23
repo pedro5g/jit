@@ -58,6 +58,7 @@ const BASE_OPERATIONS = new Set([
   "coerce",
   "apply",
   "meta",
+  "register",
   "entity",
   "keyed",
   "groupBy",

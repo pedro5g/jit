@@ -1,3 +1,4 @@
+import { compileValidator } from "../../../compiler/validate.js";
 import { AST, JIT } from "../../../index.js";
 import { mergeHints } from "../hint-merge.js";
 import { resolveHints } from "../hint-resolver.js";
@@ -92,5 +93,12 @@ describe("core hints", () => {
       expect(hints.index?.key).toBe("name");
       expect(hints.collection?.identify).toBe("name");
     });
+  });
+
+  it("keeps descriptive metadata on the executable cache identity", () => {
+    const schema = JIT.string();
+    const documented = schema.meta({ id: "DocumentedString", description: "A string" });
+
+    expect(compileValidator(schema.schema).is).toBe(compileValidator(documented.schema).is);
   });
 });

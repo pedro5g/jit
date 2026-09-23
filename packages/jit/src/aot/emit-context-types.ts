@@ -1,3 +1,4 @@
+import type { TargetProfile } from "../compiler/target/target-profile.js";
 import type { CompiledArtifact } from "../runtime/artifact-registry.js";
 import type { SkippedOperation } from "./generate.js";
 
@@ -41,6 +42,8 @@ export interface ArtifactEmissionContext<TFlag extends string = string> {
 /** Complete context shared by the top-level AOT artifact emitters. */
 export interface ArtifactEmitterBaseContext extends ArtifactEmissionContext<ArtifactEmitterFlag> {
   readonly ts: boolean;
+  /** Target selected by the AOT request; emitters must not inspect the build runtime. */
+  readonly target: TargetProfile;
   readonly classBindings: ReadonlyMap<unknown, string>;
   readonly classArtifacts: ReadonlyMap<unknown, Extract<CompiledArtifact, { readonly kind: "class" }>>;
   readonly assertionBindings: ReadonlyMap<unknown, string>;

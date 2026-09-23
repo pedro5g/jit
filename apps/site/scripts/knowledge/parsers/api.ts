@@ -264,7 +264,7 @@ interface DocumentedMember {
 function documentedMembers(source: string): DocumentedMember[] {
   const members: DocumentedMember[] = [];
   const seen = new Set<string>();
-  const pattern = /`JIT\.([A-Za-z0-9_]+)`\s*\|\s*\[[^\]]+\]\(\.\/([^)]+)\)(?:\s*\|\s*(?!\s*`JIT\.)([^|\n]+))?/g;
+  const pattern = /`JIT\.([A-Za-z0-9_$]+)`\s*\|\s*\[[^\]]+\]\(\.\/([^)]+)\)(?:\s*\|\s*(?!\s*`JIT\.)([^|\n]+))?/g;
 
   for (const match of source.matchAll(pattern)) {
     const [, name, target, purpose] = match;

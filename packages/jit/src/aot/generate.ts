@@ -2,8 +2,12 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { MOCK_HELPERS } from "../compiler/mock.js";
 import { JSON_PATCH_HELPERS, PATCH_EQUAL_HELPER } from "../compiler/patch.js";
+import { resolvePhysicalPlan, resolveValidationPhysicalPlan } from "../compiler/physical/physical-plan.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { resolveLazySchema, schemaChildren } from "../compiler/schema-recursion.js";
+import { portableProfile } from "../compiler/target/portable-profile.js";
+import { resolveTargetProfile } from "../compiler/target/resolve-target.js";
+import type { TargetDescriptor, TargetProfile } from "../compiler/target/target-profile.js";
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
@@ -18,6 +22,9 @@ import {
   createCompilationReceipt,
   hashArtifactFile,
   inspectArtifactStatus,
+  type ManifestPhysicalPlan,
+  sha256,
+  stableJson,
 } from "./artifact-manifest.js";
 import {
   type ArtifactProgram,
@@ -56,6 +63,8 @@ const CALL_HELPER =
 
 /** Describes the JIT generate options contract used by the public API. */
 export interface GenerateOptions {
+  /** Explicit target profile used for physical-plan reproducibility metadata. */
+  readonly target?: TargetDescriptor;
   /** Declaration name -> compiled artifact, emitted as one exported function. */
   readonly artifacts?: Readonly<Record<string, unknown>>;
   /** Declaration name -> object of artifacts, emitted as one frozen object. */
@@ -168,6 +177,10 @@ interface ClassArtifactIndex {
  */
 export function generate(options: GenerateOptions): GenerateResult {
   const layout = resolveOutputLayout(assertOutputFormat(options.format ?? "js"));
+  // AOT has no ambient engine contract. Without an explicit deployment target
+  // use the portable profile so the build machine cannot silently determine
+  // generated source.
+  const target = options.target === undefined ? portableProfile : resolveTargetProfile(options.target);
   const naming = options.naming ?? "compact";
   const skipped: SkippedOperation[] = [];
   const modules: EmittedModule[] = [];
@@ -188,7 +201,7 @@ export function generate(options: GenerateOptions): GenerateResult {
   }
 
   for (const plan of plans) {
-    const emitted = emitModule(plan, options, layout, classIndex);
+    const emitted = emitModule(plan, options, layout, classIndex, target);
 
     skipped.push(...emitted.skipped);
     if (emitted.exports.length > 0 || emitted.types.length > 0) modules.push(emitted);
@@ -245,6 +258,9 @@ export function generate(options: GenerateOptions): GenerateResult {
     ownership: options.ownership ?? "managed",
     format: layout.format,
     naming,
+    ...(options.target === undefined ? {} : { target }),
+    ...(options.target === undefined ? {} : { physicalPlanDigest: physicalPlanDigest(options, target) }),
+    ...(options.target === undefined ? {} : { physicalPlans: physicalPlans(options, target) }),
   });
   const receipt = createCompilationReceipt(manifest, JIT_COMPILER_VERSION, [
     { name: "artifact-program", status: "passed" },
@@ -255,6 +271,69 @@ export function generate(options: GenerateOptions): GenerateResult {
   const receiptFile = writeMetadata(options.outDir, options.receiptPath ?? "jit.receipt.json", receipt);
 
   return { files: [...files, manifestFile, receiptFile], skipped, program, manifest, receipt };
+}
+
+function physicalPlanDigest(options: GenerateOptions, target: ReturnType<typeof resolveTargetProfile>): string {
+  const plans = physicalPlans(options, target).map(({ symbol, digest }) => ({ name: symbol, digest }));
+  return sha256(stableJson({ target: target.digest, plans }));
+}
+
+function physicalPlans(
+  options: GenerateOptions,
+  target: ReturnType<typeof resolveTargetProfile>
+): readonly ManifestPhysicalPlan[] {
+  const plans: ManifestPhysicalPlan[] = [];
+  for (const [name, value] of Object.entries(options.artifacts ?? {})) {
+    const plan = physicalPlanForArtifact(name, value, target);
+    if (plan !== undefined) plans.push(plan);
+  }
+  for (const [groupName, group] of Object.entries(options.groups ?? {})) {
+    for (const [name, value] of Object.entries(group)) {
+      const plan = physicalPlanForArtifact(`${groupName}.${name}`, value, target);
+      if (plan !== undefined) plans.push(plan);
+    }
+  }
+  return Object.freeze(plans.sort((left, right) => left.symbol.localeCompare(right.symbol)));
+}
+
+function physicalPlanForArtifact(
+  symbol: string,
+  value: unknown,
+  target: ReturnType<typeof resolveTargetProfile>
+): ManifestPhysicalPlan | undefined {
+  const artifact = getArtifact(value);
+  const physical =
+    artifact?.kind === "execution"
+      ? resolvePhysicalPlan(artifact.plan, target)
+      : artifact?.kind === "validator"
+        ? resolveValidationPhysicalPlan(artifact.schema, artifact.op, target)
+        : undefined;
+  if (physical === undefined) return undefined;
+  return {
+    symbol,
+    target: physical.target.id,
+    digest: physical.digest,
+    capabilities: physical.capabilities.map((capability) => ({
+      kind: capability.kind,
+      ...(capability.key === undefined ? {} : { key: capability.key }),
+      sourceStage: capability.sourceStage,
+      reusable: capability.reusable,
+    })),
+    decisions: physical.decisions.map((decision) => ({
+      family: decision.family,
+      strategy: decision.strategy,
+      reason: decision.reason,
+      evidence: decision.evidence,
+      estimated: {
+        runtime: decision.estimated.runtime,
+        allocation: decision.estimated.allocation,
+        setup: decision.estimated.setup,
+        codeSize: decision.estimated.codeSize,
+        ...(decision.estimated.cold === undefined ? {} : { cold: decision.estimated.cold }),
+        ...(decision.estimated.branches === undefined ? {} : { branches: decision.estimated.branches }),
+      },
+    })),
+  };
 }
 
 /** One module per declaration file, or a single `index` holding everything. */
@@ -381,7 +460,8 @@ function emitModule(
   plan: ModulePlan,
   options: GenerateOptions,
   layout: OutputLayout,
-  classIndex: ClassArtifactIndex
+  classIndex: ClassArtifactIndex,
+  target: TargetProfile
 ): EmittedModule {
   const ts = layout.format === "ts";
   const skipped: SkippedOperation[] = [];
@@ -589,6 +669,7 @@ function emitModule(
     js,
     skipped,
     ts,
+    target,
     artifactTypeContext,
     classArtifactContext,
     classBindings,

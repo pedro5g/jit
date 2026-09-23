@@ -56,6 +56,7 @@ import type {
 } from "../ats/index.js";
 import type { EntityHint, HashStrategy, Metadata, OrderDirection, PropertySelector } from "../hints/index.js";
 import type { OpChain } from "../ops.js";
+import type { Registry } from "../registry/index.js";
 import type { HasStringCheck, SchemaInput } from "./check-state.js";
 
 /** Describes the JIT standard schema issue contract used by the public API. */
@@ -545,6 +546,8 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
    * outputs.
    */
   meta(metadata: Metadata): Builder<TSchema>;
+  /** Registers descriptive metadata in a caller-owned typed registry. */
+  register<TMetadata>(registry: Registry<TMetadata>, metadata: TMetadata): Builder<TSchema>;
   /** Marks the schema's element as an entity for collection planning. */
   entity(options: EntityHint<HintTarget<TypeofSchema<TSchema>>>): Builder<TSchema>;
   /** Declares one unique identity field and enables keyed collection planning. */

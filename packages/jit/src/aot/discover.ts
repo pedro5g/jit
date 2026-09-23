@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { TargetDescriptor } from "../compiler/target/target-profile.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
 import type { ArtifactOwnership } from "./artifact-manifest.js";
@@ -12,6 +13,8 @@ export { classifyDeclarations, isSchemaInput } from "./classify.js";
 
 /** `jit.config.*` shape — declaration discovery plus one generation target. */
 export interface JitConfig {
+  /** Explicit target profile used for deterministic physical planning. */
+  readonly target?: TargetDescriptor;
   /**
    * Declaration files, directories, or glob patterns loaded by the AOT build.
    * When omitted, discovery starts at the project root using `patterns`.

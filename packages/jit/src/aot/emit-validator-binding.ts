@@ -1,3 +1,4 @@
+import type { TargetProfile } from "../compiler/target/target-profile.js";
 import { emitValidator } from "../compiler/validate/emit-validator-entry.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SkippedOperation } from "./generate.js";
@@ -16,6 +17,7 @@ export interface ValidatorBindingSelection {
 export interface ValidatorBindingEmitterContext {
   readonly js: string[];
   readonly ts: boolean;
+  readonly target: TargetProfile;
   readonly skipped: SkippedOperation[];
   readonly classBindings: ReadonlyMap<unknown, string>;
   readonly assertionBindings: ReadonlyMap<unknown, string>;
@@ -62,6 +64,7 @@ function emitValidatorBinding(
       ...(selection.maxIssues === undefined ? {} : { maxIssues: selection.maxIssues }),
       ...(selection.validateChecks === undefined ? {} : { validateChecks: selection.validateChecks }),
       typescript: selection.typescript ?? context.ts,
+      target: context.target,
     })
   );
   if (!validator) return undefined;

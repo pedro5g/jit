@@ -1,30 +1,10 @@
 import type * as ATS from "../core/ats/index.js";
-import { TypeName } from "../core/ats/index.js";
 import type { ExecutionPlan, ExecutionStage } from "./execution-plan.js";
-import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
+import { deriveSchemaFacts, type SemanticFact, type SemanticFactKind } from "./facts/schema-facts.js";
 import { canUseFastParse } from "./validate/emit-validate-support.js";
 
 /** Describes the JIT semantic fact kind contract used by the public API. */
-export type SemanticFactKind =
-  | "IsString"
-  | "IsNumber"
-  | "IsInteger"
-  | "IsBoolean"
-  | "IsObject"
-  | "NonNull"
-  | "KnownShape"
-  | "KnownField"
-  | "Validated"
-  | "Sanitized"
-  | "Range";
-
-/** Compile-time proof attached to an execution-stage boundary. */
-export interface SemanticFact {
-  readonly kind: SemanticFactKind;
-  readonly path: readonly string[];
-  readonly minimum?: number;
-  readonly maximum?: number;
-}
+export type { SemanticFact, SemanticFactKind } from "./facts/schema-facts.js";
 
 /** Effects used by optimizer barriers; these never survive backend lowering. */
 export interface SemanticEffects {
@@ -176,54 +156,7 @@ function inferredFacts(stage: ExecutionStage): readonly SemanticFact[] {
 }
 
 function schemaFacts(schema: ATS.AnyTypeSchema, path: readonly string[] = []): SemanticFact[] {
-  const base = resolveWrappers(schema).base;
-  const facts: SemanticFact[] = [];
-
-  switch (base.type) {
-    case TypeName.string:
-      facts.push(fact("IsString", path));
-      break;
-    case TypeName.number:
-      facts.push(fact("IsNumber", path));
-      break;
-    case TypeName.int:
-      facts.push(fact("IsNumber", path), fact("IsInteger", path));
-      break;
-    case TypeName.boolean:
-      facts.push(fact("IsBoolean", path));
-      break;
-    case TypeName.object: {
-      facts.push(fact("IsObject", path), fact("NonNull", path), fact("KnownShape", path));
-      const props = (base as ATS.ObjectSchema).def.props;
-
-      for (const key of Object.keys(props)) facts.push(fact("KnownField", [...path, key]));
-      break;
-    }
-  }
-
-  const checks = (base.def as { readonly checks?: readonly { readonly kind: string; readonly value?: unknown }[] })
-    .checks;
-  const minimum = numericCheck(checks, ["min", "gte", "moreThan", "gt"]);
-  const maximum = numericCheck(checks, ["max", "lte", "lessThan", "lt"]);
-  if (minimum !== undefined || maximum !== undefined) {
-    facts.push(
-      Object.freeze({
-        kind: "Range",
-        path: Object.freeze([...path]),
-        ...(minimum === undefined ? {} : { minimum }),
-        ...(maximum === undefined ? {} : { maximum }),
-      })
-    );
-  }
-  return facts;
-}
-
-function numericCheck(
-  checks: readonly { readonly kind: string; readonly value?: unknown }[] | undefined,
-  kinds: readonly string[]
-): number | undefined {
-  const value = checks?.find((check) => kinds.includes(check.kind))?.value;
-  return typeof value === "number" ? value : undefined;
+  return deriveSchemaFacts(schema, path);
 }
 
 function fact(kind: SemanticFactKind, path: readonly string[] = []): SemanticFact {
@@ -245,5 +178,14 @@ function mergeFacts(current: readonly SemanticFact[], next: readonly SemanticFac
 }
 
 function factKey(value: SemanticFact): string {
-  return `${value.kind}:${value.path.join(".")}:${value.minimum ?? ""}:${value.maximum ?? ""}`;
+  return JSON.stringify([
+    value.kind,
+    value.path,
+    value.minimum,
+    value.maximum,
+    value.exact,
+    value.values,
+    value.value,
+    value.elementType,
+  ]);
 }

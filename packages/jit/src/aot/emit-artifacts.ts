@@ -41,6 +41,7 @@ function createValidatorBinding(context: ArtifactEmitterContext) {
   return createValidatorBindingEmitter({
     js: context.js,
     ts: context.ts,
+    target: context.target,
     skipped: context.skipped,
     classBindings: context.classBindings,
     assertionBindings: context.assertionBindings,
@@ -120,6 +121,7 @@ function createExecutionEmitters(
   return createExecutionArtifactEmitter({
     js: context.js,
     ts: context.ts,
+    target: context.target,
     skipped: context.skipped,
     classBindings: context.classBindings,
     classArtifacts: context.classArtifacts,

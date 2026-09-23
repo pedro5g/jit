@@ -11,9 +11,15 @@ export type Wire<TSchemaLike> = import("./core/ats/representations.js").Wire<TSc
 export type Update<TSchemaLike> = import("./core/ats/input.js").Update<TSchemaLike>;
 export type { Strict } from "./core/builder/types.js";
 export type {
+  JITEnvironment,
+  RuntimeConfig,
+  RuntimeConfigInput,
+} from "./core/environment/index.js";
+export type {
   CompilationOptions,
   CompilationRequest,
   CompilerHost,
   OperationDescriptor,
+  OperationDescriptorMap,
 } from "./core/host.js";
 export * as JIT from "./factories/index.js";

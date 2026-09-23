@@ -59,10 +59,22 @@ import type { QueryConditionNode } from "./core/ast/index.js";
 import type * as ATS from "./core/ats/index.js";
 import type { SchemaInput } from "./core/builder/index.js";
 import { unwrapSchema } from "./core/builder/index.js";
+import type { RuntimeConfigInput } from "./core/environment/config.js";
+import { configureDefaultEnvironment } from "./core/environment/environment.js";
+import type { ExtendedNamespace } from "./core/environment/facade.js";
+import { rootError } from "./core/environment/facade.js";
+import {
+  createEnvironment,
+  createEnvironmentFacade,
+  extendEnvironment,
+  getDefaultEnvironment,
+  type JITEnvironment,
+} from "./core/environment/index.js";
 import { AOT_ARTIFACT, type ArtifactDescriptor } from "./core/host.js";
 import { defineClass, defineDdd } from "./define-class.js";
 import { type DefineFunction, executionStub, mapStage, operationStub, stage } from "./define-execution.js";
 import { JITError } from "./errors/index.js";
+import type { ExtensionDescriptor } from "./extensions/plugin.js";
 import type { Ability, AccessBuilder, AccessPlan } from "./factories/access.js";
 import {
   type CollectionMutation,
@@ -1501,6 +1513,38 @@ export const JIT = {
     readonly sanitize: typeof sanitize;
   };
 };
+
+function configureDefineEnvironment(input: RuntimeConfigInput): JITEnvironment {
+  return configureDefaultEnvironment(input);
+}
+
+function createDefineEnvironment(input: RuntimeConfigInput = {}): typeof JIT {
+  const environment = getDefaultEnvironment();
+  return createEnvironmentFacade(
+    JIT,
+    createEnvironment(input, environment.extensions, environment.config)
+  ) as typeof JIT;
+}
+
+function extendDefineEnvironment<TPlugin extends ExtensionDescriptor>(
+  extension: TPlugin
+): ExtendedNamespace<typeof JIT, TPlugin> {
+  return createEnvironmentFacade(
+    JIT,
+    extendEnvironment(getDefaultEnvironment(), extension)
+  ) as unknown as ExtendedNamespace<typeof JIT, TPlugin>;
+}
+
+Object.defineProperties(JIT, {
+  config: { enumerable: true, value: configureDefineEnvironment },
+  create: { enumerable: true, value: createDefineEnvironment },
+  error: { enumerable: true, value: rootError },
+  globalRegistry: {
+    enumerable: true,
+    get: () => getDefaultEnvironment().globalRegistry,
+  },
+  $extends: { enumerable: true, value: extendDefineEnvironment },
+});
 
 /** Describes the JIT namespace contract used by the public API. */
 export namespace JIT {

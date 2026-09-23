@@ -13,6 +13,7 @@ export function createArtifactToolCore(): AgentToolCore {
     statusContract(),
     findContract(),
     describeContract(),
+    explainContract(),
     dependenciesContract(),
     sourceReadContract(),
     materializeContract(),
@@ -71,6 +72,20 @@ function dependenciesContract(): ToolContract {
       symbol: { type: "string", minLength: 1, description: "Symbol name or symbol id." },
     }),
     execute: async (input, context) => dependenciesTool(input, context.root),
+  };
+}
+
+function explainContract(): ToolContract {
+  return {
+    name: "jit_artifact_explain",
+    description: "Explain target-aware physical decisions for a generated symbol without reading source.",
+    mode: "read",
+    outputSchema: TOOL_RESULT_SCHEMA,
+    inputSchema: objectSchema({
+      ...artifactPathProperties(),
+      symbol: { type: "string", minLength: 1, description: "Symbol name or symbol id." },
+    }),
+    execute: async (input, context) => explainTool(input, context.root),
   };
 }
 
@@ -182,6 +197,28 @@ async function dependenciesTool(input: JsonValue, root: string): Promise<ToolPay
   return {
     text: `${symbol.name}: ${symbol.dependencies.length} dependency(ies), ${consumers.length} consumer(s)`,
     data: { status: result.status, symbol: symbol.id, dependencies: symbol.dependencies, consumers },
+  };
+}
+
+async function explainTool(input: JsonValue, root: string): Promise<ToolPayload> {
+  const result = inspect(input, root);
+  if (result.status !== "clean") return untrusted(result);
+  const symbolName = readString(inputRecord(input), "symbol");
+  const symbol = result.manifest?.symbols.find(
+    (candidate) => candidate.name === symbolName || candidate.id === symbolName || candidate.exportName === symbolName
+  );
+  const physical = result.manifest?.physicalPlans?.find(
+    (candidate) => candidate.symbol === symbol?.name || candidate.symbol === symbol?.id
+  );
+  if (!symbol || !physical) {
+    return {
+      text: `No physical plan was recorded for ${JSON.stringify(symbolName)}.`,
+      data: { status: result.status, symbol: symbol?.id ?? null, physical: null },
+    };
+  }
+  return {
+    text: `${symbol.name}: ${physical.target} selected ${physical.decisions.length} physical decision(s)`,
+    data: { status: result.status, symbol: symbol.id, physical: toJsonValue(physical) },
   };
 }
 

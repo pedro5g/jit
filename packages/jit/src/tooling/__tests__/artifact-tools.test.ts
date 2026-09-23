@@ -4,19 +4,24 @@ import { join } from "node:path";
 import { AOT, JIT } from "../../index.js";
 import { createArtifactToolCore } from "../artifact-tools.js";
 
-describe("AgentToolCore artifact tools", () => {
+function createArtifactRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "jit-agent-tools-"));
+  const User = JIT.object({ id: JIT.number() });
+  AOT.generate({
+    artifacts: { isUser: JIT.validate.is(User) },
+    schemas: { User },
+    outDir: join(root, "generated"),
+    format: "ts",
+    emitManifest: true,
+  });
+  return root;
+}
+
+describe("AgentToolCore artifact lookup tools", () => {
   let root: string;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "jit-agent-tools-"));
-    const User = JIT.object({ id: JIT.number() });
-    AOT.generate({
-      artifacts: { isUser: JIT.validate.is(User) },
-      schemas: { User },
-      outDir: join(root, "generated"),
-      format: "ts",
-      emitManifest: true,
-    });
+    root = createArtifactRoot();
   });
 
   afterEach(() => {
@@ -48,6 +53,43 @@ describe("AgentToolCore artifact tools", () => {
 
     expect(result.data).toMatchObject({ status: "modified", files: ["index.ts"] });
     expect(result.text).toContain("not authoritative");
+  });
+});
+
+describe("AgentToolCore artifact materialization tools", () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = createArtifactRoot();
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("explains physical choices only when the manifest was built with a target", async () => {
+    const Values = JIT.array(JIT.string()).length(5);
+    AOT.generate({
+      artifacts: { isValues: JIT.validate.is(Values) },
+      outDir: join(root, "adaptive"),
+      format: "ts",
+      target: { profile: "v8-99" },
+      emitManifest: true,
+    });
+
+    const explained = await createArtifactToolCore().execute(
+      "jit_artifact_explain",
+      { outDir: "adaptive", symbol: "isValues" },
+      { root }
+    );
+
+    expect(explained.data).toMatchObject({
+      status: "clean",
+      physical: {
+        target: "v8-99",
+        decisions: [expect.objectContaining({ family: "array.validate", strategy: "unrolled" })],
+      },
+    });
   });
 
   it("materializes a clean tree and keeps the second write unchanged", async () => {

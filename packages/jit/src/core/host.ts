@@ -5,64 +5,62 @@ export type AnyCompiledFunction = (...args: never[]) => unknown;
 
 /** Describes the JIT compilation target contract used by the public API. */
 export type CompilationTarget = "runtime" | "aot";
-/** Describes the JIT optimization level contract used by the public API. */
-export type OptimizationLevel = "none" | "standard" | "aggressive";
-
-/** Describes the JIT performance hints contract used by the public API. */
-export interface PerformanceHints {
-  readonly shapes?: boolean;
-  readonly strings?: boolean;
-  readonly allocation?: "auto" | "low" | "throughput";
-  readonly strategies?: "auto" | "simple" | "specialized";
-}
-
 /** Provides the JIT compilation options operation for the supplied input. */
 export interface CompilationOptions {
   readonly target?: CompilationTarget;
   readonly mode?: "development" | "production";
-  readonly optimization?: OptimizationLevel;
-  readonly performance?: PerformanceHints;
   readonly diagnostics?: boolean;
   readonly sourceMap?: boolean;
 }
 
 /** Provides the JIT operation descriptor operation for the supplied input. */
-export type OperationDescriptor =
-  | { readonly kind: "validate"; readonly op: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" }
-  | {
-      readonly kind: "operation";
-      readonly op:
-        | "equal"
-        | "clone"
-        | "diff"
-        | "hash"
-        | "stringify"
-        | "fromJSON"
-        | "format"
-        | "sort"
-        | "index"
-        | "lookup"
-        | "reconcile"
-        | "project"
-        | "changed"
-        | "patch"
-        | "state.collection"
-        | "cacheKey"
-        | "canonical"
-        | "access"
-        | "rules"
-        | "match"
-        | "migrate"
-        | "csv"
-        | "ndjson";
-    }
-  | { readonly kind: "query"; readonly params?: readonly string[] }
-  | { readonly kind: "transform" };
+/** Built-in operation families. Environments may supply a narrower map. */
+export interface OperationDescriptorMap {
+  readonly validate: {
+    readonly kind: "validate";
+    readonly op: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync";
+  };
+  readonly operation: {
+    readonly kind: "operation";
+    readonly op:
+      | "equal"
+      | "clone"
+      | "diff"
+      | "hash"
+      | "stringify"
+      | "fromJSON"
+      | "format"
+      | "sort"
+      | "index"
+      | "lookup"
+      | "reconcile"
+      | "project"
+      | "changed"
+      | "patch"
+      | "state.collection"
+      | "cacheKey"
+      | "canonical"
+      | "access"
+      | "rules"
+      | "match"
+      | "migrate"
+      | "csv"
+      | "ndjson";
+  };
+  readonly query: { readonly kind: "query"; readonly params?: readonly string[] };
+  readonly transform: { readonly kind: "transform" };
+}
+
+/** Extensible operation descriptor union derived from an environment map. */
+export type OperationDescriptor<TMap extends OperationDescriptorMap = OperationDescriptorMap> = TMap[keyof TMap];
 
 /** Provides the JIT compilation request operation for the supplied input. */
-export interface CompilationRequest<TFunction extends AnyCompiledFunction = AnyCompiledFunction> {
+export interface CompilationRequest<
+  TFunction extends AnyCompiledFunction = AnyCompiledFunction,
+  TMap extends OperationDescriptorMap = OperationDescriptorMap,
+> {
   readonly schema: ATS.AnyTypeSchema;
-  readonly operation: OperationDescriptor;
+  readonly operation: OperationDescriptor<TMap>;
   readonly options?: CompilationOptions;
   readonly expectedFunction?: TFunction;
 }
@@ -97,7 +95,28 @@ export interface HelperReference {
 
 /** Describes the JIT performance plan contract used by the public API. */
 export interface PerformancePlan {
-  readonly steps: readonly string[];
+  /** Stable target profile used for physical strategy selection. */
+  readonly target?: {
+    readonly profile: string;
+    readonly digest: string;
+  };
+  /** Reviewable physical decisions; semantic stages remain in the execution plan. */
+  readonly decisions?: readonly {
+    readonly family: string;
+    readonly strategy: string;
+    readonly reason: readonly string[];
+    readonly evidence: readonly string[];
+    readonly estimated?: {
+      readonly runtime: number;
+      readonly allocation: number;
+      readonly setup: number;
+      readonly codeSize: number;
+      readonly cold?: number;
+      readonly branches?: number;
+    };
+  }[];
+  /** Transitional compatibility summary for older host consumers. */
+  readonly steps?: readonly string[];
 }
 
 /** Creates the JIT compiled artifact artifact from the supplied input. */

@@ -12,6 +12,7 @@ interface EmittedBinding {
 export interface ExecutionArtifactEmitterContext {
   readonly js: string[];
   readonly ts: boolean;
+  readonly target: import("../compiler/target/target-profile.js").TargetProfile;
   readonly skipped: SkippedOperation[];
   readonly classBindings: ReadonlyMap<unknown, string>;
   readonly classArtifacts: ReadonlyMap<unknown, Extract<CompiledArtifact, { readonly kind: "class" }>>;
@@ -57,6 +58,7 @@ export function createExecutionArtifactEmitter(context: ExecutionArtifactEmitter
       {
         js,
         typescript: context.ts,
+        target: context.target,
         skipped,
         classBindings,
         classArtifacts,

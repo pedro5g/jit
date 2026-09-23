@@ -47,6 +47,19 @@ documentation.
 | `JIT.class`       | [Runtime classes](./runtime-classes)               | Generated class, construction and capabilities                                   |
 | `JIT.ddd`         | [Runtime classes](./runtime-classes#ddd-factories) | `valueObject`, `entity`, `aggregateRoot`, `domainEvent`, `uniqueIdentifier`, `watchedList`, `abstract`, `timestamps`, `softDelete`, `versioned`, `$extends` |
 
+## Environments, errors, metadata and extensions
+
+| API                 | Reference                      | Purpose                                                     |
+| ------------------- | ------------------------------ | ----------------------------------------------------------- |
+| `JIT.config`        | [Contract-first compiler](./contract-first#environment) | Replace the default observable runtime configuration         |
+| `JIT.create`         | [Contract-first compiler](./contract-first#environment) | Create an isolated JIT environment                          |
+| `JIT.error`          | [Contract-first compiler](./contract-first#errors)      | format, flatten, tree, pretty and issues validation failures |
+| `JIT.locales`        | [Contract-first compiler](./contract-first#errors)      | Built-in issue presentation locales                         |
+| `JIT.globalRegistry` | [Contract-first compiler](./contract-first#metadata)   | Metadata registry owned by the default environment          |
+| `JIT.registry`       | [Contract-first compiler](./contract-first#metadata)   | Create a typed metadata registry                            |
+| `JIT.plugin`         | [Contract-first compiler](./contract-first#extensions)  | operator declarations and composition, semantic or strategy extensions |
+| `JIT.$extends`       | [Contract-first compiler](./contract-first#extensions)  | Create an immutable facade with an extension set            |
+
 ## Schema factories and composition
 
 | API                    | Reference                                     | API                      | Reference                                       |

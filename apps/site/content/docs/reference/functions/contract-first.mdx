@@ -1,0 +1,85 @@
+---
+title: Contract-first compiler
+description: Isolated environments, canonical validation errors, metadata registries and safe compiler extensions.
+---
+
+The public API describes the contract. The compiler derives semantic facts and
+chooses a target-aware physical implementation. Runtime configuration and
+extensions therefore affect only the environment that owns them; compiled
+artifacts capture the relevant context at compilation time.
+
+## Environment
+
+```ts
+const AppJIT = JIT.create({ locale: JIT.locales.ptBR });
+
+JIT.config({ locale: JIT.locales.enUS });
+const isUser = AppJIT.validate.is(User);
+```
+
+`JIT.create()` is immutable from the caller's perspective, shares the factory
+implementation, and gives the child environment its own global registry and
+extension set. Presentation locale is not part of the executable compilation
+digest, so changing it does not invalidate a compiled predicate.
+
+## Errors
+
+Validation diagnostics have stable structural fields (`code`, `path`,
+`expected`, `received` and `params`). The message is presentation and can be
+chosen after validation:
+
+```ts
+JIT.error.format(error);
+JIT.error.flatten(error); // formErrors + fieldErrors
+JIT.error.tree(error);    // nested properties
+JIT.error.pretty(error);  // CLI/log-oriented text
+```
+
+Use `JIT.create({ locale: customLocale })` to connect an application i18n
+system. Predicate validation does not allocate issue descriptors or format
+messages on either the success or boolean-failure path.
+
+## Metadata
+
+Descriptive metadata is stored in a typed registry and is not executable schema
+semantics by default:
+
+```ts
+const docs = JIT.registry<{ title: string; description?: string }>();
+User.register(docs, { title: "User", description: "Application user" });
+User.meta({ id: "User", title: "User" });
+```
+
+Registries reject duplicate `id` values in the same registry. `JIT.globalRegistry`
+belongs only to the default environment; child environments expose their own
+registry. Environments do not share their `globalRegistry`; metadata can be consumed by documentation,
+JSON Schema or artifact manifests without changing the operation's executable
+digest.
+
+## Extensions
+
+`JIT.$extends(plugin)` returns a new facade. Plugins declare stable identity and
+grammar metadata, and use a restricted semantic IR when built-in composition is
+not enough:
+
+```ts
+const ExtendedJIT = JIT.$extends(
+  JIT.plugin.operator({
+    id: "@acme/slug",
+    version: "1.0.0",
+    abi: 1,
+    name: "slug",
+    target: "string",
+    grammar: {
+      repeat: "forbid",
+      requires: ["string"],
+      provides: ["slug"],
+    },
+    compose: (schema) => schema.lowercase().regex(/^[a-z0-9-]+$/),
+  }),
+);
+```
+
+Raw source emitters are intentionally not part of the extension contract.
+Standalone AOT artifacts do not import the plugin after its semantics have
+been lowered, and unsupported bindings are reported explicitly.

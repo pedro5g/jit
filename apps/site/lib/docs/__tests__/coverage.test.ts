@@ -9,7 +9,7 @@ const indexPath = resolve(referenceRoot, "index.mdx");
 
 function documentedReferences(source: string): ReadonlyMap<string, string> {
   const references = new Map<string, string>();
-  const pattern = /`JIT\.([A-Za-z0-9_]+)`\s*\|\s*\[[^\]]+\]\(\.\/([^#)]+)(?:#[^)]+)?\)/g;
+  const pattern = /`JIT\.([A-Za-z0-9_$]+)`\s*\|\s*\[[^\]]+\]\(\.\/([^#)]+)(?:#[^)]+)?\)/g;
 
   for (const match of source.matchAll(pattern)) {
     const [, name, target] = match;
