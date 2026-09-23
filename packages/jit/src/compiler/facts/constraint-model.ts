@@ -102,7 +102,7 @@ function mergeChecks(
     bound = merged.bound;
     if (merged.contradiction !== undefined) contradictions.push(merged.contradiction);
   }
-  return { bound, contradictions };
+  return { ...(bound === undefined ? {} : { bound }), contradictions };
 }
 
 function mergeTupleBound(schema: ATS.AnyTypeSchema, analysis: BoundAnalysis): BoundAnalysis {
@@ -113,7 +113,7 @@ function mergeTupleBound(schema: ATS.AnyTypeSchema, analysis: BoundAnalysis): Bo
       : { minimum: tuple.items.length };
   const merged = mergeBound(analysis.bound, structuralBound, "tuple");
   return {
-    bound: merged.bound,
+    ...(merged.bound === undefined ? {} : { bound: merged.bound }),
     contradictions:
       merged.contradiction === undefined ? analysis.contradictions : [...analysis.contradictions, merged.contradiction],
   };
